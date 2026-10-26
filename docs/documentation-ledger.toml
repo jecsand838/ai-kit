@@ -1,0 +1,206 @@
+version = 7
+scope_date = "2026-10-25"
+scope_source = "User-approved PR #22 documentation refresh on codex/public-trait-mock-ci, starting from d3b763e7; user-authorized release continuation from 9d99ddda with verified unchanged receipts; current owning specifications and explicit workspace contracts"
+notes = [
+  "This ledger covers the five compiled SDK crates and their active repository-owned guidance.",
+  "Generated rustdoc and immutable tmp artifacts are not authority. Historical documents and vendored material confer no authority merely by existing or being linked; owning specifications may explicitly adopt bounded requirements or pinned source semantics.",
+  "App's owning specifications adopt the fixed rurr core oracle recorded in app-sdk/specs/workflows/RESEARCH.md. This does not authorize a vendor refresh, archive mutation, or broader public surface.",
+  "The adopted_requirements records identify incorporated requirements inside dated documents; those documents retain historical provenance. Current owning specifications govern exact signatures and translations; current validation guides and scripts govern runnable commands.",
+  "The active architecture has no public factory or conformance framework, LoopDriver, public KnowledgeBase backend, storage-to-tool adapter, or portable database realtime API.",
+  "Toolset is the sole erased root ingress; provider, storage, and agent callers implement their public hierarchies directly.",
+  "ModelBackend owns both its Session and Continuation associated types; Custom Agent keeps continuation prompt-local and durable history provider-neutral.",
+  "Agent preserves direct ToolsetBackend and its associated Handler; App adds five workflow traits without widening lower-crate seams.",
+  "Direct public-trait mocks are the primary deterministic lane; native integration and strict-live proof remain separate. Known defects and dated receipts never weaken release requirements.",
+  "Active guidance describes contracts and required validation, not a claim that a particular checkout passed the release gates.",
+  "The qualification report, prototype/capacity records and migration-fixture provenance retain their recorded source and results. Documentation edits do not relabel qualification; new integration results are recorded separately.",
+]
+
+[canonical_owners]
+workspace = ["README.md", "ARCHITECTURE.md", "AGENTS.md", "SKILLS.md", "docs/mock-testing.md", "docs/mock-testing-production-bugs.md", "docs/release-qualification.md"]
+provider = [
+  "provider-sdk/README.md",
+  "provider-sdk/ARCHITECTURE.md",
+  "provider-sdk/AGENTS.md",
+  "provider-sdk/docs/PORTABLE_API.md",
+  "provider-sdk/docs/STRICT_TESTING.md",
+  "provider-sdk/docs/BEHAVIOR_PROOF_POLICY.md",
+  "provider-sdk/CONTRIBUTING.md",
+]
+storage = [
+  "storage-sdk/README.md",
+  "storage-sdk/ARCHITECTURE.md",
+  "storage-sdk/AGENTS.md",
+  "storage-sdk/docs/PORTABLE_API.md",
+  "storage-sdk/docs/capability-matrix.md",
+  "storage-sdk/docs/testing.md",
+  "storage-sdk/docs/feature-split-qualification.md",
+  "storage-sdk/docs/lancedb-state-store-capacity.md",
+  "storage-sdk/docs/lancedb-state-store-prototype.md",
+]
+tools = [
+  "tool-sdk/README.md",
+  "tool-sdk/ARCHITECTURE.md",
+  "tool-sdk/AGENTS.md",
+  "tool-sdk/docs/PORTABLE_API.md",
+  "tool-sdk/docs/STRICT_TESTING.md",
+  "tool-sdk/docs/BEHAVIOR_PROOF_POLICY.md",
+]
+agents = [
+  "agent-sdk/README.md",
+  "agent-sdk/ARCHITECTURE.md",
+  "agent-sdk/AGENTS.md",
+  "agent-sdk/docs/PORTABLE_API.md",
+  "agent-sdk/docs/STRICT_TESTING.md",
+  "agent-sdk/specs/API.md",
+  "agent-sdk/specs/SPECIFICATIONS.md",
+  "agent-sdk/specs/AGENT.md",
+  "agent-sdk/specs/BACKENDS.md",
+  "agent-sdk/specs/BUILD_CONFIG.md",
+  "agent-sdk/specs/KNOWLEDGE.md",
+  "agent-sdk/specs/NOTIFICATIONS.md",
+  "agent-sdk/specs/RUNTIME.md",
+  "agent-sdk/specs/STATE.md",
+  "agent-sdk/specs/CATALOG.md",
+  "agent-sdk/specs/CONVERSATION.md",
+  "agent-sdk/specs/WORKSPACE.md",
+  "agent-sdk/specs/ERRORS.md",
+]
+applications = [
+  "app-sdk/README.md",
+  "app-sdk/ARCHITECTURE.md",
+  "app-sdk/AGENTS.md",
+  "app-sdk/specs/SPECIFICATIONS.md",
+  "app-sdk/specs/APP.md",
+  "app-sdk/specs/WORKSPACE.md",
+  "app-sdk/specs/STATE_STORE.md",
+  "app-sdk/specs/OBSERVABILITY.md",
+  "app-sdk/specs/workflows/WORKFLOW.md",
+  "app-sdk/specs/workflows/CHECKPOINTS.md",
+  "app-sdk/specs/workflows/INTERACTIONS.md",
+  "app-sdk/specs/workflows/RESEARCH.md",
+  "app-sdk/specs/workflows/TESTING.md",
+]
+
+# These sets supplement the canonical entrypoints above. Paths are relative to
+# the workspace; globs cover document families without duplicating their index.
+# Active sets and explicitly named adopted-requirement files participate in
+# existence and inline-file-link checks, without recursive historical traversal.
+[document_sets]
+active = [
+  "provider-sdk/docs/providers/*.md",
+  "agent-sdk/specs/codex/*.md",
+  "agent-sdk/specs/opencode/*.md",
+  "agent-sdk/specs/custom/*.md",
+  "app-sdk/docs/*.md",
+  ".agents/skills/*/SKILL.md",
+  ".agents/skills/*/references/*.md",
+  ".agents/skills/*/agents/openai.yaml",
+  ".codex/agents/*.toml",
+  "agent-sdk/.codex/development/PROCESS.md",
+  "agent-sdk/.codex/development/dispatch/*.md",
+]
+historical = ["app-sdk/audits/**/*.md", "app-sdk/plans/**/*.md", "docs/refactors/**/*.md", "docs/pr20-pr21-integration.md", "docs/pr22-validation.md", "app-sdk/tests/fixtures/app-v6/README.md", "storage-sdk/tests/fixtures/README.md"]
+templates = ["agent-sdk/.codex/development/templates/**/*.md", ".agents/skills/*/assets/**"]
+excluded = ["tmp/**", "target/**", "**/vendor/**", "agent-sdk/.codex/development/execution/**"]
+policy = "Historical records retain their original evidence; templates are examples, not active runs. Explicit adopted_requirements records preserve only the incorporated scope, not old phase instructions, draft signatures, commands, or completion claims. Ordinary links do not propagate adoption. Excluded artifacts are never traversed by documentation checks; pinned oracle authority comes only from the owning specification's explicit adoption. Selecting a workflow is explicit; its presence or adoption of frozen requirements does not activate an old campaign."
+
+# These source-specific links identify private, locally retained evidence. Their
+# absence in a clean checkout is permitted; this proves neither receipt
+# availability nor qualification. Ordinary documentation links still must exist.
+[[local_evidence_links]]
+source = "storage-sdk/docs/feature-split-qualification.md"
+target_prefix = "target/"
+
+[[adopted_requirements]]
+path = "app-sdk/plans/2026-09-13/COMPLETION_PLAN.md"
+adopted_by = [
+  "app-sdk/specs/SPECIFICATIONS.md",
+  "app-sdk/specs/workflows/TESTING.md",
+  "app-sdk/docs/STRICT_TESTING.md",
+]
+scope = "Approved semantic boundaries and exclusions, acceptance and independent-review obligations, and section 13 crash/performance workloads and proof requirements. Old commands, proposed target/API names, implementation chronology, baseline results, and section 15's executable goal prompt remain historical; adoption does not restart execution or establish a current pass."
+
+[[adopted_requirements]]
+path = "app-sdk/plans/2026-09-13/ACCEPTANCE_MATRIX.md"
+adopted_by = [
+  "app-sdk/specs/workflows/RESEARCH.md",
+  "app-sdk/specs/workflows/TESTING.md",
+  "app-sdk/docs/RURR_PARITY.md",
+]
+scope = "A01-A31 and C01-C12 observable outcomes and exclusions, acceptance protocol, binding/execution-mode proof, and integration/documentation acceptance. Dated source anchors and proposed API/test names do not supersede current owning specifications or validation commands; listed requirements are not evidence of implementation or passing tests."
+
+[[adopted_requirements]]
+path = "app-sdk/plans/2026-09-13/HISTORY_AND_CONTROLS.md"
+adopted_by = ["app-sdk/plans/2026-09-13/COMPLETION_PLAN.md"]
+scope = "Completion-plan section 10 explicitly adopts the observable history/control design outcomes in Decisions recommended for the completion plan and the twelve behavioral groups in Tests-first acceptance set. Current owning specifications govern signatures and translations; dated touchpoint tables and suggested private implementation spellings remain historical. This explicit incorporation does not adopt other linked proposals or execution instructions."
+
+[[domains]]
+name = "provider"
+hierarchy = "Provider -> Model -> Session"
+root_ingress = []
+public_traits = ["ProviderBackend", "ModelBackend", "SessionBackend"]
+supporting_modules = [
+  "config",
+  "generation",
+  "embedding",
+  "hosted",
+  "files",
+  "batch",
+  "models",
+  "session",
+  "runtime",
+  "error",
+]
+
+[[domains]]
+name = "storage"
+hierarchy = "Database; StateStore -> StateTransaction"
+root_ingress = []
+public_traits = ["DatabaseBackend", "StateStoreBackend", "StateTransactionBackend"]
+supporting_modules = ["database::config", "database::catalog", "database::data", "database::query", "database::index", "state::config", "state::record", "state::transaction"]
+
+[[domains]]
+name = "tools"
+hierarchy = "Toolset -> ToolHandler; independent McpServer"
+root_ingress = ["Toolset::from_backend"]
+public_traits = ["ToolsetBackend", "ToolHandlerBackend"]
+supporting_modules = ["declaration", "execution", "interaction", "local", "mcp", "schema"]
+
+[[domains]]
+name = "agents"
+hierarchy = "Agent -> Workspace -> Conversation"
+root_ingress = []
+public_traits = ["AgentBackend", "WorkspaceBackend", "ConversationBackend"]
+supporting_modules = ["config", "identity", "workspace", "conversation", "prompt", "notification", "model", "tool", "knowledge", "error"]
+
+[[domains]]
+name = "applications"
+hierarchy = "App -> Workspace -> Workflow -> WorkflowRun"
+# App::open constructs App; it is not a backend normalization ingress.
+root_ingress = []
+public_traits = ["ActionBackend", "ConditionBackend", "StateTyping", "LifecycleHooks", "ChildExecutor"]
+supporting_modules = ["workflow"]
+
+[validation]
+primary_ci_script = "scripts/check_ci.sh"
+mock_contracts_script = "scripts/check_mock_contracts.sh"
+runtime_qualification_script = "scripts/qualify_mock_runtime.py"
+workspace_script = "scripts/verify_workspace_strict.sh"
+release_qualification_script = "scripts/release_qualification.py"
+release_evidence_script = "scripts/release_evidence.py"
+release_import_script = "scripts/import_release_evidence.py"
+docs_script = "scripts/check_docs_site.sh"
+documentation_contract = "python3 -m unittest scripts.tests.test_documentation_contract"
+path_guard = "scripts/check_no_path_wiring.sh"
+alias_guard = "scripts/check_no_type_aliases.sh"
+strict_scripts = [
+  "agent-sdk/scripts/verify_strict_live.sh",
+  "provider-sdk/scripts/verify_strict_live.sh",
+  "storage-sdk/scripts/verify_strict_live.sh",
+  "tool-sdk/scripts/verify_strict_live.sh",
+  "app-sdk/scripts/verify_strict_live.sh",
+]
+
+[maintenance]
+rule = "When a public hierarchy, functional module, validation command, or canonical document changes, update its owner documents and this compact ledger in the same change."
+prohibited = "Do not append historical timelines, duplicate exact API inventories, or references to deleted compatibility surfaces."

@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ai-kit Rustdoc</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #ffffff;
+      --fg: #1f2328;
+      --muted: #57606a;
+      --border: #d0d7de;
+      --link: #0969da;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0d1117;
+        --fg: #e6edf3;
+        --muted: #9da7b3;
+        --border: #30363d;
+        --link: #58a6ff;
+      }
+    }
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--fg);
+    }
+    main {
+      max-width: 52rem;
+      margin: 0 auto;
+      padding: 3rem 1.5rem 4rem;
+    }
+    .logo-wrap {
+      display: flex;
+      justify-content: center;
+      margin: 0 0 1.5rem;
+    }
+    .logo-wrap img {
+      width: 220px;
+      max-width: min(220px, 100%);
+      height: auto;
+      display: block;
+    }
+    h1 {
+      margin: 0 0 0.75rem;
+      font-size: 2rem;
+      line-height: 1.2;
+      text-align: center;
+    }
+    p {
+      margin: 0 0 1rem;
+      color: var(--muted);
+      line-height: 1.6;
+      text-align: center;
+    }
+    ul {
+      list-style: none;
+      padding: 0;
+      margin: 2rem 0 0;
+      border: 1px solid var(--border);
+      border-radius: 0.75rem;
+      overflow: hidden;
+    }
+    li + li {
+      border-top: 1px solid var(--border);
+    }
+    a {
+      display: block;
+      padding: 1rem 1.25rem;
+      color: inherit;
+      text-decoration: none;
+    }
+    a:hover {
+      background: color-mix(in srgb, var(--border) 18%, transparent);
+    }
+    strong {
+      color: var(--link);
+      display: block;
+      margin-bottom: 0.25rem;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="logo-wrap">
+      <img src="assets/ai-kit-logo.png" alt="ai-kit logo">
+    </div>
+    <h1>ai-kit Rustdoc</h1>
+    <p>Stable local API documentation for the crates in this workspace.</p>
+    <p>Start at each crate root for primary handles and traits, then follow its functional modules for configuration and request types.</p>
+    <p>See the workspace and crate README, ARCHITECTURE, and AGENTS files for usage guides, invariants, and exact validation commands.</p>
+    <ul>
+      <li>
+        <a href="agent_sdk/index.html">
+          <strong>agent-sdk</strong>
+          Portable Agent runtime with statically preserved provider and storage implementations, prompt-local Model continuation, durable workspaces, foreground conversations, notifications, managed knowledge, executable tools, and Codex/OpenCode integration.
+        </a>
+      </li>
+      <li>
+        <a href="app_sdk/index.html">
+          <strong>app-sdk</strong>
+          Durable application workspaces, opaque workflow definitions, checkpointed runs, and orchestration over direct caller-built AgentBackend implementations.
+        </a>
+      </li>
+      <li>
+        <a href="provider_sdk/index.html">
+          <strong>provider-sdk</strong>
+          Provider → Model → Session resources with Model-associated continuation, exact model selection, generation, streaming, embeddings, files, batches, and runtime checks.
+        </a>
+      </li>
+      <li>
+        <a href="storage_sdk/index.html">
+          <strong>storage-sdk</strong>
+          Portable Database subdomains plus cloneable StateStore and owned StateTransaction contracts for transactional control-plane state.
+        </a>
+      </li>
+      <li>
+        <a href="tool_sdk/index.html">
+          <strong>tool-sdk</strong>
+          Local and MCP Toolsets, associated handlers, source-neutral execution, and an independent MCP server product.
+        </a>
+      </li>
+    </ul>
+  </main>
+</body>
+</html>

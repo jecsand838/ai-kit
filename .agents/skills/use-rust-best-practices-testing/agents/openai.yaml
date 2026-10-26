@@ -1,0 +1,6 @@
+interface:
+  display_name: Rust Testing Best Practices
+  short_description: Public-contract, integration, doctest, and live proof strategy.
+  default_prompt: Use $use-rust-best-practices-testing to choose the narrowest honest tests, preserving ai-kit direct public-trait mocks as separate evidence from built-in and strict-live validation.
+policy:
+  allow_implicit_invocation: true

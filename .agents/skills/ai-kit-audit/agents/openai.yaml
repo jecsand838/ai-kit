@@ -1,0 +1,6 @@
+interface:
+  display_name: "ai-kit Audit"
+  short_description: "Scoped read-only ai-kit audit backlog."
+  default_prompt: "Use $ai-kit-audit to audit a specified ai-kit scope and return structured findings without editing files."
+policy:
+  allow_implicit_invocation: false

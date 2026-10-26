@@ -1,0 +1,11 @@
+{
+  "schema": "app-sdk.workflow/v2",
+  "id": "retry",
+  "revision": "r1",
+  "state": {"review": ""},
+  "required": ["review"],
+  "reducers": {"review": "reject_concurrent"},
+  "entry": "review",
+  "nodes": [{"id": "review", "deadline_ms": 30000, "retry": {"kind": "fixed", "max_attempts": 3, "max_elapsed_ms": 30000, "delay_ms": 100}, "step": {"kind": "agent", "agent": "reviewer", "prompt": [{"kind": "text", "text": "Explain Rust ownership in one sentence."}], "text_target": "review"}}],
+  "routes": {}
+}

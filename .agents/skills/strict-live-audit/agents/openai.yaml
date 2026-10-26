@@ -1,0 +1,6 @@
+interface:
+  display_name: "Strict Live Audit"
+  short_description: "Strict-live tests, env contracts, and validation rules."
+  default_prompt: "Use $strict-live-audit to review ai-kit strict-live tests, env contracts, and verification guidance."
+policy:
+  allow_implicit_invocation: true

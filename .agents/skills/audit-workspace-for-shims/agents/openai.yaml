@@ -1,0 +1,6 @@
+interface:
+  display_name: "Shim Audit"
+  short_description: "Audit crate shims and fake live assumptions."
+  default_prompt: "Use $audit-workspace-for-shims to audit a target ai-kit crate for shims, synthetic behavior, and unproven live-test assumptions, annotate every issue, and return findings."
+policy:
+  allow_implicit_invocation: false

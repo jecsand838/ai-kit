@@ -1,0 +1,28 @@
+[package]
+name = "my-app"
+version = "0.1.0"
+edition = "2024"
+# Set rust-version only if this repository intentionally supports an MSRV.
+# rust-version = "1.85"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "my-app"
+path = "src/main.rs"
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+dbg_macro = "deny"
+todo = "deny"
+unwrap_used = "deny"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+tracing = "0.1"

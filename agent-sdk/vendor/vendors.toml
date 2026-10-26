@@ -1,0 +1,84 @@
+version = 1
+
+[vendors.codex]
+repo = "openai/codex"
+source_kind = "github-release-source"
+channel = "stable"
+release_tag_prefix = "rust-v"
+archive_prefix = "codex"
+upstream_focus_paths = [
+  "codex-rs/app-server-protocol/src",
+  "codex-rs/protocol/src",
+  "codex-rs/app-server/src",
+  "codex-rs/docs/protocol_v1.md",
+]
+local_focus_paths = [
+  "agent-sdk/src/backends/codex",
+  "agent-sdk/src/config/codex.rs",
+  "agent-sdk/tests/strict_live.rs",
+  "agent-sdk/tests/source_contract",
+  "agent-sdk/scripts/precheck_strict_live.sh",
+  "agent-sdk/scripts/verify_strict_live.sh",
+  "agent-sdk/strict-tests.env.example",
+  "agent-sdk/specs/SPECIFICATIONS.md",
+  "agent-sdk/specs/codex",
+  "agent-sdk/AGENTS.md",
+  "agent-sdk/ARCHITECTURE.md",
+  "agent-sdk/docs/STRICT_TESTING.md",
+  ".agents/skills/agent-sdk-research/references/live-validation.md",
+]
+plan_prompt_suffix = """Prioritize sourced protocol surface drift, request and approval flow changes, config updates, and strict-live coverage needed to keep the existing portable Codex API honest. Limit production and spec changes to facts changed by this vendor range plus mechanical cleanup in touched paths. Do not audit or implement unrelated agent-sdk specification backlog, expose every new upstream operation, or add caller-facing Rust API."""
+preflight_gates = [
+  ["bash", "-lc", "source agent-sdk/strict-tests.env && bash agent-sdk/scripts/precheck_strict_live.sh"],
+]
+completion_gates = [
+  ["cargo", "fmt", "--all", "--check"],
+  ["cargo", "clippy", "--locked", "--workspace", "--all-targets", "--all-features", "--exclude", "storage-sdk", "--", "-D", "warnings"],
+  ["cargo", "clippy", "--locked", "-p", "storage-sdk", "--all-targets", "--", "-D", "warnings"],
+  ["cargo", "clippy", "--locked", "-p", "storage-sdk", "--all-targets", "--no-default-features", "--", "-D", "warnings"],
+  ["cargo", "clippy", "--locked", "-p", "storage-sdk", "--all-targets", "--no-default-features", "--features", "qdrant", "--", "-D", "warnings"],
+  ["bash", "scripts/check_docs_site.sh"],
+  ["bash", "-lc", "source agent-sdk/strict-tests.env && bash agent-sdk/scripts/verify_strict_live.sh"],
+]
+
+[vendors.opencode]
+repo = "anomalyco/opencode"
+source_kind = "github-release-source"
+channel = "stable"
+release_tag_prefix = "v"
+archive_prefix = "opencode"
+upstream_focus_paths = [
+  "packages/sdk/openapi.json",
+  "packages/docs/docs.json",
+  ".opencode/opencode.jsonc",
+  "README.md",
+]
+local_focus_paths = [
+  "agent-sdk/src/backends/opencode",
+  "agent-sdk/src/config/opencode.rs",
+  "agent-sdk/tests/strict_live.rs",
+  "agent-sdk/tests/source_contract",
+  "agent-sdk/scripts/precheck_strict_live.sh",
+  "agent-sdk/scripts/verify_strict_live.sh",
+  "agent-sdk/strict-tests.env.example",
+  "agent-sdk/opencode.json",
+  "agent-sdk/specs/SPECIFICATIONS.md",
+  "agent-sdk/specs/opencode",
+  "agent-sdk/AGENTS.md",
+  "agent-sdk/ARCHITECTURE.md",
+  "agent-sdk/docs/STRICT_TESTING.md",
+  ".agents/skills/agent-sdk-research/references/live-validation.md",
+]
+plan_prompt_suffix = """Prioritize sourced HTTP payload drift, session and prompt response shape changes, permission-policy regressions, and strict-live coverage needed to keep the existing portable OpenCode API honest. The generated OpenAPI artifact must remain primary evidence when it is unchanged. Limit production and spec changes to facts changed by this vendor range plus mechanical cleanup in touched paths. Do not audit or implement unrelated agent-sdk specification backlog or add caller-facing Rust API."""
+preflight_gates = [
+  ["bash", "-lc", "source agent-sdk/strict-tests.env && bash agent-sdk/scripts/precheck_strict_live.sh"],
+]
+completion_gates = [
+  ["cargo", "fmt", "--all", "--check"],
+  ["cargo", "clippy", "--locked", "--workspace", "--all-targets", "--all-features", "--exclude", "storage-sdk", "--", "-D", "warnings"],
+  ["cargo", "clippy", "--locked", "-p", "storage-sdk", "--all-targets", "--", "-D", "warnings"],
+  ["cargo", "clippy", "--locked", "-p", "storage-sdk", "--all-targets", "--no-default-features", "--", "-D", "warnings"],
+  ["cargo", "clippy", "--locked", "-p", "storage-sdk", "--all-targets", "--no-default-features", "--features", "qdrant", "--", "-D", "warnings"],
+  ["bash", "scripts/check_docs_site.sh"],
+  ["bash", "-lc", "source agent-sdk/strict-tests.env && bash agent-sdk/scripts/verify_strict_live.sh"],
+]

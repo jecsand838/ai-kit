@@ -1,0 +1,6 @@
+interface:
+  display_name: "Test Coverage Audit"
+  short_description: "Find public-contract and live coverage gaps."
+  default_prompt: "Use $audit-workspace-test-coverage to audit ai-kit primary public-trait mocks, real consumer coverage, and separate live validation; return detailed findings without editing code."
+policy:
+  allow_implicit_invocation: false

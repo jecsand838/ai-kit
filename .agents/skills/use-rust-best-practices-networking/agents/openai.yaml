@@ -1,0 +1,6 @@
+interface:
+  display_name: Rust Networking Best Practices
+  short_description: HTTP, gRPC, retries, timeouts, client reuse, and database pooling.
+  default_prompt: Use $use-rust-best-practices-networking to apply Rust networking, REST, gRPC, and pooling best practices to this task.
+policy:
+  allow_implicit_invocation: true

@@ -1,0 +1,6 @@
+interface:
+  display_name: "ai-kit Validation Matrix"
+  short_description: "Exact primary CI, strict-live, and cleanup matrix."
+  default_prompt: "Use $ai-kit-validation-matrix to run or plan the exact ai-kit primary deterministic and release validation commands, keeping scoped, strict-live, and incomplete evidence distinct."
+policy:
+  allow_implicit_invocation: false

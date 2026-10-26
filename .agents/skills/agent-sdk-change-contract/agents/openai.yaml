@@ -1,0 +1,6 @@
+interface:
+  display_name: "agent-sdk Change Contract"
+  short_description: "agent-sdk rules, validation, and portable-surface checks."
+  default_prompt: "Use $agent-sdk-change-contract to enforce agent-sdk crate rules, validation, and public-surface contract changes."
+policy:
+  allow_implicit_invocation: true

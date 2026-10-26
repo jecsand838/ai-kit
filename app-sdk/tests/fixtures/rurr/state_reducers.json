@@ -1,0 +1,1595 @@
+{
+  "provenance": {
+    "kind": "app-extension-contract",
+    "archive_sha256": "5b5f20eb1d233467c600dc9dd249feaaa9046c5a303ae4e937040be5b6ecf25e",
+    "archive_commit": "005bfe3ece631e64b06dac2d42ef84235f727a4f",
+    "members": [
+      "app-sdk/specs/workflows/WORKFLOW.md:201-208",
+      "app-sdk/plans/2026-09-13/COMPLETION_PLAN.md:208",
+      "app-sdk/src/workflow/execution/mod.rs:551-710 (baseline implementation; reviewed, not the semantic oracle)"
+    ],
+    "note": "Sibling reducers are an App extension with no rurr counterpart. The pinned archive identity records the surrounding completion baseline only; these are NOT rurr-derived or executed-rurr results. Node names determine canonical contribution order; authored writer arrays deliberately reverse it. Per-action ordered assignments contribute their final value once. sum_integer retains the existing signed-i64 App contract and is distinct from rurr increment range [i64::MIN,u64::MAX]. Failures must leave all user state unchanged, including unrelated earlier contributions."
+  },
+  "cases": [
+    {
+      "id": "zero_contributions_preserve_reject_concurrent",
+      "family": "reducers",
+      "source": "app-sdk/specs/workflows/WORKFLOW.md:201-208; app-sdk/plans/2026-09-13/COMPLETION_PLAN.md:208",
+      "initial": [
+        [
+          "guard",
+          0
+        ],
+        [
+          "out",
+          8
+        ]
+      ],
+      "reducers": {
+        "out": "reject_concurrent"
+      },
+      "program": {
+        "kind": "siblings",
+        "writers": [
+          {
+            "node": "zeta",
+            "mutations": []
+          },
+          {
+            "node": "alpha",
+            "mutations": []
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "value",
+        "state": [
+          [
+            "guard",
+            0
+          ],
+          [
+            "out",
+            8
+          ]
+        ]
+      }
+    },
+    {
+      "id": "zero_contributions_preserve_collect",
+      "family": "reducers",
+      "source": "app-sdk/specs/workflows/WORKFLOW.md:201-208; app-sdk/plans/2026-09-13/COMPLETION_PLAN.md:208",
+      "initial": [
+        [
+          "guard",
+          0
+        ],
+        [
+          "out",
+          [
+            "base"
+          ]
+        ]
+      ],
+      "reducers": {
+        "out": "collect"
+      },
+      "program": {
+        "kind": "siblings",
+        "writers": [
+          {
+            "node": "zeta",
+            "mutations": []
+          },
+          {
+            "node": "alpha",
+            "mutations": []
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "value",
+        "state": [
+          [
+            "guard",
+            0
+          ],
+          [
+            "out",
+            [
+              "base"
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "id": "zero_contributions_preserve_append_array",
+      "family": "reducers",
+      "source": "app-sdk/specs/workflows/WORKFLOW.md:201-208; app-sdk/plans/2026-09-13/COMPLETION_PLAN.md:208",
+      "initial": [
+        [
+          "guard",
+          0
+        ],
+        [
+          "out",
+          [
+            "base"
+          ]
+        ]
+      ],
+      "reducers": {
+        "out": "append_array"
+      },
+      "program": {
+        "kind": "siblings",
+        "writers": [
+          {
+            "node": "zeta",
+            "mutations": []
+          },
+          {
+            "node": "alpha",
+            "mutations": []
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "value",
+        "state": [
+          [
+            "guard",
+            0
+          ],
+          [
+            "out",
+            [
+              "base"
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "id": "zero_contributions_preserve_sum_integer",
+      "family": "reducers",
+      "source": "app-sdk/specs/workflows/WORKFLOW.md:201-208; app-sdk/plans/2026-09-13/COMPLETION_PLAN.md:208",
+      "initial": [
+        [
+          "guard",
+          0
+        ],
+        [
+          "out",
+          10
+        ]
+      ],
+      "reducers": {
+        "out": "sum_integer"
+      },
+      "program": {
+        "kind": "siblings",
+        "writers": [
+          {
+            "node": "zeta",
+            "mutations": []
+          },
+          {
+            "node": "alpha",
+            "mutations": []
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "value",
+        "state": [
+          [
+            "guard",
+            0
+          ],
+          [
+            "out",
+            10
+          ]
+        ]
+      }
+    },
+    {
+      "id": "zero_contributions_preserve_merge_object",
+      "family": "reducers",
+      "source": "app-sdk/specs/workflows/WORKFLOW.md:201-208; app-sdk/plans/2026-09-13/COMPLETION_PLAN.md:208",
+      "initial": [
+        [
+          "guard",
+          0
+        ],
+        [
+          "out",
+          {
+            "base": 0
+          }
+        ]
+      ],
+      "reducers": {
+        "out": "merge_object"
+      },
+      "program": {
+        "kind": "siblings",
+        "writers": [
+          {
+            "node": "zeta",
+            "mutations": []
+          },
+          {
+            "node": "alpha",
+            "mutations": []
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "value",
+        "state": [
+          [
+            "guard",
+            0
+          ],
+          [
+            "out",
+            {
+              "base": 0
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "id": "one_reject_writer_replaces_base",
+      "family": "reducers",
+      "source": "app-sdk/specs/workflows/WORKFLOW.md:201-208; app-sdk/plans/2026-09-13/COMPLETION_PLAN.md:208",
+      "initial": [
+        [
+          "guard",
+          0
+        ],
+        [
+          "out",
+          8
+        ]
+      ],
+      "reducers": {
+        "out": "reject_concurrent"
+      },
+      "program": {
+        "kind": "siblings",
+        "writers": [
+          {
+            "node": "zeta",
+            "mutations": [
+              {
+                "kind": "assign",
+                "target": "out",
+                "value": {
+                  "kind": "literal",
+                  "value": 3
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "value",
+        "state": [
+          [
+            "guard",
+            0
+          ],
+          [
+            "out",
+            3
+          ]
+        ]
+      }
+    },
+    {
+      "id": "collect_omits_base_and_uses_canonical_writer_order",
+      "family": "reducers",
+      "source": "app-sdk/specs/workflows/WORKFLOW.md:201-208; app-sdk/plans/2026-09-13/COMPLETION_PLAN.md:208",
+      "initial": [
+        [
+          "guard",
+          0
+        ],
+        [
+          "out",
+          [
+            "base"
+          ]
+        ]
+      ],
+      "reducers": {
+        "out": "collect"
+      },
+      "program": {
+        "kind": "siblings",
+        "writers": [
+          {
+            "node": "zeta",
+            "mutations": [
+              {
+                "kind": "assign",
+                "target": "out",
+                "value": {
+                  "kind": "literal",
+                  "value": "z"
+                }
+              }
+            ]
+          },
+          {
+            "node": "alpha",
+            "mutations": [
+              {
+                "kind": "assign",
+                "target": "out",
+                "value": {
+                  "kind": "literal",
+                  "value": "a"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "value",
+        "state": [
+          [
+            "guard",
+            0
+          ],
+          [
+            "out",
+            [
+              "a",
+              "z"
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "id": "one_collect_writer_is_one_contribution",
+      "family": "reducers",
+      "source": "app-sdk/specs/workflows/WORKFLOW.md:201-208; app-sdk/plans/2026-09-13/COMPLETION_PLAN.md:208",
+      "initial": [
+        [
+          "guard",
+          0
+        ],
+        [
+          "out",
+          [
+            "base"
+          ]
+        ]
+      ],
+      "reducers": {
+        "out": "collect"
+      },
+      "program": {
+        "kind": "siblings",
+        "writers": [
+          {
+            "node": "alpha",
+            "mutations": [
+              {
+                "kind": "assign",
+                "target": "out",
+                "value": {
+                  "kind": "literal",
+                  "value": "a"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "value",
+        "state": [
+          [
+            "guard",
+            0
+          ],
+          [
+            "out",
+            [
+              "a"
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "id": "append_array_includes_base_and_canonical_contributions",
+      "family": "reducers",
+      "source": "app-sdk/specs/workflows/WORKFLOW.md:201-208; app-sdk/plans/2026-09-13/COMPLETION_PLAN.md:208",
+      "initial": [
+        [
+          "guard",
+          0
+        ],
+        [
+          "out",
+          [
+            "base"
+          ]
+        ]
+      ],
+      "reducers": {
+        "out": "append_array"
+      },
+      "program": {
+        "kind": "siblings",
+        "writers": [
+          {
+            "node": "zeta",
+            "mutations": [
+              {
+                "kind": "assign",
+                "target": "out",
+                "value": {
+                  "kind": "literal",
+                  "value": [
+                    "z"
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "node": "alpha",
+            "mutations": [
+              {
+                "kind": "assign",
+                "target": "out",
+                "value": {
+                  "kind": "literal",
+                  "value": [
+                    "a"
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "value",
+        "state": [
+          [
+            "guard",
+            0
+          ],
+          [
+            "out",
+            [
+              "base",
+              "a",
+              "z"
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "id": "append_empty_contributions_preserve_base",
+      "family": "reducers",
+      "source": "app-sdk/specs/workflows/WORKFLOW.md:201-208; app-sdk/plans/2026-09-13/COMPLETION_PLAN.md:208",
+      "initial": [
+        [
+          "guard",
+          0
+        ],
+        [
+          "out",
+          [
+            "base"
+          ]
+        ]
+      ],
+      "reducers": {
+        "out": "append_array"
+      },
+      "program": {
+        "kind": "siblings",
+        "writers": [
+          {
+            "node": "zeta",
+            "mutations": [
+              {
+                "kind": "assign",
+                "target": "out",
+                "value": {
+                  "kind": "literal",
+                  "value": []
+                }
+              }
+            ]
+          },
+          {
+            "node": "alpha",
+            "mutations": [
+              {
+                "kind": "assign",
+                "target": "out",
+                "value": {
+                  "kind": "literal",
+                  "value": []
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "value",
+        "state": [
+          [
+            "guard",
+            0
+          ],
+          [
+            "out",
+            [
+              "base"
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "id": "sum_integer_includes_base_once",
+      "family": "reducers",
+      "source": "app-sdk/specs/workflows/WORKFLOW.md:201-208; app-sdk/plans/2026-09-13/COMPLETION_PLAN.md:208",
+      "initial": [
+        [
+          "guard",
+          0
+        ],
+        [
+          "out",
+          10
+        ]
+      ],
+      "reducers": {
+        "out": "sum_integer"
+      },
+      "program": {
+        "kind": "siblings",
+        "writers": [
+          {
+            "node": "zeta",
+            "mutations": [
+              {
+                "kind": "assign",
+                "target": "out",
+                "value": {
+                  "kind": "literal",
+                  "value": 3
+                }
+              }
+            ]
+          },
+          {
+            "node": "alpha",
+            "mutations": [
+              {
+                "kind": "assign",
+                "target": "out",
+                "value": {
+                  "kind": "literal",
+                  "value": 2
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "value",
+        "state": [
+          [
+            "guard",
+            0
+          ],
+          [
+            "out",
+            15
+          ]
+        ]
+      }
+    },
+    {
+      "id": "merge_object_keeps_base_and_later_canonical_collision_wins",
+      "family": "reducers",
+      "source": "app-sdk/specs/workflows/WORKFLOW.md:201-208; app-sdk/plans/2026-09-13/COMPLETION_PLAN.md:208",
+      "initial": [
+        [
+          "guard",
+          0
+        ],
+        [
+          "out",
+          {
+            "shared": "base",
+            "base": 0
+          }
+        ]
+      ],
+      "reducers": {
+        "out": "merge_object"
+      },
+      "program": {
+        "kind": "siblings",
+        "writers": [
+          {
+            "node": "zeta",
+            "mutations": [
+              {
+                "kind": "assign",
+                "target": "out",
+                "value": {
+                  "kind": "literal",
+                  "value": {
+                    "shared": "z",
+                    "z": 2
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "node": "alpha",
+            "mutations": [
+              {
+                "kind": "assign",
+                "target": "out",
+                "value": {
+                  "kind": "literal",
+                  "value": {
+                    "shared": "a",
+                    "a": 1
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "value",
+        "state": [
+          [
+            "guard",
+            0
+          ],
+          [
+            "out",
+            {
+              "shared": "z",
+              "base": 0,
+              "a": 1,
+              "z": 2
+            }
+          ]
+        ],
+        "object_order": [
+          [
+            "out",
+            [
+              "shared",
+              "base",
+              "a",
+              "z"
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "id": "merge_object_empty_contributions_preserve_base",
+      "family": "reducers",
+      "source": "app-sdk/specs/workflows/WORKFLOW.md:201-208; app-sdk/plans/2026-09-13/COMPLETION_PLAN.md:208",
+      "initial": [
+        [
+          "guard",
+          0
+        ],
+        [
+          "out",
+          {
+            "base": 0
+          }
+        ]
+      ],
+      "reducers": {
+        "out": "merge_object"
+      },
+      "program": {
+        "kind": "siblings",
+        "writers": [
+          {
+            "node": "zeta",
+            "mutations": [
+              {
+                "kind": "assign",
+                "target": "out",
+                "value": {
+                  "kind": "literal",
+                  "value": {}
+                }
+              }
+            ]
+          },
+          {
+            "node": "alpha",
+            "mutations": [
+              {
+                "kind": "assign",
+                "target": "out",
+                "value": {
+                  "kind": "literal",
+                  "value": {}
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "value",
+        "state": [
+          [
+            "guard",
+            0
+          ],
+          [
+            "out",
+            {
+              "base": 0
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "id": "same_action_last_assignment_contributes_once_reject_concurrent",
+      "family": "reducers",
+      "source": "app-sdk/specs/workflows/WORKFLOW.md:201-208; app-sdk/plans/2026-09-13/COMPLETION_PLAN.md:208",
+      "initial": [
+        [
+          "guard",
+          0
+        ],
+        [
+          "out",
+          10
+        ]
+      ],
+      "reducers": {
+        "out": "reject_concurrent"
+      },
+      "program": {
+        "kind": "siblings",
+        "writers": [
+          {
+            "node": "alpha",
+            "mutations": [
+              {
+                "kind": "assign",
+                "target": "out",
+                "value": {
+                  "kind": "literal",
+                  "value": 1
+                }
+              },
+              {
+                "kind": "assign",
+                "target": "out",
+                "value": {
+                  "kind": "literal",
+                  "value": 2
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "value",
+        "state": [
+          [
+            "guard",
+            0
+          ],
+          [
+            "out",
+            2
+          ]
+        ]
+      }
+    },
+    {
+      "id": "same_action_last_assignment_contributes_once_collect",
+      "family": "reducers",
+      "source": "app-sdk/specs/workflows/WORKFLOW.md:201-208; app-sdk/plans/2026-09-13/COMPLETION_PLAN.md:208",
+      "initial": [
+        [
+          "guard",
+          0
+        ],
+        [
+          "out",
+          [
+            "base"
+          ]
+        ]
+      ],
+      "reducers": {
+        "out": "collect"
+      },
+      "program": {
+        "kind": "siblings",
+        "writers": [
+          {
+            "node": "alpha",
+            "mutations": [
+              {
+                "kind": "assign",
+                "target": "out",
+                "value": {
+                  "kind": "literal",
+                  "value": 1
+                }
+              },
+              {
+                "kind": "assign",
+                "target": "out",
+                "value": {
+                  "kind": "literal",
+                  "value": 2
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "value",
+        "state": [
+          [
+            "guard",
+            0
+          ],
+          [
+            "out",
+            [
+              2
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "id": "same_action_last_assignment_contributes_once_sum_integer",
+      "family": "reducers",
+      "source": "app-sdk/specs/workflows/WORKFLOW.md:201-208; app-sdk/plans/2026-09-13/COMPLETION_PLAN.md:208",
+      "initial": [
+        [
+          "guard",
+          0
+        ],
+        [
+          "out",
+          10
+        ]
+      ],
+      "reducers": {
+        "out": "sum_integer"
+      },
+      "program": {
+        "kind": "siblings",
+        "writers": [
+          {
+            "node": "alpha",
+            "mutations": [
+              {
+                "kind": "assign",
+                "target": "out",
+                "value": {
+                  "kind": "literal",
+                  "value": 1
+                }
+              },
+              {
+                "kind": "assign",
+                "target": "out",
+                "value": {
+                  "kind": "literal",
+                  "value": 2
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "value",
+        "state": [
+          [
+            "guard",
+            0
+          ],
+          [
+            "out",
+            12
+          ]
+        ]
+      }
+    },
+    {
+      "id": "same_action_last_assignment_contributes_once_append_array",
+      "family": "reducers",
+      "source": "app-sdk/specs/workflows/WORKFLOW.md:201-208; app-sdk/plans/2026-09-13/COMPLETION_PLAN.md:208",
+      "initial": [
+        [
+          "guard",
+          0
+        ],
+        [
+          "out",
+          [
+            "base"
+          ]
+        ]
+      ],
+      "reducers": {
+        "out": "append_array"
+      },
+      "program": {
+        "kind": "siblings",
+        "writers": [
+          {
+            "node": "alpha",
+            "mutations": [
+              {
+                "kind": "assign",
+                "target": "out",
+                "value": {
+                  "kind": "literal",
+                  "value": [
+                    1
+                  ]
+                }
+              },
+              {
+                "kind": "assign",
+                "target": "out",
+                "value": {
+                  "kind": "literal",
+                  "value": [
+                    2
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "value",
+        "state": [
+          [
+            "guard",
+            0
+          ],
+          [
+            "out",
+            [
+              "base",
+              2
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "id": "concurrent_writes_rejected_atomically",
+      "family": "atomic",
+      "source": "app-sdk/specs/workflows/WORKFLOW.md:201-208; app-sdk/plans/2026-09-13/COMPLETION_PLAN.md:208",
+      "initial": [
+        [
+          "guard",
+          0
+        ],
+        [
+          "out",
+          0
+        ]
+      ],
+      "reducers": {
+        "out": "reject_concurrent"
+      },
+      "program": {
+        "kind": "siblings",
+        "writers": [
+          {
+            "node": "zeta",
+            "mutations": [
+              {
+                "kind": "assign",
+                "target": "out",
+                "value": {
+                  "kind": "literal",
+                  "value": 2
+                }
+              }
+            ]
+          },
+          {
+            "node": "alpha",
+            "mutations": [
+              {
+                "kind": "assign",
+                "target": "guard",
+                "value": {
+                  "kind": "literal",
+                  "value": 1
+                }
+              },
+              {
+                "kind": "assign",
+                "target": "out",
+                "value": {
+                  "kind": "literal",
+                  "value": 1
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "state_failure"
+      }
+    },
+    {
+      "id": "sibling_remove_write_conflict_is_atomic",
+      "family": "atomic",
+      "source": "app-sdk/specs/workflows/WORKFLOW.md:201-208; app-sdk/plans/2026-09-13/COMPLETION_PLAN.md:208",
+      "initial": [
+        [
+          "guard",
+          0
+        ],
+        [
+          "out",
+          []
+        ]
+      ],
+      "reducers": {
+        "out": "collect"
+      },
+      "program": {
+        "kind": "siblings",
+        "writers": [
+          {
+            "node": "zeta",
+            "mutations": [
+              {
+                "kind": "remove",
+                "target": "out"
+              }
+            ]
+          },
+          {
+            "node": "alpha",
+            "mutations": [
+              {
+                "kind": "assign",
+                "target": "guard",
+                "value": {
+                  "kind": "literal",
+                  "value": 1
+                }
+              },
+              {
+                "kind": "assign",
+                "target": "out",
+                "value": {
+                  "kind": "literal",
+                  "value": 1
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "state_failure"
+      }
+    },
+    {
+      "id": "invalid_base_append_array",
+      "family": "atomic",
+      "source": "app-sdk/specs/workflows/WORKFLOW.md:201-208; app-sdk/plans/2026-09-13/COMPLETION_PLAN.md:208",
+      "initial": [
+        [
+          "guard",
+          0
+        ],
+        [
+          "out",
+          false
+        ]
+      ],
+      "reducers": {
+        "out": "append_array"
+      },
+      "program": {
+        "kind": "siblings",
+        "writers": [
+          {
+            "node": "zeta",
+            "mutations": []
+          },
+          {
+            "node": "alpha",
+            "mutations": [
+              {
+                "kind": "assign",
+                "target": "guard",
+                "value": {
+                  "kind": "literal",
+                  "value": 1
+                }
+              },
+              {
+                "kind": "assign",
+                "target": "out",
+                "value": {
+                  "kind": "literal",
+                  "value": []
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "state_failure"
+      }
+    },
+    {
+      "id": "invalid_contribution_append_array",
+      "family": "atomic",
+      "source": "app-sdk/specs/workflows/WORKFLOW.md:201-208; app-sdk/plans/2026-09-13/COMPLETION_PLAN.md:208",
+      "initial": [
+        [
+          "guard",
+          0
+        ],
+        [
+          "out",
+          []
+        ]
+      ],
+      "reducers": {
+        "out": "append_array"
+      },
+      "program": {
+        "kind": "siblings",
+        "writers": [
+          {
+            "node": "zeta",
+            "mutations": []
+          },
+          {
+            "node": "alpha",
+            "mutations": [
+              {
+                "kind": "assign",
+                "target": "guard",
+                "value": {
+                  "kind": "literal",
+                  "value": 1
+                }
+              },
+              {
+                "kind": "assign",
+                "target": "out",
+                "value": {
+                  "kind": "literal",
+                  "value": false
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "state_failure"
+      }
+    },
+    {
+      "id": "invalid_base_sum_integer",
+      "family": "atomic",
+      "source": "app-sdk/specs/workflows/WORKFLOW.md:201-208; app-sdk/plans/2026-09-13/COMPLETION_PLAN.md:208",
+      "initial": [
+        [
+          "guard",
+          0
+        ],
+        [
+          "out",
+          1.5
+        ]
+      ],
+      "reducers": {
+        "out": "sum_integer"
+      },
+      "program": {
+        "kind": "siblings",
+        "writers": [
+          {
+            "node": "zeta",
+            "mutations": []
+          },
+          {
+            "node": "alpha",
+            "mutations": [
+              {
+                "kind": "assign",
+                "target": "guard",
+                "value": {
+                  "kind": "literal",
+                  "value": 1
+                }
+              },
+              {
+                "kind": "assign",
+                "target": "out",
+                "value": {
+                  "kind": "literal",
+                  "value": 1
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "state_failure"
+      }
+    },
+    {
+      "id": "invalid_contribution_sum_integer",
+      "family": "atomic",
+      "source": "app-sdk/specs/workflows/WORKFLOW.md:201-208; app-sdk/plans/2026-09-13/COMPLETION_PLAN.md:208",
+      "initial": [
+        [
+          "guard",
+          0
+        ],
+        [
+          "out",
+          1
+        ]
+      ],
+      "reducers": {
+        "out": "sum_integer"
+      },
+      "program": {
+        "kind": "siblings",
+        "writers": [
+          {
+            "node": "zeta",
+            "mutations": []
+          },
+          {
+            "node": "alpha",
+            "mutations": [
+              {
+                "kind": "assign",
+                "target": "guard",
+                "value": {
+                  "kind": "literal",
+                  "value": 1
+                }
+              },
+              {
+                "kind": "assign",
+                "target": "out",
+                "value": {
+                  "kind": "literal",
+                  "value": 1.5
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "state_failure"
+      }
+    },
+    {
+      "id": "invalid_base_merge_object",
+      "family": "atomic",
+      "source": "app-sdk/specs/workflows/WORKFLOW.md:201-208; app-sdk/plans/2026-09-13/COMPLETION_PLAN.md:208",
+      "initial": [
+        [
+          "guard",
+          0
+        ],
+        [
+          "out",
+          false
+        ]
+      ],
+      "reducers": {
+        "out": "merge_object"
+      },
+      "program": {
+        "kind": "siblings",
+        "writers": [
+          {
+            "node": "zeta",
+            "mutations": []
+          },
+          {
+            "node": "alpha",
+            "mutations": [
+              {
+                "kind": "assign",
+                "target": "guard",
+                "value": {
+                  "kind": "literal",
+                  "value": 1
+                }
+              },
+              {
+                "kind": "assign",
+                "target": "out",
+                "value": {
+                  "kind": "literal",
+                  "value": {}
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "state_failure"
+      }
+    },
+    {
+      "id": "invalid_contribution_merge_object",
+      "family": "atomic",
+      "source": "app-sdk/specs/workflows/WORKFLOW.md:201-208; app-sdk/plans/2026-09-13/COMPLETION_PLAN.md:208",
+      "initial": [
+        [
+          "guard",
+          0
+        ],
+        [
+          "out",
+          {}
+        ]
+      ],
+      "reducers": {
+        "out": "merge_object"
+      },
+      "program": {
+        "kind": "siblings",
+        "writers": [
+          {
+            "node": "zeta",
+            "mutations": []
+          },
+          {
+            "node": "alpha",
+            "mutations": [
+              {
+                "kind": "assign",
+                "target": "guard",
+                "value": {
+                  "kind": "literal",
+                  "value": 1
+                }
+              },
+              {
+                "kind": "assign",
+                "target": "out",
+                "value": {
+                  "kind": "literal",
+                  "value": false
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "state_failure"
+      }
+    },
+    {
+      "id": "sum_integer_i64_overflow_is_atomic",
+      "family": "atomic",
+      "source": "app-sdk/specs/workflows/WORKFLOW.md:201-208; app-sdk/plans/2026-09-13/COMPLETION_PLAN.md:208",
+      "initial": [
+        [
+          "guard",
+          0
+        ],
+        [
+          "out",
+          9223372036854775807
+        ]
+      ],
+      "reducers": {
+        "out": "sum_integer"
+      },
+      "program": {
+        "kind": "siblings",
+        "writers": [
+          {
+            "node": "zeta",
+            "mutations": [
+              {
+                "kind": "assign",
+                "target": "out",
+                "value": {
+                  "kind": "literal",
+                  "value": 1
+                }
+              }
+            ]
+          },
+          {
+            "node": "alpha",
+            "mutations": [
+              {
+                "kind": "assign",
+                "target": "guard",
+                "value": {
+                  "kind": "literal",
+                  "value": 1
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "state_failure"
+      }
+    },
+    {
+      "id": "sum_integer_i64_underflow_is_atomic",
+      "family": "atomic",
+      "source": "app-sdk/specs/workflows/WORKFLOW.md:201-208; app-sdk/plans/2026-09-13/COMPLETION_PLAN.md:208",
+      "initial": [
+        [
+          "guard",
+          0
+        ],
+        [
+          "out",
+          -9223372036854775808
+        ]
+      ],
+      "reducers": {
+        "out": "sum_integer"
+      },
+      "program": {
+        "kind": "siblings",
+        "writers": [
+          {
+            "node": "zeta",
+            "mutations": [
+              {
+                "kind": "assign",
+                "target": "out",
+                "value": {
+                  "kind": "literal",
+                  "value": -1
+                }
+              }
+            ]
+          },
+          {
+            "node": "alpha",
+            "mutations": [
+              {
+                "kind": "assign",
+                "target": "guard",
+                "value": {
+                  "kind": "literal",
+                  "value": 1
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "state_failure"
+      }
+    },
+    {
+      "id": "siblings_read_isolated_base_state",
+      "family": "reducers",
+      "source": "app-sdk/specs/workflows/WORKFLOW.md:201-208; app-sdk/plans/2026-09-13/CORE_DESIGN.md:174-196 (barrier staging)",
+      "initial": [
+        [
+          "guard",
+          0
+        ],
+        [
+          "out",
+          0
+        ]
+      ],
+      "program": {
+        "kind": "siblings",
+        "writers": [
+          {
+            "node": "zeta",
+            "mutations": [
+              {
+                "kind": "assign",
+                "target": "out",
+                "value": {
+                  "kind": "state",
+                  "path": "guard"
+                }
+              }
+            ]
+          },
+          {
+            "node": "alpha",
+            "mutations": [
+              {
+                "kind": "assign",
+                "target": "guard",
+                "value": {
+                  "kind": "literal",
+                  "value": 7
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "value",
+        "state": [
+          [
+            "guard",
+            7
+          ],
+          [
+            "out",
+            0
+          ]
+        ]
+      }
+    }
+  ]
+}

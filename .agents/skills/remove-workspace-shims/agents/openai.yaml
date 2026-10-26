@@ -1,0 +1,6 @@
+interface:
+  display_name: "Remove Shims"
+  short_description: "Plan and remove audited crate shims."
+  default_prompt: "Use $remove-workspace-shims to remove accepted shim-audit findings from a target ai-kit crate with a delete-first, strict-live-first workflow."
+policy:
+  allow_implicit_invocation: false

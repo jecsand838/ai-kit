@@ -1,0 +1,6 @@
+interface:
+  display_name: "Vendor Refresh Campaign"
+  short_description: "Run end-to-end vendor refresh campaigns."
+  default_prompt: "Use $vendor-refresh-campaign to refresh all outdated ai-kit vendors in scope on the current branch, rerun the final validation gates, and stop on first failure without pushing."
+policy:
+  allow_implicit_invocation: false

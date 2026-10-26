@@ -1,0 +1,25 @@
+mod capability;
+mod catalog;
+mod data;
+mod error;
+mod filter;
+mod index;
+mod locator;
+mod query;
+mod record;
+mod schema;
+mod vector;
+
+pub use capability::CapabilitySet;
+pub(crate) use catalog::CreateCollectionAction;
+pub use catalog::*;
+pub use data::*;
+pub use error::StorageError;
+pub use filter::{ComparisonOp, FilterExpr};
+pub use index::*;
+pub use locator::StorageLocator;
+pub(crate) use locator::{ApplyDefaultLocator, HasLocator};
+pub use query::*;
+pub use record::{DataRecord, RecordId};
+pub use schema::{CollectionSchema, FieldSchema, FieldType, VectorElementType};
+pub use vector::{DenseVector, DistanceMetric, VectorCoercionPolicy};

@@ -1,0 +1,6 @@
+interface:
+  display_name: "ai-kit Net Reduction Check"
+  short_description: "Measure net reduction and isolate residual diff growth."
+  default_prompt: "Use $ai-kit-net-reduction-check to measure residual diff growth and decide whether another cleanup pass is justified."
+policy:
+  allow_implicit_invocation: false

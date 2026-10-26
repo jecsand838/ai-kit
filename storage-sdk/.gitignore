@@ -1,0 +1,8 @@
+/target
+/.DS_Store
+/.data
+Cargo.lock
+strict-tests.env
+/.idea
+/.vscode
+/.docker

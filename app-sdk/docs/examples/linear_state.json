@@ -1,0 +1,33 @@
+{
+  "schema": "app-sdk.workflow/v2",
+  "id": "linear_state",
+  "revision": "r1",
+  "state": {"count": 0, "label": "pending"},
+  "required": ["count", "label"],
+  "reducers": {"count": "reject_concurrent", "label": "reject_concurrent"},
+  "entry": "first",
+  "nodes": [
+    {
+      "id": "first",
+      "step": {
+        "kind": "state",
+        "mutations": [
+          {"kind": "increment", "target": "count", "value": {"kind": "literal", "value": 1}}
+        ]
+      }
+    },
+    {
+      "id": "second",
+      "step": {
+        "kind": "state",
+        "mutations": [
+          {"kind": "increment", "target": "count", "value": {"kind": "literal", "value": 1}},
+          {"kind": "assign", "target": "label", "value": {"kind": "literal", "value": "complete"}}
+        ]
+      }
+    }
+  ],
+  "routes": {
+    "first": {"mode": "first", "branches": [{"target": {"kind": "node", "id": "second"}}]}
+  }
+}

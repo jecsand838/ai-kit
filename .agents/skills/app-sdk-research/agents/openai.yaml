@@ -1,0 +1,7 @@
+interface:
+  display_name: "app-sdk Research"
+  short_description: "Research app graphs, rurr, and ai-kit contracts."
+  default_prompt: "Use $app-sdk-research to ground app-sdk workflow architecture in the fixed rurr snapshot, ai-kit public contracts, and current graph-engine research."
+
+policy:
+  allow_implicit_invocation: true

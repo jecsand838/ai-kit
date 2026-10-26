@@ -1,0 +1,36 @@
+version = 1
+
+[vendors.lancedb]
+tag = "v0.40.0"
+archive = "lancedb-0.40.0.zip"
+extracted_dir = "lancedb-0.40.0"
+published_at = "2026-10-07T09:17:29Z"
+sha256 = "d28311beaf5b0a0a3da57e92bc541f0fc5fee990134d28a1bd623b048394ba44"
+
+[vendors.qdrant]
+tag = "v1.19.2"
+archive = "qdrant-1.19.2.zip"
+extracted_dir = "qdrant-1.19.2"
+published_at = "2026-10-05T14:16:50Z"
+sha256 = "4228c84132c568959c49143fb5a722018996d1126d82bc1f00838c593473cf8a"
+
+[vendors.redb]
+tag = "v4.3.0"
+archive = "redb-4.3.0.zip"
+extracted_dir = "redb-4.3.0"
+published_at = "2026-09-15T03:46:59Z"
+sha256 = "a5ae5c250f1a8102d3bca02eb17a9891b5feb9f6ff1035abf7fb2598df49c546"
+
+[vendors.surrealdb]
+tag = "v3.3.0"
+archive = "surrealdb-3.3.0.zip"
+extracted_dir = "surrealdb-3.3.0"
+published_at = "2026-09-28T11:40:24Z"
+sha256 = "507ff33e50fece0cdd732198adc71a347a91f702baecbd6b2cb46c40d3034cc4"
+
+[vendors.turso]
+tag = "v0.8.2"
+archive = "turso-0.8.2.zip"
+extracted_dir = "turso-0.8.2"
+published_at = "2026-10-06T07:27:41Z"
+sha256 = "388e77695ed9086cc7fcc96b3d6473756bab9954c390a62aef16d5caabdceccd"

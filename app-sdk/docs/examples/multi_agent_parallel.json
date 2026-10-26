@@ -1,0 +1,20 @@
+{
+  "schema": "app-sdk.workflow/v2",
+  "id": "parallel_review",
+  "revision": "r1",
+  "state": {"topic": "Rust ownership", "draft": "", "risks": ""},
+  "required": ["topic", "draft", "risks"],
+  "reducers": {"topic": "reject_concurrent", "draft": "reject_concurrent", "risks": "reject_concurrent"},
+  "entry": "fork",
+  "nodes": [
+    {"id": "fork", "step": {"kind": "state", "mutations": []}},
+    {"id": "draft", "step": {"kind": "agent", "agent": "author", "prompt": [{"kind": "text", "text": "Explain "}, {"kind": "state", "path": "topic"}], "text_target": "draft"}},
+    {"id": "risks", "step": {"kind": "agent", "agent": "reviewer", "prompt": [{"kind": "text", "text": "Identify common mistakes in "}, {"kind": "state", "path": "topic"}], "text_target": "risks"}},
+    {"id": "join", "step": {"kind": "join_all"}}
+  ],
+  "routes": {
+    "fork": {"mode": "broadcast", "branches": [{"target": {"kind": "node", "id": "risks"}}, {"target": {"kind": "node", "id": "draft"}}]},
+    "draft": {"mode": "first", "branches": [{"target": {"kind": "node", "id": "join"}}]},
+    "risks": {"mode": "first", "branches": [{"target": {"kind": "node", "id": "join"}}]}
+  }
+}

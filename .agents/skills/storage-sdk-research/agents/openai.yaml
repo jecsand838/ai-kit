@@ -1,0 +1,6 @@
+interface:
+  display_name: "storage-sdk Research"
+  short_description: "Database and embedded Lance, SQLite/Turso, Redb, and PostgreSQL StateStore docs, sources, and validation assumptions."
+  default_prompt: "Use $storage-sdk-research to route storage-sdk research across databases, embedded Lance state stores, opt-in SQLite/Turso, Redb or PostgreSQL state stores, or both before changing behavior. Bind the selected native versions and distinguish source facts from recorded platform and live proof."
+policy:
+  allow_implicit_invocation: true

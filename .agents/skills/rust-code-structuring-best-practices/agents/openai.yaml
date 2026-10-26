@@ -1,0 +1,6 @@
+interface:
+  display_name: "Rust Code Structuring Best Practices"
+  short_description: "Structs, enums, impl blocks, and receiver-method Rust design."
+  default_prompt: "Use $rust-code-structuring-best-practices to enforce strict receiver-method Rust design and remove standalone functions except main or explicit human spec carveouts."
+policy:
+  allow_implicit_invocation: true

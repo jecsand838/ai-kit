@@ -1,0 +1,6 @@
+interface:
+  display_name: "ai-kit Public Surface Contract"
+  short_description: "Crate-root APIs, visibility, and portable type honesty."
+  default_prompt: "Use $ai-kit-public-surface-contract to review or update ai-kit public API, module visibility, and documentation contract changes."
+policy:
+  allow_implicit_invocation: true

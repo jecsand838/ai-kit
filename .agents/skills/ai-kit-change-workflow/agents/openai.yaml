@@ -1,0 +1,6 @@
+interface:
+  display_name: "ai-kit Change Workflow"
+  short_description: "Three-phase scoped ai-kit change execution."
+  default_prompt: "Use $ai-kit-change-workflow for scoped inline planning, research refinement, and implementation in ai-kit."
+policy:
+  allow_implicit_invocation: false

@@ -1,0 +1,15 @@
+version = 1
+
+[vendors.codex]
+tag = "rust-v0.163.0"
+archive = "codex-0.163.0.zip"
+extracted_dir = "codex-0.163.0"
+published_at = "2026-10-15T21:30:38Z"
+sha256 = "36fda4e61c251d805c2d68203c3a34b0f6881a88846e12776ca02fb13d6e67c7"
+
+[vendors.opencode]
+tag = "v1.19.3"
+archive = "opencode-1.19.3.zip"
+extracted_dir = "opencode-1.19.3"
+published_at = "2026-10-16T12:31:52Z"
+sha256 = "662ef890f51c49c364bc8e91ab04f25c8a3abf8833c86d42d9d0e5c31df34b0b"

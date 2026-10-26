@@ -1,0 +1,6 @@
+interface:
+  display_name: "ai-kit Diff Optimization Audit"
+  short_description: "Findings-only diff audit for bloat and cleanup risk."
+  default_prompt: "Use $ai-kit-diff-optimization-audit to inspect the current diff and return cleanup findings only."
+policy:
+  allow_implicit_invocation: false

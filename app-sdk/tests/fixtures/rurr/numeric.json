@@ -1,0 +1,883 @@
+{
+  "provenance": {
+    "kind": "pinned-source-derived",
+    "archive_sha256": "5b5f20eb1d233467c600dc9dd249feaaa9046c5a303ae4e937040be5b6ecf25e",
+    "archive_commit": "005bfe3ece631e64b06dac2d42ef84235f727a4f",
+    "members": [
+      "rurr-main/crates/rurr-expr/src/eval/numeric.rs:5-155",
+      "rurr-main/crates/rurr-expr/src/value.rs:34-43",
+      "rurr-main/crates/rurr-expr/src/eval/mod.rs:124-145",
+      "rurr-main/crates/rurr-expr/src/eval/mod.rs:119-145",
+      "rurr-main/crates/rurr-expr/src/eval/numeric.rs:94-169"
+    ],
+    "note": "Expected results were derived from pinned functions and numeric coercion. The rurr runtime was not executed. App JSON syntax is a Rust-surface translation; intermediate exact i128 arithmetic is preserved."
+  },
+  "cases": [
+    {
+      "id": "true_division",
+      "expected": {
+        "outcome": "value",
+        "value": 2.5
+      },
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "divide",
+          "left": {
+            "kind": "literal",
+            "value": 5
+          },
+          "right": {
+            "kind": "literal",
+            "value": 2
+          }
+        }
+      }
+    },
+    {
+      "id": "integral_true_division_stays_float",
+      "expected": {
+        "outcome": "value",
+        "value": 2.0
+      },
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "divide",
+          "left": {
+            "kind": "literal",
+            "value": 6
+          },
+          "right": {
+            "kind": "literal",
+            "value": 3
+          }
+        }
+      }
+    },
+    {
+      "id": "negative_modulo",
+      "expected": {
+        "outcome": "value",
+        "value": 1
+      },
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "remainder",
+          "left": {
+            "kind": "literal",
+            "value": -5
+          },
+          "right": {
+            "kind": "literal",
+            "value": 2
+          }
+        }
+      }
+    },
+    {
+      "id": "negative_divisor_modulo",
+      "expected": {
+        "outcome": "value",
+        "value": -1
+      },
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "remainder",
+          "left": {
+            "kind": "literal",
+            "value": 5
+          },
+          "right": {
+            "kind": "literal",
+            "value": -2
+          }
+        }
+      }
+    },
+    {
+      "id": "both_negative_modulo",
+      "expected": {
+        "outcome": "value",
+        "value": -1
+      },
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "remainder",
+          "left": {
+            "kind": "literal",
+            "value": -5
+          },
+          "right": {
+            "kind": "literal",
+            "value": -2
+          }
+        }
+      }
+    },
+    {
+      "id": "boolean_numeric_add",
+      "expected": {
+        "outcome": "value",
+        "value": 3
+      },
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "add",
+          "left": {
+            "kind": "literal",
+            "value": true
+          },
+          "right": {
+            "kind": "literal",
+            "value": 2
+          }
+        }
+      }
+    },
+    {
+      "id": "boolean_numeric_multiply",
+      "expected": {
+        "outcome": "value",
+        "value": 0
+      },
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "multiply",
+          "left": {
+            "kind": "literal",
+            "value": false
+          },
+          "right": {
+            "kind": "literal",
+            "value": 9
+          }
+        }
+      }
+    },
+    {
+      "id": "mixed_float_add",
+      "expected": {
+        "outcome": "value",
+        "value": 2.5
+      },
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "add",
+          "left": {
+            "kind": "literal",
+            "value": 2
+          },
+          "right": {
+            "kind": "literal",
+            "value": 0.5
+          }
+        }
+      }
+    },
+    {
+      "id": "float_modulo",
+      "expected": {
+        "outcome": "value",
+        "value": 0.5
+      },
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "remainder",
+          "left": {
+            "kind": "literal",
+            "value": -5.5
+          },
+          "right": {
+            "kind": "literal",
+            "value": 2
+          }
+        }
+      }
+    },
+    {
+      "id": "cross_i64_boundary",
+      "expected": {
+        "outcome": "value",
+        "value": 9223372036854775808
+      },
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "add",
+          "left": {
+            "kind": "literal",
+            "value": 9223372036854775807
+          },
+          "right": {
+            "kind": "literal",
+            "value": 1
+          }
+        }
+      }
+    },
+    {
+      "id": "floor_positive",
+      "expected": {
+        "outcome": "value",
+        "value": 2
+      },
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "floor_divide",
+          "left": {
+            "kind": "literal",
+            "value": 5
+          },
+          "right": {
+            "kind": "literal",
+            "value": 2
+          }
+        }
+      }
+    },
+    {
+      "id": "floor_negative_numerator",
+      "expected": {
+        "outcome": "value",
+        "value": -3
+      },
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "floor_divide",
+          "left": {
+            "kind": "literal",
+            "value": -5
+          },
+          "right": {
+            "kind": "literal",
+            "value": 2
+          }
+        }
+      }
+    },
+    {
+      "id": "floor_negative_denominator",
+      "expected": {
+        "outcome": "value",
+        "value": -3
+      },
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "floor_divide",
+          "left": {
+            "kind": "literal",
+            "value": 5
+          },
+          "right": {
+            "kind": "literal",
+            "value": -2
+          }
+        }
+      }
+    },
+    {
+      "id": "floor_both_negative",
+      "expected": {
+        "outcome": "value",
+        "value": 2
+      },
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "floor_divide",
+          "left": {
+            "kind": "literal",
+            "value": -5
+          },
+          "right": {
+            "kind": "literal",
+            "value": -2
+          }
+        }
+      }
+    },
+    {
+      "id": "floor_mixed_stays_float",
+      "expected": {
+        "outcome": "value",
+        "value": -3.0
+      },
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "floor_divide",
+          "left": {
+            "kind": "literal",
+            "value": -5
+          },
+          "right": {
+            "kind": "literal",
+            "value": 2.0
+          }
+        }
+      }
+    },
+    {
+      "id": "integer_power",
+      "expected": {
+        "outcome": "value",
+        "value": 1024
+      },
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "power",
+          "left": {
+            "kind": "literal",
+            "value": 2
+          },
+          "right": {
+            "kind": "literal",
+            "value": 10
+          }
+        }
+      }
+    },
+    {
+      "id": "negative_power",
+      "expected": {
+        "outcome": "value",
+        "value": 0.25
+      },
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "power",
+          "left": {
+            "kind": "literal",
+            "value": 2
+          },
+          "right": {
+            "kind": "literal",
+            "value": -2
+          }
+        }
+      }
+    },
+    {
+      "id": "zero_power_zero",
+      "expected": {
+        "outcome": "value",
+        "value": 1
+      },
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "power",
+          "left": {
+            "kind": "literal",
+            "value": 0
+          },
+          "right": {
+            "kind": "literal",
+            "value": 0
+          }
+        }
+      }
+    },
+    {
+      "id": "wide_integer_intermediate",
+      "expected": {
+        "outcome": "value",
+        "value": 0.5
+      },
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "divide",
+          "left": {
+            "kind": "subtract",
+            "left": {
+              "kind": "add",
+              "left": {
+                "kind": "literal",
+                "value": 18446744073709551615
+              },
+              "right": {
+                "kind": "literal",
+                "value": 1
+              }
+            },
+            "right": {
+              "kind": "literal",
+              "value": 18446744073709551615
+            }
+          },
+          "right": {
+            "kind": "literal",
+            "value": 2
+          }
+        }
+      }
+    },
+    {
+      "id": "zero_division",
+      "expected": {
+        "outcome": "evaluation_error",
+        "message_contains": "division by zero"
+      },
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "divide",
+          "left": {
+            "kind": "literal",
+            "value": 5
+          },
+          "right": {
+            "kind": "literal",
+            "value": 0
+          }
+        }
+      }
+    },
+    {
+      "id": "zero_modulo",
+      "expected": {
+        "outcome": "evaluation_error",
+        "message_contains": "division by zero"
+      },
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "remainder",
+          "left": {
+            "kind": "literal",
+            "value": 5
+          },
+          "right": {
+            "kind": "literal",
+            "value": 0
+          }
+        }
+      }
+    },
+    {
+      "id": "zero_floor_division",
+      "expected": {
+        "outcome": "evaluation_error",
+        "message_contains": "division by zero"
+      },
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "floor_divide",
+          "left": {
+            "kind": "literal",
+            "value": 5
+          },
+          "right": {
+            "kind": "literal",
+            "value": 0
+          }
+        }
+      }
+    },
+    {
+      "id": "negative_power_of_zero",
+      "expected": {
+        "outcome": "evaluation_error",
+        "message_contains": "division by zero"
+      },
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "power",
+          "left": {
+            "kind": "literal",
+            "value": 0
+          },
+          "right": {
+            "kind": "literal",
+            "value": -1
+          }
+        }
+      }
+    },
+    {
+      "id": "string_add_is_not_concatenation",
+      "expected": {
+        "outcome": "evaluation_error"
+      },
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "add",
+          "left": {
+            "kind": "literal",
+            "value": "a"
+          },
+          "right": {
+            "kind": "literal",
+            "value": "b"
+          }
+        }
+      }
+    },
+    {
+      "id": "null_is_not_number",
+      "expected": {
+        "outcome": "evaluation_error"
+      },
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "multiply",
+          "left": {
+            "kind": "literal",
+            "value": null
+          },
+          "right": {
+            "kind": "literal",
+            "value": 1
+          }
+        }
+      }
+    },
+    {
+      "id": "integer_power_overflow",
+      "expected": {
+        "outcome": "evaluation_error",
+        "message_contains": "integer overflow"
+      },
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "power",
+          "left": {
+            "kind": "literal",
+            "value": 2
+          },
+          "right": {
+            "kind": "literal",
+            "value": 128
+          }
+        }
+      }
+    },
+    {
+      "id": "right_evaluation_failure_precedes_left_numeric_coercion",
+      "expected": {
+        "outcome": "evaluation_error",
+        "message_contains": "division by zero"
+      },
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "add",
+          "left": {
+            "kind": "literal",
+            "value": "not numeric"
+          },
+          "right": {
+            "kind": "divide",
+            "left": {
+              "kind": "literal",
+              "value": 1
+            },
+            "right": {
+              "kind": "literal",
+              "value": 0
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "i128_minimum_modulo_negative_one",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "remainder",
+          "left": {
+            "kind": "power",
+            "left": {
+              "kind": "literal",
+              "value": -2
+            },
+            "right": {
+              "kind": "literal",
+              "value": 127
+            }
+          },
+          "right": {
+            "kind": "literal",
+            "value": -1
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": 0
+      }
+    },
+    {
+      "id": "i128_minimum_floor_negative_one_overflows",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "floor_divide",
+          "left": {
+            "kind": "power",
+            "left": {
+              "kind": "literal",
+              "value": -2
+            },
+            "right": {
+              "kind": "literal",
+              "value": 127
+            }
+          },
+          "right": {
+            "kind": "literal",
+            "value": -1
+          }
+        }
+      },
+      "expected": {
+        "outcome": "evaluation_error",
+        "message_contains": "integer overflow"
+      }
+    },
+    {
+      "id": "i128_minimum_times_negative_one_overflows",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "multiply",
+          "left": {
+            "kind": "power",
+            "left": {
+              "kind": "literal",
+              "value": -2
+            },
+            "right": {
+              "kind": "literal",
+              "value": 127
+            }
+          },
+          "right": {
+            "kind": "literal",
+            "value": -1
+          }
+        }
+      },
+      "expected": {
+        "outcome": "evaluation_error",
+        "message_contains": "integer overflow"
+      }
+    },
+    {
+      "id": "exponent_u32_maximum",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "power",
+          "left": {
+            "kind": "literal",
+            "value": 1
+          },
+          "right": {
+            "kind": "literal",
+            "value": 4294967295
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": 1
+      }
+    },
+    {
+      "id": "exponent_above_u32_maximum_even_for_one",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "power",
+          "left": {
+            "kind": "literal",
+            "value": 1
+          },
+          "right": {
+            "kind": "literal",
+            "value": 4294967296
+          }
+        }
+      },
+      "expected": {
+        "outcome": "evaluation_error",
+        "message_contains": "integer overflow"
+      }
+    },
+    {
+      "id": "final_integer_above_u64_maximum_rejected",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "add",
+          "left": {
+            "kind": "literal",
+            "value": 18446744073709551615
+          },
+          "right": {
+            "kind": "literal",
+            "value": 1
+          }
+        }
+      },
+      "expected": {
+        "outcome": "evaluation_error",
+        "message_contains": "finite JSON number"
+      }
+    },
+    {
+      "id": "final_integer_below_i64_minimum_rejected",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "subtract",
+          "left": {
+            "kind": "literal",
+            "value": -9223372036854775808
+          },
+          "right": {
+            "kind": "literal",
+            "value": 1
+          }
+        }
+      },
+      "expected": {
+        "outcome": "evaluation_error",
+        "message_contains": "finite JSON number"
+      }
+    },
+    {
+      "id": "nonfinite_final_float_rejected",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "multiply",
+          "left": {
+            "kind": "literal",
+            "value": 1e+308
+          },
+          "right": {
+            "kind": "literal",
+            "value": 1e+308
+          }
+        }
+      },
+      "expected": {
+        "outcome": "evaluation_error",
+        "message_contains": "finite JSON number"
+      }
+    },
+    {
+      "id": "nan_final_float_rejected",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "power",
+          "left": {
+            "kind": "literal",
+            "value": -1.0
+          },
+          "right": {
+            "kind": "literal",
+            "value": 0.5
+          }
+        }
+      },
+      "expected": {
+        "outcome": "evaluation_error",
+        "message_contains": "finite JSON number"
+      }
+    },
+    {
+      "id": "infinite_intermediate_can_produce_finite_result",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "divide",
+          "left": {
+            "kind": "literal",
+            "value": 1
+          },
+          "right": {
+            "kind": "multiply",
+            "left": {
+              "kind": "literal",
+              "value": 1e+308
+            },
+            "right": {
+              "kind": "literal",
+              "value": 1e+308
+            }
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": 0.0
+      }
+    },
+    {
+      "id": "float_negative_zero_modulo_retains_sign",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "remainder",
+          "left": {
+            "kind": "literal",
+            "value": -4.0
+          },
+          "right": {
+            "kind": "literal",
+            "value": 2.0
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": -0.0
+      }
+    },
+    {
+      "id": "negative_zero_divisor_is_zero",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "divide",
+          "left": {
+            "kind": "literal",
+            "value": 1
+          },
+          "right": {
+            "kind": "literal",
+            "value": -0.0
+          }
+        }
+      },
+      "expected": {
+        "outcome": "evaluation_error",
+        "message_contains": "division by zero"
+      }
+    }
+  ]
+}

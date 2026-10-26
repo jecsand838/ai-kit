@@ -1,0 +1,6 @@
+interface:
+  display_name: "Refresh Workspace Agentic Docs"
+  short_description: "Reconcile ai-kit docs and agentic guidance."
+  default_prompt: "Use $refresh-workspace-agentic-documentation from /plan. Select explicit user and workflow authority before inspecting the branch; reconcile root/crate docs, skill/agent guidance and metadata, the documentation ledger and docs-contract tests. Preserve historical evidence and invocation policies, then run the prescribed docs gates when execution is permitted."
+policy:
+  allow_implicit_invocation: false

@@ -1,0 +1,12 @@
+pub(crate) mod backend;
+mod catalog;
+mod collection;
+mod context;
+mod data;
+mod index;
+mod manager;
+mod mapper;
+mod point_id;
+mod query;
+mod rest;
+mod support;

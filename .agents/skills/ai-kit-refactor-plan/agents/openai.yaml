@@ -1,0 +1,6 @@
+interface:
+  display_name: "ai-kit Refactor Plan"
+  short_description: "Decision-complete optimization and cleanup planning."
+  default_prompt: "Use $ai-kit-refactor-plan to turn optimization audit findings or cleanup goals into a complete ai-kit refactor plan without editing code."
+policy:
+  allow_implicit_invocation: false

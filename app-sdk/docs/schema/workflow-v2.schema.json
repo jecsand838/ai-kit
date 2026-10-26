@@ -1,0 +1,680 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "App SDK workflow v2",
+  "description": "The adopted workflow document syntax. WorkflowDefinition compilation and App admission perform the additional semantic checks described in WORKFLOW.md.",
+  "$comment": "Hand-maintained. All schema references are local. JSON Schema string lengths count characters; the compiler also checks decoded UTF-8 byte limits, source size, nesting, duplicate JSON fields, identity/reference relationships, embedded schema compilation and execution bounds. Literal expression payloads and resolved task data are not a second expression grammar. Workflow graph loops are permitted.",
+  "type": "object",
+  "required": ["schema", "id", "revision", "state", "required", "reducers", "entry", "nodes", "routes"],
+  "properties": {
+    "schema": {"const": "app-sdk.workflow/v2"},
+    "id": {"$ref": "#/$defs/identity"},
+    "revision": {"$ref": "#/$defs/revision"},
+    "state": {
+      "type": "object",
+      "maxProperties": 1024,
+      "propertyNames": {"$ref": "#/$defs/dataKey"},
+      "additionalProperties": true
+    },
+    "required": {
+      "type": "array",
+      "maxItems": 1024,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/dataKey"}
+    },
+    "reducers": {
+      "type": "object",
+      "maxProperties": 1024,
+      "propertyNames": {"$ref": "#/$defs/dataKey"},
+      "additionalProperties": {"$ref": "#/$defs/reducer"}
+    },
+    "entry": {"$ref": "#/$defs/identity"},
+    "nodes": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1024,
+      "items": {"$ref": "#/$defs/node"}
+    },
+    "routes": {
+      "type": "object",
+      "maxProperties": 1024,
+      "propertyNames": {"$ref": "#/$defs/identity"},
+      "additionalProperties": {"$ref": "#/$defs/route"}
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "identity": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[a-z0-9]",
+      "not": {"pattern": "[^a-z0-9_-]"}
+    },
+    "revision": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "not": {"pattern": "[\u0000-\u001f\u007f-\u009f]"},
+      "$comment": "The compiler additionally requires trim-stable text and at most 256 decoded UTF-8 bytes. Revisions are opaque and are not ordered lexically."
+    },
+    "dataKey": {
+      "type": "string",
+      "maxLength": 128,
+      "$comment": "Data keys may be empty or contain arbitrary Unicode. The compiler's limit is 128 decoded UTF-8 bytes."
+    },
+    "path": {
+      "type": "string",
+      "maxLength": 65536,
+      "pattern": "^(?:[^~]|~[01])*$",
+      "$comment": "Slash-separated state path with RFC 6901 token escapes; no leading slash is required. Decoded token byte limits and declared root-key requirements remain compiler checks."
+    },
+    "text": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 65536,
+      "not": {"pattern": "\u0000"}
+    },
+    "displayText": {
+      "type": "string",
+      "maxLength": 65536
+    },
+    "duration": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 31536000000
+    },
+    "attempts": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 64
+    },
+    "ordinal": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 18446744073709551615
+    },
+    "reducer": {
+      "enum": ["reject_concurrent", "collect", "append_array", "sum_integer", "merge_object"]
+    },
+    "expressionMap": {
+      "type": "object",
+      "maxProperties": 1024,
+      "propertyNames": {"$ref": "#/$defs/dataKey"},
+      "additionalProperties": {"$ref": "#/$defs/expression"}
+    },
+    "expression": {
+      "oneOf": [
+        {"$ref": "#/$defs/literalExpression"},
+        {"$ref": "#/$defs/stateExpression"},
+        {"$ref": "#/$defs/unaryExpression"},
+        {"$ref": "#/$defs/booleanExpression"},
+        {"$ref": "#/$defs/conditionalExpression"},
+        {"$ref": "#/$defs/attributeExpression"},
+        {"$ref": "#/$defs/indexExpression"},
+        {"$ref": "#/$defs/sliceExpression"},
+        {"$ref": "#/$defs/arithmeticExpression"}
+      ]
+    },
+    "literalExpression": {
+      "type": "object",
+      "required": ["kind", "value"],
+      "properties": {
+        "kind": {"const": "literal"},
+        "value": true
+      },
+      "additionalProperties": false
+    },
+    "stateExpression": {
+      "type": "object",
+      "required": ["kind", "path"],
+      "properties": {
+        "kind": {"const": "state"},
+        "path": {"$ref": "#/$defs/path"}
+      },
+      "additionalProperties": false
+    },
+    "unaryExpression": {
+      "type": "object",
+      "required": ["kind", "value"],
+      "properties": {
+        "kind": {"enum": ["length", "positive", "negative", "not"]},
+        "value": {"$ref": "#/$defs/expression"}
+      },
+      "additionalProperties": false
+    },
+    "booleanExpression": {
+      "type": "object",
+      "required": ["kind", "values"],
+      "properties": {
+        "kind": {"enum": ["and", "or"]},
+        "values": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 4096,
+          "items": {"$ref": "#/$defs/expression"}
+        }
+      },
+      "additionalProperties": false
+    },
+    "conditionalExpression": {
+      "type": "object",
+      "required": ["kind", "when", "then", "else"],
+      "properties": {
+        "kind": {"const": "conditional"},
+        "when": {"$ref": "#/$defs/condition"},
+        "then": {"$ref": "#/$defs/expression"},
+        "else": {"$ref": "#/$defs/expression"}
+      },
+      "additionalProperties": false
+    },
+    "attributeExpression": {
+      "type": "object",
+      "required": ["kind", "value", "name"],
+      "properties": {
+        "kind": {"const": "attribute"},
+        "value": {"$ref": "#/$defs/expression"},
+        "name": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "indexExpression": {
+      "type": "object",
+      "required": ["kind", "value", "index"],
+      "properties": {
+        "kind": {"const": "index"},
+        "value": {"$ref": "#/$defs/expression"},
+        "index": {"$ref": "#/$defs/expression"}
+      },
+      "additionalProperties": false
+    },
+    "sliceExpression": {
+      "type": "object",
+      "required": ["kind", "value"],
+      "properties": {
+        "kind": {"const": "slice"},
+        "value": {"$ref": "#/$defs/expression"},
+        "start": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/expression"}]},
+        "stop": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/expression"}]},
+        "stride": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/expression"}]}
+      },
+      "additionalProperties": false
+    },
+    "arithmeticExpression": {
+      "type": "object",
+      "required": ["kind", "left", "right"],
+      "properties": {
+        "kind": {"enum": ["add", "subtract", "multiply", "divide", "remainder", "floor_divide", "power"]},
+        "left": {"$ref": "#/$defs/expression"},
+        "right": {"$ref": "#/$defs/expression"}
+      },
+      "additionalProperties": false
+    },
+    "condition": {
+      "oneOf": [
+        {"$ref": "#/$defs/customCondition"},
+        {"$ref": "#/$defs/constantCondition"},
+        {"$ref": "#/$defs/existsCondition"},
+        {"$ref": "#/$defs/binaryCondition"},
+        {"$ref": "#/$defs/compareCondition"},
+        {"$ref": "#/$defs/notCondition"},
+        {"$ref": "#/$defs/aggregateCondition"}
+      ]
+    },
+    "customCondition": {
+      "type": "object",
+      "required": ["kind", "condition", "revision"],
+      "properties": {
+        "kind": {"const": "custom"},
+        "condition": {"$ref": "#/$defs/identity"},
+        "revision": {"$ref": "#/$defs/revision"},
+        "name": {"$ref": "#/$defs/displayText"}
+      },
+      "additionalProperties": false
+    },
+    "constantCondition": {
+      "type": "object",
+      "required": ["kind", "value"],
+      "properties": {
+        "kind": {"const": "constant"},
+        "value": {"type": "boolean"}
+      },
+      "additionalProperties": false
+    },
+    "existsCondition": {
+      "type": "object",
+      "required": ["kind", "path"],
+      "properties": {
+        "kind": {"const": "exists"},
+        "path": {"$ref": "#/$defs/path"}
+      },
+      "additionalProperties": false
+    },
+    "comparison": {
+      "enum": ["equal", "not_equal", "less_than", "less_than_or_equal", "greater_than", "greater_than_or_equal", "in", "not_in", "contains", "is", "is_not"]
+    },
+    "binaryCondition": {
+      "type": "object",
+      "required": ["kind", "left", "right"],
+      "properties": {
+        "kind": {"$ref": "#/$defs/comparison"},
+        "left": {"$ref": "#/$defs/expression"},
+        "right": {"$ref": "#/$defs/expression"}
+      },
+      "additionalProperties": false
+    },
+    "compareCondition": {
+      "type": "object",
+      "required": ["kind", "values", "operators"],
+      "properties": {
+        "kind": {"const": "compare"},
+        "values": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 4096,
+          "items": {"$ref": "#/$defs/expression"}
+        },
+        "operators": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4095,
+          "items": {"$ref": "#/$defs/comparison"}
+        }
+      },
+      "additionalProperties": false,
+      "$comment": "The compiler checks that there is exactly one fewer operator than values."
+    },
+    "notCondition": {
+      "type": "object",
+      "required": ["kind", "condition"],
+      "properties": {
+        "kind": {"const": "not"},
+        "condition": {"$ref": "#/$defs/condition"}
+      },
+      "additionalProperties": false
+    },
+    "aggregateCondition": {
+      "type": "object",
+      "required": ["kind", "conditions"],
+      "properties": {
+        "kind": {"enum": ["all", "any"]},
+        "conditions": {
+          "type": "array",
+          "maxItems": 4096,
+          "items": {"$ref": "#/$defs/condition"}
+        }
+      },
+      "additionalProperties": false
+    },
+    "mutation": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["kind", "target", "value"],
+          "properties": {
+            "kind": {"enum": ["assign", "append", "increment"]},
+            "target": {"$ref": "#/$defs/dataKey"},
+            "value": {"$ref": "#/$defs/expression"}
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["kind", "target", "values"],
+          "properties": {
+            "kind": {"const": "extend"},
+            "target": {"$ref": "#/$defs/dataKey"},
+            "values": {"$ref": "#/$defs/expression"}
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["kind", "target"],
+          "properties": {
+            "kind": {"const": "remove"},
+            "target": {"$ref": "#/$defs/dataKey"}
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["kind", "keep"],
+          "properties": {
+            "kind": {"const": "wipe"},
+            "keep": {"type": "array", "maxItems": 4096, "items": {"$ref": "#/$defs/dataKey"}}
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["kind", "state"],
+          "properties": {
+            "kind": {"const": "merge"},
+            "state": {"$ref": "#/$defs/expression"}
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["kind", "keys"],
+          "properties": {
+            "kind": {"const": "subset"},
+            "keys": {"type": "array", "maxItems": 4096, "items": {"$ref": "#/$defs/dataKey"}}
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "retry": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["kind"],
+          "properties": {"kind": {"const": "never"}},
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["kind", "max_attempts"],
+          "properties": {
+            "kind": {"const": "immediate"},
+            "max_attempts": {"$ref": "#/$defs/attempts"}
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["kind", "max_attempts", "max_elapsed_ms", "delay_ms"],
+          "properties": {
+            "kind": {"const": "fixed"},
+            "max_attempts": {"$ref": "#/$defs/attempts"},
+            "max_elapsed_ms": {"$ref": "#/$defs/duration"},
+            "delay_ms": {"$ref": "#/$defs/duration"}
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["kind", "max_attempts", "max_elapsed_ms", "initial_ms", "maximum_ms", "multiplier"],
+          "properties": {
+            "kind": {"const": "exponential"},
+            "max_attempts": {"$ref": "#/$defs/attempts"},
+            "max_elapsed_ms": {"$ref": "#/$defs/duration"},
+            "initial_ms": {"$ref": "#/$defs/duration"},
+            "maximum_ms": {"$ref": "#/$defs/duration"},
+            "multiplier": {"type": "integer", "minimum": 2, "maximum": 4294967295}
+          },
+          "additionalProperties": false,
+          "$comment": "The compiler additionally requires maximum_ms >= initial_ms."
+        }
+      ]
+    },
+    "promptPart": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["kind", "text"],
+          "properties": {"kind": {"const": "text"}, "text": {"$ref": "#/$defs/text"}},
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["kind", "path"],
+          "properties": {"kind": {"const": "state"}, "path": {"$ref": "#/$defs/path"}},
+          "additionalProperties": false
+        }
+      ]
+    },
+    "message": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 4096,
+      "items": {"$ref": "#/$defs/promptPart"}
+    },
+    "checkpointSelector": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["kind"],
+          "properties": {"kind": {"const": "latest"}},
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["kind", "value"],
+          "properties": {
+            "kind": {"enum": ["sequence", "action"]},
+            "value": {"$ref": "#/$defs/ordinal"}
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "initializer": {
+      "type": "object",
+      "required": ["source", "checkpoint", "position"],
+      "properties": {
+        "source": {"$ref": "#/$defs/expression"},
+        "occurrence": {"$ref": "#/$defs/expression"},
+        "checkpoint": {"$ref": "#/$defs/checkpointSelector"},
+        "position": {"enum": ["after_completed", "at_saved", "entrypoint"]},
+        "overrides": {"$ref": "#/$defs/expressionMap"},
+        "fallback": {"$ref": "#/$defs/expression"}
+      },
+      "additionalProperties": false,
+      "$comment": "source must evaluate to a RunId, an optional occurrence to an exact occurrence token, and fallback to a complete state object. overrides is a map of expressions, not one object-producing expression."
+    },
+    "childFields": {
+      "type": "object",
+      "properties": {
+        "workflow": {"$ref": "#/$defs/identity"},
+        "revision": {"$ref": "#/$defs/revision"},
+        "select": {"$ref": "#/$defs/expression"},
+        "task_key": {"$ref": "#/$defs/expression"},
+        "input": {"$ref": "#/$defs/expressionMap"},
+        "inputs": {"$ref": "#/$defs/expressionMap"},
+        "initializer": {"$ref": "#/$defs/initializer"},
+        "history": {"enum": ["retain", "delete_after_reduction"]}
+      }
+    },
+    "childSelector": {
+      "oneOf": [
+        {"required": ["workflow"], "not": {"required": ["select"]}},
+        {"required": ["select"], "not": {"anyOf": [{"required": ["workflow"]}, {"required": ["revision"]}]}}
+      ],
+      "$comment": "A dynamic selector evaluates to an object with workflow and optional revision. Omitted revision uses the root run's captured selection."
+    },
+    "reduction": {
+      "type": "object",
+      "required": ["source", "target", "reducer"],
+      "properties": {
+        "source": {"$ref": "#/$defs/path"},
+        "target": {"$ref": "#/$defs/dataKey"},
+        "reducer": {"$ref": "#/$defs/reducer"}
+      },
+      "additionalProperties": false
+    },
+    "reductions": {
+      "type": "array",
+      "maxItems": 1024,
+      "items": {"$ref": "#/$defs/reduction"},
+      "$comment": "Source/target membership, duplicate contributions, reducer agreement and concurrent-map reducer restrictions are semantic checks."
+    },
+    "actionStep": {
+      "type": "object",
+      "required": ["kind", "action", "revision"],
+      "properties": {
+        "kind": {"const": "action"},
+        "action": {"$ref": "#/$defs/identity"},
+        "revision": {"$ref": "#/$defs/revision"},
+        "project_result": {"type": "boolean", "default": false}
+      },
+      "additionalProperties": false
+    },
+    "agentStep": {
+      "type": "object",
+      "required": ["kind", "agent", "prompt"],
+      "properties": {
+        "kind": {"const": "agent"},
+        "agent": {"$ref": "#/$defs/identity"},
+        "prompt": {"$ref": "#/$defs/message"},
+        "structured_schema": {"anyOf": [{"type": "null"}, {"type": "object", "minProperties": 1}]},
+        "text_target": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/dataKey"}]},
+        "structured_target": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/dataKey"}]},
+        "stream": {"type": "boolean", "default": false}
+      },
+      "additionalProperties": false,
+      "$comment": "A structured target requires a structured schema. Embedded schemas compile as self-contained documents; this syntax schema does not interpret their contents."
+    },
+    "stateStep": {
+      "type": "object",
+      "required": ["kind", "mutations"],
+      "properties": {
+        "kind": {"const": "state"},
+        "mutations": {"type": "array", "maxItems": 4096, "items": {"$ref": "#/$defs/mutation"}}
+      },
+      "additionalProperties": false
+    },
+    "inputStep": {
+      "type": "object",
+      "required": ["kind", "message"],
+      "properties": {
+        "kind": {"const": "input"},
+        "message": {"$ref": "#/$defs/message"},
+        "schema": {"type": ["null", "boolean", "object"]},
+        "target": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/dataKey"}]}
+      },
+      "additionalProperties": false,
+      "$comment": "Input schemas support boolean schemas. Their meta-schema validity and local references are checked by WorkflowDefinition compilation."
+    },
+    "childStep": {
+      "allOf": [{"$ref": "#/$defs/childFields"}, {"$ref": "#/$defs/childSelector"}],
+      "required": ["kind", "input", "reductions"],
+      "properties": {
+        "kind": {"const": "child"},
+        "reductions": {"$ref": "#/$defs/reductions"}
+      },
+      "unevaluatedProperties": false
+    },
+    "itemMapStep": {
+      "allOf": [{"$ref": "#/$defs/childFields"}, {"$ref": "#/$defs/childSelector"}],
+      "required": ["kind", "items", "input_key", "max_parallel", "reductions"],
+      "properties": {
+        "kind": {"const": "map"},
+        "items": {"$ref": "#/$defs/expression"},
+        "input_key": {"$ref": "#/$defs/dataKey"},
+        "index_key": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/dataKey"}]},
+        "max_parallel": {"type": "integer", "minimum": 1, "maximum": 4096},
+        "reductions": {"$ref": "#/$defs/reductions"}
+      },
+      "unevaluatedProperties": false
+    },
+    "taskMapStep": {
+      "type": "object",
+      "required": ["kind", "tasks", "max_parallel", "reductions"],
+      "properties": {
+        "kind": {"const": "map"},
+        "tasks": {"$ref": "#/$defs/expression"},
+        "max_parallel": {"type": "integer", "minimum": 1, "maximum": 4096},
+        "reductions": {"$ref": "#/$defs/reductions"}
+      },
+      "additionalProperties": false,
+      "$comment": "Execution validates each evaluated task as resolved data: required task_key:string, workflow:string, input:object; optional revision:string, inputs:object, history:retain|delete_after_reduction and initializer with source:RunId string, checkpoint, position, optional occurrence:string, overrides:object and fallback:object. No expressions are re-evaluated inside task data. This rule also applies when tasks is a literal expression."
+    },
+    "pipelineChild": {
+      "allOf": [{"$ref": "#/$defs/childFields"}, {"$ref": "#/$defs/childSelector"}],
+      "required": ["input"],
+      "unevaluatedProperties": false
+    },
+    "pipelineStep": {
+      "type": "object",
+      "required": ["kind", "children"],
+      "properties": {
+        "kind": {"const": "pipeline"},
+        "children": {"type": "array", "minItems": 1, "maxItems": 4096, "items": {"$ref": "#/$defs/pipelineChild"}},
+        "reductions": {"$ref": "#/$defs/reductions"}
+      },
+      "additionalProperties": false
+    },
+    "joinStep": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {"kind": {"enum": ["join_all", "join_first"]}},
+      "additionalProperties": false
+    },
+    "sleepStep": {
+      "type": "object",
+      "required": ["kind", "message", "delay_ms"],
+      "properties": {
+        "kind": {"const": "sleep"},
+        "message": {"$ref": "#/$defs/text"},
+        "delay_ms": {"$ref": "#/$defs/duration"}
+      },
+      "additionalProperties": false
+    },
+    "step": {
+      "oneOf": [
+        {"$ref": "#/$defs/actionStep"},
+        {"$ref": "#/$defs/agentStep"},
+        {"$ref": "#/$defs/stateStep"},
+        {"$ref": "#/$defs/inputStep"},
+        {"$ref": "#/$defs/childStep"},
+        {"$ref": "#/$defs/itemMapStep"},
+        {"$ref": "#/$defs/taskMapStep"},
+        {"$ref": "#/$defs/pipelineStep"},
+        {"$ref": "#/$defs/joinStep"},
+        {"$ref": "#/$defs/sleepStep"}
+      ]
+    },
+    "node": {
+      "type": "object",
+      "required": ["id", "step"],
+      "properties": {
+        "id": {"$ref": "#/$defs/identity"},
+        "step": {"$ref": "#/$defs/step"},
+        "name": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/displayText"}]},
+        "description": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/displayText"}]},
+        "tags": {"type": "array", "maxItems": 4096, "items": {"$ref": "#/$defs/displayText"}},
+        "retry": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/retry"}]},
+        "deadline_ms": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/duration"}]}
+      },
+      "if": {"properties": {"step": {"properties": {"kind": {"const": "agent"}}}}},
+      "else": {"properties": {"retry": {"type": "null"}}},
+      "additionalProperties": false
+    },
+    "routeTarget": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["kind", "id"],
+          "properties": {"kind": {"const": "node"}, "id": {"$ref": "#/$defs/identity"}},
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["kind"],
+          "properties": {"kind": {"const": "end"}},
+          "additionalProperties": false
+        }
+      ]
+    },
+    "routeBranch": {
+      "type": "object",
+      "required": ["target"],
+      "properties": {
+        "when": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/condition"}]},
+        "target": {"$ref": "#/$defs/routeTarget"}
+      },
+      "additionalProperties": false
+    },
+    "route": {
+      "type": "object",
+      "required": ["mode", "branches"],
+      "properties": {
+        "mode": {"enum": ["first", "broadcast"]},
+        "branches": {"type": "array", "maxItems": 4096, "items": {"$ref": "#/$defs/routeBranch"}}
+      },
+      "additionalProperties": false
+    }
+  }
+}

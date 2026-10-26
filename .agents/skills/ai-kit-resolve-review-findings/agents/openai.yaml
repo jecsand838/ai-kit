@@ -1,0 +1,6 @@
+interface:
+  display_name: "ai-kit Resolve Review Findings"
+  short_description: "Plan accepted `/review` findings with TDD."
+  default_prompt: "Use $ai-kit-resolve-review-findings to turn accepted Codex /review findings into a decision-complete TDD fix plan without editing code."
+policy:
+  allow_implicit_invocation: false

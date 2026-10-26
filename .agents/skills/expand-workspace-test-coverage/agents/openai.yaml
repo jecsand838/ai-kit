@@ -1,0 +1,6 @@
+interface:
+  display_name: "Expand Test Coverage"
+  short_description: "Plan and implement coverage fixes."
+  default_prompt: "Use $expand-workspace-test-coverage to plan known ai-kit coverage gaps, then implement when execution is permitted. Separate primary public-trait mocks from live proof, respect production scope, and run the required validation gates."
+policy:
+  allow_implicit_invocation: false

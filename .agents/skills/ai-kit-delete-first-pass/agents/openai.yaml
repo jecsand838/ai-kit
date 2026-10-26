@@ -1,0 +1,6 @@
+interface:
+  display_name: "ai-kit Delete-First Pass"
+  short_description: "Delete-first cleanup pass planning or execution."
+  default_prompt: "Use $ai-kit-delete-first-pass to plan or run a focused delete-first cleanup pass for ai-kit."
+policy:
+  allow_implicit_invocation: false

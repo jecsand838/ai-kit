@@ -1,0 +1,6 @@
+interface:
+  display_name: "Refresh Workspace Rustdocs"
+  short_description: "Refresh ai-kit public rustdoc end to end."
+  default_prompt: "Use $refresh-workspace-rustdocs from /plan to refresh ai-kit public rustdoc comments, runnable examples, and rustdoc validation across all crates."
+policy:
+  allow_implicit_invocation: false

@@ -1,0 +1,2301 @@
+{
+  "provenance": {
+    "kind": "pinned-source-derived",
+    "archive_sha256": "5b5f20eb1d233467c600dc9dd249feaaa9046c5a303ae4e937040be5b6ecf25e",
+    "archive_commit": "005bfe3ece631e64b06dac2d42ef84235f727a4f",
+    "members": [
+      "rurr-main/crates/rurr-expr/src/eval/mod.rs:25-260",
+      "rurr-main/crates/rurr-expr/src/eval/slice.rs:12-143",
+      "rurr-main/crates/rurr-expr/src/value.rs:47-101",
+      "rurr-main/crates/rurr-expr/src/validate.rs:7-154"
+    ],
+    "note": "Manually derived operation expectations, not executed-rurr results. JSON literal container operands stand for the identical JSON values supplied through rurr StateView; rurr text syntax does not accept list/dict construction ASTs. BoolOp requires at least two operands. Indexing strings is unsupported although Unicode-scalar slicing is supported. Slice index advancement is checked even after the last emitted item."
+  },
+  "cases": [
+    {
+      "id": "positive_true",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "positive",
+          "value": {
+            "kind": "literal",
+            "value": true
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": 1
+      }
+    },
+    {
+      "id": "negative_true",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "negative",
+          "value": {
+            "kind": "literal",
+            "value": true
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": -1
+      }
+    },
+    {
+      "id": "positive_false",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "positive",
+          "value": {
+            "kind": "literal",
+            "value": false
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": 0
+      }
+    },
+    {
+      "id": "negative_false",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "negative",
+          "value": {
+            "kind": "literal",
+            "value": false
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": 0
+      }
+    },
+    {
+      "id": "positive_integer",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "positive",
+          "value": {
+            "kind": "literal",
+            "value": 7
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": 7
+      }
+    },
+    {
+      "id": "negative_integer",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "negative",
+          "value": {
+            "kind": "literal",
+            "value": 7
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": -7
+      }
+    },
+    {
+      "id": "positive_float",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "positive",
+          "value": {
+            "kind": "literal",
+            "value": 2.5
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": 2.5
+      }
+    },
+    {
+      "id": "negative_float",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "negative",
+          "value": {
+            "kind": "literal",
+            "value": 2.5
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": -2.5
+      }
+    },
+    {
+      "id": "positive_zero_float",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "positive",
+          "value": {
+            "kind": "literal",
+            "value": 0.0
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": 0.0
+      }
+    },
+    {
+      "id": "negative_zero_float",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "negative",
+          "value": {
+            "kind": "literal",
+            "value": 0.0
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": -0.0
+      }
+    },
+    {
+      "id": "positive_negative_zero",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "positive",
+          "value": {
+            "kind": "literal",
+            "value": -0.0
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": -0.0
+      }
+    },
+    {
+      "id": "negative_negative_zero",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "negative",
+          "value": {
+            "kind": "literal",
+            "value": -0.0
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": 0.0
+      }
+    },
+    {
+      "id": "positive_i64_min",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "positive",
+          "value": {
+            "kind": "literal",
+            "value": -9223372036854775808
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": -9223372036854775808
+      }
+    },
+    {
+      "id": "negative_i64_min",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "negative",
+          "value": {
+            "kind": "literal",
+            "value": -9223372036854775808
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": 9223372036854775808
+      }
+    },
+    {
+      "id": "positive_rejects_null",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "positive",
+          "value": {
+            "kind": "literal",
+            "value": null
+          }
+        }
+      },
+      "expected": {
+        "outcome": "evaluation_error",
+        "message_contains": null
+      }
+    },
+    {
+      "id": "negative_rejects_null",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "negative",
+          "value": {
+            "kind": "literal",
+            "value": null
+          }
+        }
+      },
+      "expected": {
+        "outcome": "evaluation_error",
+        "message_contains": null
+      }
+    },
+    {
+      "id": "positive_rejects_text",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "positive",
+          "value": {
+            "kind": "literal",
+            "value": "1"
+          }
+        }
+      },
+      "expected": {
+        "outcome": "evaluation_error",
+        "message_contains": null
+      }
+    },
+    {
+      "id": "negative_rejects_text",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "negative",
+          "value": {
+            "kind": "literal",
+            "value": "1"
+          }
+        }
+      },
+      "expected": {
+        "outcome": "evaluation_error",
+        "message_contains": null
+      }
+    },
+    {
+      "id": "positive_rejects_array",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "positive",
+          "value": {
+            "kind": "literal",
+            "value": []
+          }
+        }
+      },
+      "expected": {
+        "outcome": "evaluation_error",
+        "message_contains": null
+      }
+    },
+    {
+      "id": "negative_rejects_array",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "negative",
+          "value": {
+            "kind": "literal",
+            "value": []
+          }
+        }
+      },
+      "expected": {
+        "outcome": "evaluation_error",
+        "message_contains": null
+      }
+    },
+    {
+      "id": "positive_rejects_object",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "positive",
+          "value": {
+            "kind": "literal",
+            "value": {}
+          }
+        }
+      },
+      "expected": {
+        "outcome": "evaluation_error",
+        "message_contains": null
+      }
+    },
+    {
+      "id": "negative_rejects_object",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "negative",
+          "value": {
+            "kind": "literal",
+            "value": {}
+          }
+        }
+      },
+      "expected": {
+        "outcome": "evaluation_error",
+        "message_contains": null
+      }
+    },
+    {
+      "id": "negative_i128_min_overflows",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "negative",
+          "value": {
+            "kind": "power",
+            "left": {
+              "kind": "literal",
+              "value": -2
+            },
+            "right": {
+              "kind": "literal",
+              "value": 127
+            }
+          }
+        }
+      },
+      "expected": {
+        "outcome": "evaluation_error",
+        "message_contains": "overflow"
+      }
+    },
+    {
+      "id": "not_truthiness_null",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "not",
+          "value": {
+            "kind": "literal",
+            "value": null
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": true
+      }
+    },
+    {
+      "id": "not_truthiness_false",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "not",
+          "value": {
+            "kind": "literal",
+            "value": false
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": true
+      }
+    },
+    {
+      "id": "not_truthiness_zero",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "not",
+          "value": {
+            "kind": "literal",
+            "value": 0
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": true
+      }
+    },
+    {
+      "id": "not_truthiness_negative_zero",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "not",
+          "value": {
+            "kind": "literal",
+            "value": -0.0
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": true
+      }
+    },
+    {
+      "id": "not_truthiness_empty_text",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "not",
+          "value": {
+            "kind": "literal",
+            "value": ""
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": true
+      }
+    },
+    {
+      "id": "not_truthiness_empty_array",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "not",
+          "value": {
+            "kind": "literal",
+            "value": []
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": true
+      }
+    },
+    {
+      "id": "not_truthiness_empty_object",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "not",
+          "value": {
+            "kind": "literal",
+            "value": {}
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": true
+      }
+    },
+    {
+      "id": "not_truthiness_true",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "not",
+          "value": {
+            "kind": "literal",
+            "value": true
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": false
+      }
+    },
+    {
+      "id": "not_truthiness_negative",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "not",
+          "value": {
+            "kind": "literal",
+            "value": -3
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": false
+      }
+    },
+    {
+      "id": "not_truthiness_text_zero",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "not",
+          "value": {
+            "kind": "literal",
+            "value": "0"
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": false
+      }
+    },
+    {
+      "id": "not_truthiness_array_zero",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "not",
+          "value": {
+            "kind": "literal",
+            "value": [
+              0
+            ]
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": false
+      }
+    },
+    {
+      "id": "not_truthiness_object_null",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "not",
+          "value": {
+            "kind": "literal",
+            "value": {
+              "x": null
+            }
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": false
+      }
+    },
+    {
+      "id": "not_nan_is_false",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "not",
+          "value": {
+            "kind": "power",
+            "left": {
+              "kind": "literal",
+              "value": -1
+            },
+            "right": {
+              "kind": "literal",
+              "value": 0.5
+            }
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": false
+      }
+    },
+    {
+      "id": "and_returns_last_operand",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "and",
+          "values": [
+            {
+              "kind": "literal",
+              "value": 2
+            },
+            {
+              "kind": "literal",
+              "value": "last"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": "last"
+      }
+    },
+    {
+      "id": "and_short_circuits_with_empty_array",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "and",
+          "values": [
+            {
+              "kind": "literal",
+              "value": []
+            },
+            {
+              "kind": "divide",
+              "left": {
+                "kind": "literal",
+                "value": 1
+              },
+              "right": {
+                "kind": "literal",
+                "value": 0
+              }
+            }
+          ]
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": []
+      }
+    },
+    {
+      "id": "and_short_circuits_with_empty_object",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "and",
+          "values": [
+            {
+              "kind": "literal",
+              "value": 4
+            },
+            {
+              "kind": "literal",
+              "value": {}
+            },
+            {
+              "kind": "divide",
+              "left": {
+                "kind": "literal",
+                "value": 1
+              },
+              "right": {
+                "kind": "literal",
+                "value": 0
+              }
+            }
+          ]
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": {}
+      }
+    },
+    {
+      "id": "or_returns_first_truthy_operand",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "or",
+          "values": [
+            {
+              "kind": "literal",
+              "value": 0
+            },
+            {
+              "kind": "literal",
+              "value": [
+                1
+              ]
+            },
+            {
+              "kind": "divide",
+              "left": {
+                "kind": "literal",
+                "value": 1
+              },
+              "right": {
+                "kind": "literal",
+                "value": 0
+              }
+            }
+          ]
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": [
+          1
+        ]
+      }
+    },
+    {
+      "id": "or_returns_last_falsy_operand",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "or",
+          "values": [
+            {
+              "kind": "literal",
+              "value": 0
+            },
+            {
+              "kind": "literal",
+              "value": ""
+            }
+          ]
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": ""
+      }
+    },
+    {
+      "id": "and_required_operand_error",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "and",
+          "values": [
+            {
+              "kind": "literal",
+              "value": 1
+            },
+            {
+              "kind": "divide",
+              "left": {
+                "kind": "literal",
+                "value": 1
+              },
+              "right": {
+                "kind": "literal",
+                "value": 0
+              }
+            }
+          ]
+        }
+      },
+      "expected": {
+        "outcome": "evaluation_error",
+        "message_contains": "division by zero"
+      }
+    },
+    {
+      "id": "or_required_operand_error",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "or",
+          "values": [
+            {
+              "kind": "literal",
+              "value": false
+            },
+            {
+              "kind": "divide",
+              "left": {
+                "kind": "literal",
+                "value": 1
+              },
+              "right": {
+                "kind": "literal",
+                "value": 0
+              }
+            }
+          ]
+        }
+      },
+      "expected": {
+        "outcome": "evaluation_error",
+        "message_contains": "division by zero"
+      }
+    },
+    {
+      "id": "and_requires_two_operands",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "and",
+          "values": [
+            {
+              "kind": "literal",
+              "value": 1
+            }
+          ]
+        }
+      },
+      "expected": {
+        "outcome": "definition_error"
+      }
+    },
+    {
+      "id": "or_requires_two_operands",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "or",
+          "values": []
+        }
+      },
+      "expected": {
+        "outcome": "definition_error"
+      }
+    },
+    {
+      "id": "conditional_does_not_evaluate_else",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "conditional",
+          "when": {
+            "kind": "constant",
+            "value": true
+          },
+          "then": {
+            "kind": "literal",
+            "value": "then"
+          },
+          "else": {
+            "kind": "divide",
+            "left": {
+              "kind": "literal",
+              "value": 1
+            },
+            "right": {
+              "kind": "literal",
+              "value": 0
+            }
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": "then"
+      }
+    },
+    {
+      "id": "conditional_does_not_evaluate_then",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "conditional",
+          "when": {
+            "kind": "constant",
+            "value": false
+          },
+          "then": {
+            "kind": "divide",
+            "left": {
+              "kind": "literal",
+              "value": 1
+            },
+            "right": {
+              "kind": "literal",
+              "value": 0
+            }
+          },
+          "else": {
+            "kind": "literal",
+            "value": "else"
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": "else"
+      }
+    },
+    {
+      "id": "conditional_comparison_chain",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "conditional",
+          "when": {
+            "kind": "compare",
+            "values": [
+              {
+                "kind": "literal",
+                "value": 1
+              },
+              {
+                "kind": "literal",
+                "value": 2
+              },
+              {
+                "kind": "literal",
+                "value": 3
+              }
+            ],
+            "operators": [
+              "less_than",
+              "less_than"
+            ]
+          },
+          "then": {
+            "kind": "literal",
+            "value": 9
+          },
+          "else": {
+            "kind": "literal",
+            "value": 8
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": 9
+      }
+    },
+    {
+      "id": "attribute_reads_object_value",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "attribute",
+          "value": {
+            "kind": "literal",
+            "value": {
+              "score": 9
+            }
+          },
+          "name": "score"
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": 9
+      }
+    },
+    {
+      "id": "attribute_allows_data_named_like_python_internal",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "attribute",
+          "value": {
+            "kind": "literal",
+            "value": {
+              "__class__": "ordinary data"
+            }
+          },
+          "name": "__class__"
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": "ordinary data"
+      }
+    },
+    {
+      "id": "attribute_reads_unicode_name",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "attribute",
+          "value": {
+            "kind": "literal",
+            "value": {
+              "é": [
+                1
+              ]
+            }
+          },
+          "name": "é"
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": [
+          1
+        ]
+      }
+    },
+    {
+      "id": "attribute_missing_fails",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "attribute",
+          "value": {
+            "kind": "literal",
+            "value": {
+              "score": 9
+            }
+          },
+          "name": "absent"
+        }
+      },
+      "expected": {
+        "outcome": "evaluation_error",
+        "message_contains": null
+      }
+    },
+    {
+      "id": "attribute_requires_object",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "attribute",
+          "value": {
+            "kind": "literal",
+            "value": [
+              1
+            ]
+          },
+          "name": "score"
+        }
+      },
+      "expected": {
+        "outcome": "evaluation_error",
+        "message_contains": null
+      }
+    },
+    {
+      "id": "array_index_first",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "index",
+          "value": {
+            "kind": "literal",
+            "value": [
+              10,
+              20,
+              30
+            ]
+          },
+          "index": {
+            "kind": "literal",
+            "value": 0
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": 10
+      }
+    },
+    {
+      "id": "array_index_last",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "index",
+          "value": {
+            "kind": "literal",
+            "value": [
+              10,
+              20,
+              30
+            ]
+          },
+          "index": {
+            "kind": "literal",
+            "value": -1
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": 30
+      }
+    },
+    {
+      "id": "array_index_negative_length",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "index",
+          "value": {
+            "kind": "literal",
+            "value": [
+              10,
+              20,
+              30
+            ]
+          },
+          "index": {
+            "kind": "literal",
+            "value": -3
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": 10
+      }
+    },
+    {
+      "id": "array_index_bool_true",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "index",
+          "value": {
+            "kind": "literal",
+            "value": [
+              10,
+              20,
+              30
+            ]
+          },
+          "index": {
+            "kind": "literal",
+            "value": true
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": 20
+      }
+    },
+    {
+      "id": "array_index_bool_false",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "index",
+          "value": {
+            "kind": "literal",
+            "value": [
+              10,
+              20,
+              30
+            ]
+          },
+          "index": {
+            "kind": "literal",
+            "value": false
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": 10
+      }
+    },
+    {
+      "id": "array_index_rejects_positive_out_of_bounds",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "index",
+          "value": {
+            "kind": "literal",
+            "value": [
+              10,
+              20,
+              30
+            ]
+          },
+          "index": {
+            "kind": "literal",
+            "value": 3
+          }
+        }
+      },
+      "expected": {
+        "outcome": "evaluation_error",
+        "message_contains": null
+      }
+    },
+    {
+      "id": "array_index_rejects_negative_out_of_bounds",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "index",
+          "value": {
+            "kind": "literal",
+            "value": [
+              10,
+              20,
+              30
+            ]
+          },
+          "index": {
+            "kind": "literal",
+            "value": -4
+          }
+        }
+      },
+      "expected": {
+        "outcome": "evaluation_error",
+        "message_contains": null
+      }
+    },
+    {
+      "id": "array_index_rejects_float",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "index",
+          "value": {
+            "kind": "literal",
+            "value": [
+              10,
+              20,
+              30
+            ]
+          },
+          "index": {
+            "kind": "literal",
+            "value": 1.0
+          }
+        }
+      },
+      "expected": {
+        "outcome": "evaluation_error",
+        "message_contains": null
+      }
+    },
+    {
+      "id": "array_index_rejects_null",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "index",
+          "value": {
+            "kind": "literal",
+            "value": [
+              10,
+              20,
+              30
+            ]
+          },
+          "index": {
+            "kind": "literal",
+            "value": null
+          }
+        }
+      },
+      "expected": {
+        "outcome": "evaluation_error",
+        "message_contains": null
+      }
+    },
+    {
+      "id": "array_index_rejects_text",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "index",
+          "value": {
+            "kind": "literal",
+            "value": [
+              10,
+              20,
+              30
+            ]
+          },
+          "index": {
+            "kind": "literal",
+            "value": "0"
+          }
+        }
+      },
+      "expected": {
+        "outcome": "evaluation_error",
+        "message_contains": null
+      }
+    },
+    {
+      "id": "empty_array_index_fails",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "index",
+          "value": {
+            "kind": "literal",
+            "value": []
+          },
+          "index": {
+            "kind": "literal",
+            "value": 0
+          }
+        }
+      },
+      "expected": {
+        "outcome": "evaluation_error",
+        "message_contains": null
+      }
+    },
+    {
+      "id": "array_wide_index_fails",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "index",
+          "value": {
+            "kind": "literal",
+            "value": [
+              1
+            ]
+          },
+          "index": {
+            "kind": "add",
+            "left": {
+              "kind": "power",
+              "left": {
+                "kind": "literal",
+                "value": 2
+              },
+              "right": {
+                "kind": "literal",
+                "value": 126
+              }
+            },
+            "right": {
+              "kind": "subtract",
+              "left": {
+                "kind": "power",
+                "left": {
+                  "kind": "literal",
+                  "value": 2
+                },
+                "right": {
+                  "kind": "literal",
+                  "value": 126
+                }
+              },
+              "right": {
+                "kind": "literal",
+                "value": 1
+              }
+            }
+          }
+        }
+      },
+      "expected": {
+        "outcome": "evaluation_error",
+        "message_contains": null
+      }
+    },
+    {
+      "id": "object_index_string_key",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "index",
+          "value": {
+            "kind": "literal",
+            "value": {
+              "x": null
+            }
+          },
+          "index": {
+            "kind": "literal",
+            "value": "x"
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": null
+      }
+    },
+    {
+      "id": "object_index_missing_key",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "index",
+          "value": {
+            "kind": "literal",
+            "value": {
+              "x": 1
+            }
+          },
+          "index": {
+            "kind": "literal",
+            "value": "missing"
+          }
+        }
+      },
+      "expected": {
+        "outcome": "evaluation_error",
+        "message_contains": null
+      }
+    },
+    {
+      "id": "object_index_rejects_numeric_key",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "index",
+          "value": {
+            "kind": "literal",
+            "value": {
+              "1": 9
+            }
+          },
+          "index": {
+            "kind": "literal",
+            "value": 1
+          }
+        }
+      },
+      "expected": {
+        "outcome": "evaluation_error",
+        "message_contains": null
+      }
+    },
+    {
+      "id": "object_index_rejects_boolean_key",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "index",
+          "value": {
+            "kind": "literal",
+            "value": {
+              "true": 9
+            }
+          },
+          "index": {
+            "kind": "literal",
+            "value": true
+          }
+        }
+      },
+      "expected": {
+        "outcome": "evaluation_error",
+        "message_contains": null
+      }
+    },
+    {
+      "id": "string_index_is_unsupported_in_pin",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "index",
+          "value": {
+            "kind": "literal",
+            "value": "abc"
+          },
+          "index": {
+            "kind": "literal",
+            "value": 0
+          }
+        }
+      },
+      "expected": {
+        "outcome": "evaluation_error",
+        "message_contains": null
+      }
+    },
+    {
+      "id": "index_evaluates_index_before_rejecting_container",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "index",
+          "value": {
+            "kind": "literal",
+            "value": 9
+          },
+          "index": {
+            "kind": "divide",
+            "left": {
+              "kind": "literal",
+              "value": 1
+            },
+            "right": {
+              "kind": "literal",
+              "value": 0
+            }
+          }
+        }
+      },
+      "expected": {
+        "outcome": "evaluation_error",
+        "message_contains": "division by zero"
+      }
+    },
+    {
+      "id": "unicode_length_counts_scalar_values",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "length",
+          "value": {
+            "kind": "literal",
+            "value": "aé🙂é"
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": 5
+      }
+    },
+    {
+      "id": "slice_all",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "slice",
+          "value": {
+            "kind": "literal",
+            "value": [
+              0,
+              1,
+              2,
+              3
+            ]
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": [
+          0,
+          1,
+          2,
+          3
+        ]
+      }
+    },
+    {
+      "id": "slice_positive_stride",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "slice",
+          "value": {
+            "kind": "literal",
+            "value": [
+              0,
+              1,
+              2,
+              3,
+              4
+            ]
+          },
+          "start": {
+            "kind": "literal",
+            "value": 1
+          },
+          "stop": {
+            "kind": "literal",
+            "value": 5
+          },
+          "stride": {
+            "kind": "literal",
+            "value": 2
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": [
+          1,
+          3
+        ]
+      }
+    },
+    {
+      "id": "slice_clips_positive_bounds",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "slice",
+          "value": {
+            "kind": "literal",
+            "value": [
+              0,
+              1,
+              2
+            ]
+          },
+          "start": {
+            "kind": "literal",
+            "value": -20
+          },
+          "stop": {
+            "kind": "literal",
+            "value": 20
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": [
+          0,
+          1,
+          2
+        ]
+      }
+    },
+    {
+      "id": "slice_negative_bounds",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "slice",
+          "value": {
+            "kind": "literal",
+            "value": [
+              0,
+              1,
+              2,
+              3,
+              4
+            ]
+          },
+          "start": {
+            "kind": "literal",
+            "value": -4
+          },
+          "stop": {
+            "kind": "literal",
+            "value": -1
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": [
+          1,
+          2,
+          3
+        ]
+      }
+    },
+    {
+      "id": "slice_reverse_omitted_stop",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "slice",
+          "value": {
+            "kind": "literal",
+            "value": [
+              0,
+              1,
+              2
+            ]
+          },
+          "stride": {
+            "kind": "literal",
+            "value": -1
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": [
+          2,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "id": "slice_reverse_explicit_minus_one_stop",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "slice",
+          "value": {
+            "kind": "literal",
+            "value": [
+              0,
+              1,
+              2
+            ]
+          },
+          "stop": {
+            "kind": "literal",
+            "value": -1
+          },
+          "stride": {
+            "kind": "literal",
+            "value": -1
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": []
+      }
+    },
+    {
+      "id": "slice_reverse_clips_bounds",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "slice",
+          "value": {
+            "kind": "literal",
+            "value": [
+              0,
+              1,
+              2
+            ]
+          },
+          "start": {
+            "kind": "literal",
+            "value": 20
+          },
+          "stop": {
+            "kind": "literal",
+            "value": -20
+          },
+          "stride": {
+            "kind": "literal",
+            "value": -1
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": [
+          2,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "id": "slice_reverse_stride_two",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "slice",
+          "value": {
+            "kind": "literal",
+            "value": [
+              0,
+              1,
+              2,
+              3,
+              4
+            ]
+          },
+          "stride": {
+            "kind": "literal",
+            "value": -2
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": [
+          4,
+          2,
+          0
+        ]
+      }
+    },
+    {
+      "id": "slice_empty_reverse",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "slice",
+          "value": {
+            "kind": "literal",
+            "value": []
+          },
+          "stride": {
+            "kind": "literal",
+            "value": -1
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": []
+      }
+    },
+    {
+      "id": "slice_boolean_indices",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "slice",
+          "value": {
+            "kind": "literal",
+            "value": [
+              0,
+              1,
+              2
+            ]
+          },
+          "start": {
+            "kind": "literal",
+            "value": false
+          },
+          "stop": {
+            "kind": "literal",
+            "value": true
+          },
+          "stride": {
+            "kind": "literal",
+            "value": true
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": [
+          0
+        ]
+      }
+    },
+    {
+      "id": "slice_zero_stride_fails",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "slice",
+          "value": {
+            "kind": "literal",
+            "value": [
+              0,
+              1
+            ]
+          },
+          "stride": {
+            "kind": "literal",
+            "value": 0
+          }
+        }
+      },
+      "expected": {
+        "outcome": "evaluation_error",
+        "message_contains": null
+      }
+    },
+    {
+      "id": "slice_false_stride_fails",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "slice",
+          "value": {
+            "kind": "literal",
+            "value": [
+              0,
+              1
+            ]
+          },
+          "stride": {
+            "kind": "literal",
+            "value": false
+          }
+        }
+      },
+      "expected": {
+        "outcome": "evaluation_error",
+        "message_contains": null
+      }
+    },
+    {
+      "id": "slice_float_stride_fails",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "slice",
+          "value": {
+            "kind": "literal",
+            "value": [
+              0,
+              1
+            ]
+          },
+          "stride": {
+            "kind": "literal",
+            "value": 1.0
+          }
+        }
+      },
+      "expected": {
+        "outcome": "evaluation_error",
+        "message_contains": null
+      }
+    },
+    {
+      "id": "slice_float_start_fails",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "slice",
+          "value": {
+            "kind": "literal",
+            "value": [
+              0,
+              1
+            ]
+          },
+          "start": {
+            "kind": "literal",
+            "value": 1.0
+          }
+        }
+      },
+      "expected": {
+        "outcome": "evaluation_error",
+        "message_contains": null
+      }
+    },
+    {
+      "id": "slice_null_stop_is_not_omitted",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "slice",
+          "value": {
+            "kind": "literal",
+            "value": [
+              0,
+              1
+            ]
+          },
+          "stop": {
+            "kind": "literal",
+            "value": null
+          }
+        }
+      },
+      "expected": {
+        "outcome": "evaluation_error",
+        "message_contains": null
+      }
+    },
+    {
+      "id": "slice_stride_is_evaluated_before_start",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "slice",
+          "value": {
+            "kind": "literal",
+            "value": [
+              0,
+              1
+            ]
+          },
+          "start": {
+            "kind": "length",
+            "value": {
+              "kind": "literal",
+              "value": 1
+            }
+          },
+          "stride": {
+            "kind": "divide",
+            "left": {
+              "kind": "literal",
+              "value": 1
+            },
+            "right": {
+              "kind": "literal",
+              "value": 0
+            }
+          }
+        }
+      },
+      "expected": {
+        "outcome": "evaluation_error",
+        "message_contains": "division by zero"
+      }
+    },
+    {
+      "id": "slice_text_unicode_reverse",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "slice",
+          "value": {
+            "kind": "literal",
+            "value": "aé🙂é"
+          },
+          "stride": {
+            "kind": "literal",
+            "value": -1
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": "́e🙂éa"
+      }
+    },
+    {
+      "id": "slice_text_unicode_stride",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "slice",
+          "value": {
+            "kind": "literal",
+            "value": "aé🙂é"
+          },
+          "start": {
+            "kind": "literal",
+            "value": 1
+          },
+          "stop": {
+            "kind": "literal",
+            "value": 5
+          },
+          "stride": {
+            "kind": "literal",
+            "value": 2
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": "ée"
+      }
+    },
+    {
+      "id": "slice_text_empty_reverse",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "slice",
+          "value": {
+            "kind": "literal",
+            "value": ""
+          },
+          "stride": {
+            "kind": "literal",
+            "value": -1
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": ""
+      }
+    },
+    {
+      "id": "slice_object_is_unsupported",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "slice",
+          "value": {
+            "kind": "literal",
+            "value": {
+              "x": 1
+            }
+          }
+        }
+      },
+      "expected": {
+        "outcome": "evaluation_error",
+        "message_contains": null
+      }
+    },
+    {
+      "id": "slice_scalar_is_unsupported",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "slice",
+          "value": {
+            "kind": "literal",
+            "value": 1
+          }
+        }
+      },
+      "expected": {
+        "outcome": "evaluation_error",
+        "message_contains": null
+      }
+    },
+    {
+      "id": "slice_checked_stride_even_after_last_yield",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "slice",
+          "value": {
+            "kind": "literal",
+            "value": [
+              0,
+              1,
+              2
+            ]
+          },
+          "start": {
+            "kind": "literal",
+            "value": 1
+          },
+          "stride": {
+            "kind": "add",
+            "left": {
+              "kind": "power",
+              "left": {
+                "kind": "literal",
+                "value": 2
+              },
+              "right": {
+                "kind": "literal",
+                "value": 126
+              }
+            },
+            "right": {
+              "kind": "subtract",
+              "left": {
+                "kind": "power",
+                "left": {
+                  "kind": "literal",
+                  "value": 2
+                },
+                "right": {
+                  "kind": "literal",
+                  "value": 126
+                }
+              },
+              "right": {
+                "kind": "literal",
+                "value": 1
+              }
+            }
+          }
+        }
+      },
+      "expected": {
+        "outcome": "evaluation_error",
+        "message_contains": "overflow"
+      }
+    },
+    {
+      "id": "slice_max_stride_at_zero_is_valid",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "slice",
+          "value": {
+            "kind": "literal",
+            "value": [
+              0,
+              1,
+              2
+            ]
+          },
+          "stride": {
+            "kind": "add",
+            "left": {
+              "kind": "power",
+              "left": {
+                "kind": "literal",
+                "value": 2
+              },
+              "right": {
+                "kind": "literal",
+                "value": 126
+              }
+            },
+            "right": {
+              "kind": "subtract",
+              "left": {
+                "kind": "power",
+                "left": {
+                  "kind": "literal",
+                  "value": 2
+                },
+                "right": {
+                  "kind": "literal",
+                  "value": 126
+                }
+              },
+              "right": {
+                "kind": "literal",
+                "value": 1
+              }
+            }
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": [
+          0
+        ]
+      }
+    },
+    {
+      "id": "slice_min_stride_is_valid",
+      "evaluation": {
+        "kind": "expression",
+        "value": {
+          "kind": "slice",
+          "value": {
+            "kind": "literal",
+            "value": [
+              0,
+              1,
+              2
+            ]
+          },
+          "stride": {
+            "kind": "power",
+            "left": {
+              "kind": "literal",
+              "value": -2
+            },
+            "right": {
+              "kind": "literal",
+              "value": 127
+            }
+          }
+        }
+      },
+      "expected": {
+        "outcome": "value",
+        "value": [
+          2
+        ]
+      }
+    }
+  ]
+}

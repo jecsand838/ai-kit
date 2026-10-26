@@ -1,0 +1,6 @@
+interface:
+  display_name: "Rust Public API Docs"
+  short_description: "Rustdoc, doctests, and public API docs for ai-kit."
+  default_prompt: "Use $rust-public-api-docs to add or review ai-kit rustdoc, doctests, and public API examples."
+policy:
+  allow_implicit_invocation: true

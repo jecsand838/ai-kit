@@ -1,0 +1,6 @@
+interface:
+  display_name: "Orchestrate Workflow"
+  short_description: "Run selected findings through worktree workers."
+  default_prompt: "Use $orchestrate-workflow to create worktrees for selected findings, spawn scoped workers, review results, merge clean work, and clean up."
+policy:
+  allow_implicit_invocation: false

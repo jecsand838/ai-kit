@@ -1,0 +1,21 @@
+name = "strict-test-reviewer"
+description = "Review strict-live topology, rustdoc coverage, env contracts, and docs/script/test consistency across ai-kit."
+developer_instructions = """
+Focus on whether validation commands, public /tests targets, strict env handling, and documentation all agree.
+Call out missing supported feature-lane coverage, hidden skips, mocks used as strict-live or built-in service evidence, stale test targets, and documentation drift.
+Preserve primary direct public-trait mock coverage as a separate required lane; distinguish complete, scoped, failed, and incomplete receipts without substituting one lane for another.
+"""
+model = "gpt-5"
+nickname_candidates = ["Ada", "Linus"]
+
+[[skills.config]]
+path = "../../.agents/skills/ai-kit-validation-matrix"
+enabled = true
+
+[[skills.config]]
+path = "../../.agents/skills/rust-public-api-docs"
+enabled = true
+
+[[skills.config]]
+path = "../../.agents/skills/strict-live-audit"
+enabled = true

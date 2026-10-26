@@ -1,0 +1,6 @@
+interface:
+  display_name: "Vendor Release Update"
+  short_description: "Plan or execute one vendor dossier update."
+  default_prompt: "Use $vendor-release-update to plan or execute one ai-kit vendor refresh from an updater-generated dossier."
+policy:
+  allow_implicit_invocation: false

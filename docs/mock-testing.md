@@ -66,7 +66,8 @@ Dependency changes can restore an older cache for the same toolchain/settings;
 Cargo decides which outputs need rebuilding. Successful runs save missing cache
 entries, including PR-local caches for dependency-changing PRs. Exact cache hits
 do not upload another copy. `main` runs maintain the shared cache; GitHub isolates
-PR-created caches to that PR. Test receipts are never cached. Formatting is also
+PR-created caches to that PR, so the first `main` run must create its own cache.
+Test receipts are never cached. Formatting is also
 checked before native package installation and cache transfer to reject cheap
 failures early. Local runners default to one compiler worker unless callers set
 `CARGO_BUILD_JOBS`; Cargo commands themselves remain serial.
@@ -80,23 +81,26 @@ contain no reports, never satisfy a check by themselves, and never turn the
 original failure into a pass. They prevent a cold build from repeatedly losing
 completed work when it exceeds one run's budget.
 
-Superseded runs for the same PR or branch are cancelled. The job has a provisional
-15-minute ceiling. GNU `timeout` sends TERM directly to the CI runner after
-11 minutes, allowing its existing signal handler to terminate and join the
+Superseded runs for the same PR or branch are cancelled. The job has a
+20-minute ceiling. GNU `timeout` sends TERM directly to the CI runner after
+18 minutes, allowing its existing signal handler to terminate and join the
 owned Cargo process group before cache archiving. A ten-second forced-kill
-backstop and GitHub's 12-minute step limit bound failed cleanup. This avoids
+backstop and GitHub's 19-minute step limit bound failed cleanup. This avoids
 archiving files while a compiler continues writing after a hard step timeout.
 Timeouts fail validation; they do not waive tests. Fresh reports and logs from
 `target/mock-contracts/` are uploaded after success or failure when available and
 retained for seven days. GitHub step timings, report durations, and the final
-disk-usage step provide the initial cold/cached build measurements. A local pass
-does not establish hosted Linux resource usage; measure the first GitHub runs
-to confirm the budget fits. The first hosted run exhausted the 12-minute CI
-budget during native dependency compilation, before Rust test execution. A
-fully cold build may therefore require multiple bounded runs to prepare its
-cache; incomplete runs remain failed and cannot authorize merging. The timeout
-is a spending ceiling. Routine runs still require the complete current-source
-test inventory, regardless of the cache restored.
+disk-usage step provide cold/cached build measurements. Initial hosted runs
+exhausted shorter validation budgets during native dependency compilation.
+The 20-minute ceiling gives cold compilation more headroom to avoid making a
+failed run and retry the normal bootstrap path; cached runs finish as soon as
+checks complete.
+If an unusually slow cold build still times out, rerun the failed job to reuse
+its partial cache. Incomplete runs remain failed and cannot authorize merging.
+The timeout is a spending ceiling, not a target duration. Routine runs still
+require the complete current-source test inventory, regardless of the cache
+restored. Local timings and cached recovery do not establish a single cold
+hosted run's duration.
 
 ## Test ownership and boundaries
 

@@ -71,6 +71,15 @@ checked before native package installation and cache transfer to reject cheap
 failures early. Local runners default to one compiler worker unless callers set
 `CARGO_BUILD_JOBS`; Cargo commands themselves remain serial.
 
+After a failed cache-miss validation, the workflow preserves partial compiled
+outputs under a unique key extending the normal cache key. This includes a CI
+step timeout, but excludes cancelled runs. A later run can restore that prefix
+match, let Cargo validate and finish compilation, and execute all required tests
+again. Only a successful run saves the normal complete-cache key. Partial caches
+contain no reports, never satisfy a check by themselves, and never turn the
+original failure into a pass. They prevent a cold build from repeatedly losing
+completed work when it exceeds one run's budget.
+
 Superseded runs for the same PR or branch are cancelled. The job has a provisional
 15-minute ceiling, with a 12-minute CI step limit to leave time for diagnostics.
 Timeouts fail validation; they do not waive tests. Fresh reports and logs from
@@ -78,9 +87,12 @@ Timeouts fail validation; they do not waive tests. Fresh reports and logs from
 retained for seven days. GitHub step timings, report durations, and the final
 disk-usage step provide the initial cold/cached build measurements. A local pass
 does not establish hosted Linux resource usage; measure the first GitHub runs
-to confirm the budget fits. The timeout is a spending ceiling, not a claim that
-an uncached Linux build is already measured to finish within it. Dependencies
-still compile, so a cache miss can be slower than ordinary cached runs.
+to confirm the budget fits. The first hosted run exhausted the 12-minute CI
+budget during native dependency compilation, before Rust test execution. A
+fully cold build may therefore require multiple bounded runs to prepare its
+cache; incomplete runs remain failed and cannot authorize merging. The timeout
+is a spending ceiling. Routine runs still require the complete current-source
+test inventory, regardless of the cache restored.
 
 ## Test ownership and boundaries
 

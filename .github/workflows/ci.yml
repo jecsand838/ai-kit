@@ -60,6 +60,7 @@ jobs:
             cargo-unified-v1-nodebug-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-
 
       - name: Check formatting, Clippy, and all public-trait mocks
+        id: validation
         # Leave time for diagnostics after the CI runner is interrupted.
         timeout-minutes: 12
         run: bash scripts/check_ci.sh
@@ -90,3 +91,18 @@ jobs:
             ~/.cargo/git
             target/debug
           key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
+
+      - name: Preserve partial compilation after a failed cache miss
+        # A bounded cold build may need another run. Cargo rechecks these outputs;
+        # the failed run stays failed and test reports are never cached.
+        if: >-
+          ${{ failure() && !cancelled() && steps.validation.outcome == 'failure' &&
+              steps.cargo-cache.outputs.cache-primary-key != '' &&
+              steps.cargo-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/debug
+          key: ${{ steps.cargo-cache.outputs.cache-primary-key }}-partial-${{ github.run_id }}-${{ github.run_attempt }}

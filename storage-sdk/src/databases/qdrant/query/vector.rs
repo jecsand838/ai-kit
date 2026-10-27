@@ -139,11 +139,11 @@ impl QdrantVectorQuery {
             VectorSeed::Vector(vector) => vector.to_f32(VectorCoercionPolicy::Lossless),
             VectorSeed::PointId(id) => {
                 let record = shard
-                    .retrieve(
-                        &[mapper::encode_point_id_for_edge(id, db)?],
-                        Some(qdrant_edge::WithPayloadInterface::Bool(false)),
-                        Some(qdrant_edge::WithVector::Bool(true)),
-                    )
+                    .retrieve(qdrant_edge::RetrieveRequest {
+                        point_ids: vec![mapper::encode_point_id_for_edge(id, db)?],
+                        with_payload: Some(qdrant_edge::WithPayloadInterface::Bool(false)),
+                        with_vector: Some(qdrant_edge::WithVector::Bool(true)),
+                    })
                     .map_err(|error| db.map_err("edge_retrieve", error))?
                     .into_iter()
                     .next()

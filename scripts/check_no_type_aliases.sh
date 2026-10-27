@@ -4,6 +4,16 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 
+# A directory name alone never authorizes third-party implementation syntax.
+approved_roots="$(python3 "${SCRIPT_DIR}/security_dependencies.py" verify --root "${WORKSPACE_DIR}" --print-roots)"
+verified_upstream_file() {
+    local root
+    while IFS= read -r root; do
+        if [[ -n "${root}" && "$1" == "${root}/"* ]]; then return 0; fi
+    done <<< "${approved_roots}"
+    return 1
+}
+
 scan_file() {
     local file="$1"
     awk -v file="${file}" '
@@ -66,6 +76,7 @@ failures="$(
     cd "${WORKSPACE_DIR}"
     while IFS= read -r file; do
         [[ -f "${file}" ]] || continue
+        if verified_upstream_file "${file}"; then continue; fi
         scan_file "${file}"
     done < <(
         git ls-files --cached --others --exclude-standard -- \

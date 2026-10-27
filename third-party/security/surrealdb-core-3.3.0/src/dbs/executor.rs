@@ -1,0 +1,3243 @@
+use std::collections::HashMap;
+use std::pin::{Pin, pin};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
+
+use anyhow::{Result, anyhow, bail};
+use async_channel::Sender;
+use futures::{Stream, StreamExt};
+use reblessive::TreeStack;
+use surrealdb_types::{Error as TypesError, QueryError, ToSql};
+#[cfg(not(target_family = "wasm"))]
+use tokio::spawn;
+use tracing::instrument;
+#[cfg(target_family = "wasm")]
+use wasm_bindgen_futures::spawn_local as spawn;
+use web_time::Instant;
+
+use crate::catalog::providers::{
+	CatalogProvider, DatabaseProvider, NamespaceProvider, RootProvider,
+};
+use crate::ctx::reason::Reason;
+use crate::ctx::{Context, FrozenContext};
+use crate::dbs::{
+	Dispatch, Force, MessageBroker, Options, QueryResult, QueryStreamItem, QueryType,
+	RoutedNotification, StatementCounters, TopLevelStatement, items_for_result,
+};
+use crate::doc::DefaultBroker;
+use crate::err::{EngineError, Error};
+use crate::exec::function::FunctionRegistry;
+use crate::exec::planner::try_plan_expr;
+use crate::exec::{Error as ExecError, OutputShape};
+use crate::expr::paths::{DB, NS};
+use crate::expr::statements::{OptionStatement, UseStatement};
+use crate::expr::{Base, ControlFlow, Expr, FlowResult, TopLevelExpr};
+use crate::iam::{Action, ResourceKind};
+use crate::kvs::slowlog::SlowLogVisit;
+use crate::kvs::{Datastore, DatastoreError, Transaction, TransactionType};
+use crate::legacy::expr_to_ident;
+use crate::observe::{
+	Outcome, QueryCounters, QueryEvent, QueryEventSafe, StatementEvent, StatementEventCtx,
+	StatementEventSafe, StatementType,
+};
+use crate::rpc::types_error_from_anyhow;
+use crate::val::{Array, Value, convert_value_to_public_value};
+use crate::{err, sql};
+
+const TARGET: &str = "surrealdb::core::dbs";
+
+/// Classify an [`anyhow::Error`] into one of the bounded `error_class`
+/// constants by downcasting to the well-known concrete error types
+/// produced by the executor / kvs layers.
+///
+/// Mapping rules (first match wins):
+///
+/// - Downcasts to [`crate::kvs::Error`]: retryable variants →
+///   [`crate::observe::error_class::TXN_CONFLICT`]; everything else from the kvs layer →
+///   [`crate::observe::error_class::STORAGE`].
+/// - Downcasts to [`surrealdb_types::Error`]: delegates to
+///   [`crate::observe::error_class::classify_types_error`].
+/// - Anything else: [`crate::observe::error_class::INTERNAL`].
+///
+/// Lives in `dbs` rather than the observe crate because it downcasts to
+/// [`crate::kvs::Error`], a core-only type the leaf crate cannot depend on.
+/// It stays `pub` and re-exported as `crate::observe::classify_anyhow_error`,
+/// which is where it used to live: an out-of-tree observer filling the
+/// `error_class` attribute has only an `anyhow::Error` to work from, and the
+/// alternative is re-deriving the kvs-is-retryable rule that this function
+/// exists to keep in one place.
+pub fn classify_anyhow_error(err: &anyhow::Error) -> &'static str {
+	use crate::observe::error_class::{INTERNAL, STORAGE, TXN_CONFLICT, classify_types_error};
+	// Both shapes reach here. A bare `kvs::Error` comes straight from the
+	// store; the `err::Error::Kvs`-wrapped one comes from every `Transaction`
+	// write, which goes through `map_err(Error::from)`. Matching only the bare
+	// one classified a write conflict as `internal`.
+	if let Some(kvs_err) = crate::kvs::storage_error(err) {
+		if kvs_err.is_retryable() {
+			return TXN_CONFLICT;
+		}
+		return STORAGE;
+	}
+	if let Some(types_err) = err.downcast_ref::<surrealdb_types::Error>() {
+		return classify_types_error(types_err);
+	}
+	INTERNAL
+}
+
+/// Turns the values a plan produced into the statement's result value.
+///
+/// The plan declares the shape and the number of values that arrived does not
+/// get a vote: a consumer that forwards values as they are produced knows the
+/// shape long before it knows the count, so the count cannot be what decides.
+/// An operator that declares [`OutputShape::Scalar`] and then emits anything
+/// but one value has a bug; reporting it is what keeps that bug from reaching
+/// the caller as a silently rearranged result.
+fn shape_statement_value(shape: OutputShape, mut values: Vec<Value>) -> Result<Value> {
+	match shape {
+		OutputShape::Scalar if values.len() == 1 => {
+			Ok(values.pop().expect("values verified non-empty"))
+		}
+		OutputShape::Scalar => Err(anyhow!(EngineError::unreachable(format!(
+			"A scalar plan produced {} values instead of one",
+			values.len()
+		)))),
+		OutputShape::Rows => Ok(Value::Array(Array::from(values))),
+	}
+}
+
+/// Where a streaming execution sends its output.
+///
+/// Only rows stream: a statement's `QueryResult` is one small entry either way,
+/// so [`Executor::results`] still accumulates them, and this sends
+/// [`QueryStreamItem`]s alongside. That is what keeps the transaction-block
+/// bookkeeping — which rewrites already-produced results when a block fails —
+/// working unchanged.
+///
+/// The ordering it maintains is the one the wire requires: a statement's rows
+/// go out while it runs, and its `Finished` only once its outcome is final.
+struct StreamSink {
+	items: Sender<QueryStreamItem>,
+	/// Statements whose rows have already been sent, and how many went out.
+	///
+	/// Keyed by statement index rather than held in a single slot because
+	/// finalisation can lag several statements behind: inside a
+	/// `BEGIN … COMMIT` block every statement's rows go out as it runs, but
+	/// none of them is final until the block resolves.
+	streamed: HashMap<usize, u64>,
+	/// How many of [`Executor::results`] have been finalised. Results at or
+	/// past this index are still provisional — inside an unresolved
+	/// `BEGIN … COMMIT` block, they may yet be rewritten into errors.
+	finalised: usize,
+}
+
+impl StreamSink {
+	/// Send one item, ignoring a consumer that has stopped reading.
+	///
+	/// A closed channel is not an error here: the caller has already been told
+	/// to stop by [`Self::is_closed`], and an item produced in the meantime has
+	/// nowhere to go.
+	async fn send(&self, item: QueryStreamItem) {
+		let _ = self.items.send(item).await;
+	}
+
+	/// Whether the consumer has gone away.
+	fn is_closed(&self) -> bool {
+		self.items.is_closed()
+	}
+}
+
+struct PreparedBroker {
+	receiver: async_channel::Receiver<RoutedNotification>,
+	delivery: Arc<dyn MessageBroker>,
+}
+
+/// An executor which relies on the `compute` methods of the logical expressions.
+pub struct Executor {
+	stack: TreeStack,
+	results: Vec<QueryResult>,
+	opt: Options,
+	ctx: FrozenContext,
+	/// The datastore's function registry. Seated on the `RootContext` of every
+	/// statement this executor runs, so the streaming planner and every nested
+	/// context derived from it resolve function names through one registry.
+	function_registry: Arc<FunctionRegistry>,
+	/// Cached session info to avoid re-extracting from context on every query.
+	/// Session values don't change between statements in the same executor batch.
+	cached_session: Option<Arc<crate::exec::context::SessionInfo>>,
+	/// Set when [`Executor::prepare_broker`] installs a [`DefaultBroker`]. Left false when a
+	/// broker was already present (higher layer) or this statement skipped installation.
+	/// Drives conditional [`clear_broker`] so we never remove an externally supplied broker.
+	broker_owned_by_executor: bool,
+	/// Present when this execution streams its results.
+	stream: Option<StreamSink>,
+}
+
+impl Executor {
+	/// Install a per-statement notification broker when `writable` is true and the session has
+	/// notifications enabled. Read-only bare statements skip installation — they cannot emit
+	/// LIVE/KILL notifications — avoiding allocation and stale-broker leaks on the hot path.
+	#[inline]
+	fn prepare_broker(
+		&mut self,
+		writable: bool,
+		delivery: Option<Arc<dyn MessageBroker>>,
+	) -> Option<PreparedBroker> {
+		if !writable {
+			return None;
+		}
+		let delivery = delivery?;
+		// If a broker is already provided by a higher layer, don't override it here.
+		if self.ctx.broker().is_some() {
+			return None;
+		}
+		let (send, recv) = async_channel::unbounded();
+		let Some(ctx) = Arc::get_mut(&mut self.ctx) else {
+			debug_assert!(false, "prepare_broker: ctx Arc was contended at statement boundary");
+			static WARNED: AtomicBool = AtomicBool::new(false);
+			if !WARNED.swap(true, Ordering::Relaxed) {
+				tracing::warn!(
+					target: TARGET,
+					"prepare_broker: ctx Arc contended at statement boundary; \
+					 LIVE notifications for this batch will be skipped. This is a bug — \
+					 future occurrences will not log."
+				);
+			}
+			return None;
+		};
+		ctx.set_broker(Some(DefaultBroker::new(send, Arc::clone(&delivery))));
+		self.broker_owned_by_executor = true;
+		Some(PreparedBroker {
+			receiver: recv,
+			delivery,
+		})
+	}
+
+	fn flush_live_query_notifications(prepared: PreparedBroker) {
+		let PreparedBroker {
+			receiver,
+			delivery,
+		} = prepared;
+		spawn(async move {
+			while let Ok(item) = receiver.recv().await {
+				delivery.send(item).await;
+			}
+		});
+	}
+
+	#[inline]
+	fn clear_broker(&mut self) {
+		let Some(ctx) = Arc::get_mut(&mut self.ctx) else {
+			debug_assert!(false, "clear_broker: ctx Arc was contended at statement boundary");
+			static WARNED: AtomicBool = AtomicBool::new(false);
+			if !WARNED.swap(true, Ordering::Relaxed) {
+				tracing::warn!(
+					target: TARGET,
+					"clear_broker: ctx Arc contended at statement boundary; \
+					 broker leaked for this batch and may affect notification \
+					 semantics for the next batch. This is a bug — \
+					 future occurrences will not log."
+				);
+			}
+			return;
+		};
+		ctx.set_broker(None);
+		self.broker_owned_by_executor = false;
+	}
+}
+
+impl Executor {
+	pub fn new(kvs: &Datastore, ctx: FrozenContext, opt: Options) -> Self {
+		Executor {
+			stack: TreeStack::new(),
+			results: Vec::new(),
+			opt,
+			ctx,
+			function_registry: Arc::clone(kvs.function_registry()),
+			cached_session: None,
+			broker_owned_by_executor: false,
+			stream: None,
+		}
+	}
+
+	/// Build an executor that streams its results into `items` as it produces
+	/// them, instead of only accumulating them.
+	pub(crate) fn new_streaming(
+		kvs: &Datastore,
+		ctx: FrozenContext,
+		opt: Options,
+		items: Sender<QueryStreamItem>,
+	) -> Self {
+		let mut this = Self::new(kvs, ctx, opt);
+		this.stream = Some(StreamSink {
+			items,
+			streamed: HashMap::new(),
+			finalised: 0,
+		});
+		this
+	}
+
+	/// Whether a streaming execution has lost its consumer.
+	///
+	/// The remaining statements are abandoned when it has. Stopping only the
+	/// statement that was producing rows would leave the ones after it to run
+	/// and commit — a dropped `SELECT * FROM big; DELETE FROM important` would
+	/// still perform the delete — so the check belongs at the statement
+	/// boundary, beside the executor's other stop conditions.
+	fn consumer_gone(&self) -> bool {
+		self.stream.as_ref().is_some_and(StreamSink::is_closed)
+	}
+
+	/// Whether the statement about to run should stream its rows.
+	///
+	/// False once the consumer has gone away, so a dropped stream stops the
+	/// work rather than producing rows nothing will read.
+	fn streams_rows(&self) -> bool {
+		self.stream.as_ref().is_some_and(|sink| !sink.is_closed())
+	}
+
+	/// The index of the statement currently running.
+	///
+	/// Its result has not been pushed yet, so it is the next slot in
+	/// [`Self::results`]. Statements run one at a time, which is what makes
+	/// that identification sound.
+	fn current_index(&self) -> usize {
+		self.results.len()
+	}
+
+	/// How many rows the statement at `index` streamed, if it streamed.
+	///
+	/// `Some` means its rows are already on their way to the consumer, so its
+	/// value must not be sent again — and it is the row count for that
+	/// statement, which cannot be recovered from its result: a streamed
+	/// statement's value is empty precisely because the rows went elsewhere.
+	fn streamed_rows(&self, index: usize) -> Option<u64> {
+		self.stream.as_ref().and_then(|sink| sink.streamed.get(&index).copied())
+	}
+
+	/// Send the results that have become final, in order.
+	///
+	/// Called once a statement's outcome can no longer change: immediately for
+	/// a statement outside a transaction block, and at the block's resolution
+	/// for every statement inside one, since until then a failure can still
+	/// rewrite them into errors.
+	async fn finalise_results(&mut self) {
+		let Some(sink) = self.stream.as_mut() else {
+			return;
+		};
+		while sink.finalised < self.results.len() {
+			let index = sink.finalised;
+			sink.finalised += 1;
+			let result = &mut self.results[index];
+			// A statement whose rows already went out is owed only its terminal
+			// item; one that failed is owed only that too, since its rows (if
+			// any) are retracted. Anything else contributes its value as well.
+			let items = if result.result.is_ok() && sink.streamed.contains_key(&index) {
+				vec![QueryStreamItem::Finished {
+					index,
+					time: result.time,
+					query_type: result.query_type,
+					error: None,
+				}]
+			} else {
+				// Take the value rather than copy it: it can be a whole
+				// statement's results from the legacy evaluator, and the only
+				// caller that reads them back wants a `LIVE`/`KILL` id, which
+				// is left in place.
+				let owned = match result.query_type {
+					QueryType::Live | QueryType::Kill => result.clone(),
+					QueryType::Other => QueryResult {
+						time: result.time,
+						result: std::mem::replace(
+							&mut result.result,
+							Ok(surrealdb_types::Value::None),
+						),
+						query_type: result.query_type,
+					},
+				};
+				items_for_result(index, owned)
+			};
+			for item in items {
+				sink.send(item).await;
+			}
+		}
+	}
+
+	/// Install a fresh [`StatementCounters`] on the executor's context for
+	/// the next statement and return a clone of the handle so the caller
+	/// can read the counts after the statement returns. The iterator
+	/// (deep in the execution path) inherits the same handle through the
+	/// child contexts it derives from `self.ctx`.
+	///
+	/// Between statements the executor holds the only strong reference to
+	/// `self.ctx`, so `Arc::get_mut` succeeds. If it ever fails — i.e.
+	/// some child kept a strong reference past statement completion —
+	/// the iterator would record into the previous statement's
+	/// counters (or `None`) while `count_result_rows` reads zero from
+	/// the new one, silently underreporting `RETURN NONE` DML row
+	/// counts (the very case `StatementCounters` exists to fix).
+	///
+	/// We treat that as a programmer error: in debug builds it
+	/// panics so tests fail loud; in release builds it logs a `warn`
+	/// (deduped per process) so production telemetry surfaces the bug
+	/// without turning a row-count discrepancy into an outage.
+	fn install_statement_counters(&mut self) -> Arc<StatementCounters> {
+		let counters = StatementCounters::new();
+		if let Some(ctx) = Arc::get_mut(&mut self.ctx) {
+			ctx.set_statement_counters(Some(Arc::clone(&counters)));
+		} else {
+			debug_assert!(
+				false,
+				"install_statement_counters: ctx Arc was contended at statement boundary"
+			);
+			static WARNED: std::sync::atomic::AtomicBool =
+				std::sync::atomic::AtomicBool::new(false);
+			if !WARNED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+				tracing::warn!(
+					target: "surrealdb::core::dbs",
+					"install_statement_counters: ctx Arc contended at statement boundary; \
+					 result_rows on RETURN NONE DML may underreport. This is a bug — \
+					 future occurrences will not log."
+				);
+			}
+		}
+		counters
+	}
+
+	fn execute_option_statement(&mut self, stmt: &OptionStatement) -> Result<()> {
+		// Allowed to run?
+		self.ctx.is_allowed(&self.opt, Action::Edit, ResourceKind::Option, Base::Db)?;
+
+		if stmt.name.eq_ignore_ascii_case("IMPORT") {
+			self.opt.set_import(stmt.what);
+		} else if stmt.name.eq_ignore_ascii_case("FORCE") {
+			let force = if stmt.what {
+				Force::All
+			} else {
+				Force::None
+			};
+			self.opt.force = force;
+		}
+
+		Ok(())
+	}
+
+	/// If slow logging is configured in the current context, evaluate whether the
+	/// statement exceeded the slow threshold and emit a log entry if so.
+	///
+	/// Generic over `S` to accept both concrete statements and wrappers that
+	/// implement `Display` and `VisitExpression`.
+	fn check_slow_log<S: SlowLogVisit + ToSql>(&self, start: &Instant, stm: &S) {
+		if let Some(slow_log) = self.ctx.slow_log() {
+			slow_log.check_log(&self.ctx, start, stm);
+		}
+	}
+
+	/// Dispatch a [`QueryEvent`] to the datastore's installed observer at
+	/// the boundary of a query batch.
+	///
+	/// Aggregates per-statement outcomes captured by the executor while
+	/// running the batch. Counters are derived from `results`: any
+	/// `QueryResult` whose `result` is `Err` is classified as a statement
+	/// error, and the batch outcome is [`Outcome::Error`] if any
+	/// statement errored, otherwise [`Outcome::Success`]. Callers pass
+	/// the slice of [`QueryResult`]s produced by the current batch
+	/// (excluding any from outer batches).
+	fn emit_query_event_for_results(
+		&self,
+		kvs: &Datastore,
+		batch_start: Instant,
+		results: &[QueryResult],
+	) {
+		let total = results.len() as u32;
+		let err = results.iter().filter(|r| r.result.is_err()).count() as u32;
+		let ok = total - err;
+		let outcome = if err > 0 {
+			Outcome::Error
+		} else {
+			Outcome::Success
+		};
+		// Classify the batch error using the FIRST errored statement's
+		// structured `surrealdb_types::Error`. Operators see the
+		// dominant error class for the batch on `surrealdb.query.*`;
+		// per-statement classification happens via
+		// `surrealdb.statement.*` once executor emit sites are wired
+		// to populate it (today only the unexecuted-statement paths
+		// do so explicitly).
+		let error_class = results
+			.iter()
+			.find_map(|r| r.result.as_ref().err())
+			.map(crate::observe::error_class::classify_types_error);
+		kvs.observer().on_query_complete(&QueryEvent {
+			safe: QueryEventSafe {
+				outcome,
+				duration: batch_start.elapsed(),
+				counters: QueryCounters {
+					total,
+					ok,
+					err,
+				},
+				error_class,
+			},
+			ctx: self.ctx.tenant_identity().map(|t| t.to_query_ctx()).unwrap_or_default(),
+		});
+	}
+
+	/// Dispatch a [`StatementEvent`] to the datastore's installed observer.
+	///
+	/// Classification fields (`kind`, `read_only`, optional `sql`) are
+	/// captured up-front by the caller before the originating expression is
+	/// moved into the execution path. This keeps `on_statement_complete`
+	/// reachable from every control-flow branch (early `return`, `continue`,
+	/// or fall-through) without re-examining the consumed statement.
+	///
+	/// `result_rows` is the number of rows the statement returned (SELECT)
+	/// or affected (CREATE / UPDATE / UPSERT / DELETE / RELATE / INSERT).
+	/// Non-DML statements pass `0`. For DML statements with `RETURN NONE`
+	/// the post-RETURN value is empty; the actual affected count is
+	/// captured by the iterator on a per-statement [`StatementCounters`]
+	/// and supplied here by the caller.
+	#[allow(clippy::too_many_arguments)]
+	fn emit_statement_event_cached(
+		&self,
+		kvs: &Datastore,
+		kind: StatementType,
+		read_only: bool,
+		sql: Option<String>,
+		start: &Instant,
+		outcome: Outcome,
+		result_rows: u64,
+		error_class: Option<&'static str>,
+	) {
+		kvs.observer().on_statement_complete(&StatementEvent {
+			safe: StatementEventSafe {
+				kind,
+				outcome,
+				duration: start.elapsed(),
+				read_only,
+				result_rows,
+				error_class,
+			},
+			ctx: self.ctx.tenant_identity().map(|t| t.to_statement_ctx(sql.clone())).unwrap_or(
+				StatementEventCtx {
+					sql,
+					..Default::default()
+				},
+			),
+		});
+	}
+
+	/// Emit a `StatementEvent` for a statement that was rejected
+	/// before execution (transaction-create failure, parent-batch
+	/// timeout, ctx cancellation, …). Centralised so every
+	/// `QueryResult::Err(NotExecuted | TimedOut | Cancelled)` push
+	/// has a matching telemetry event and dashboards do not undercount
+	/// `surrealdb_statement_total{outcome="error"}` on these paths.
+	///
+	/// Duration is `Duration::ZERO` because the statement never ran;
+	/// `read_only` is conservatively `false` because we cannot inspect
+	/// the consumed expression.
+	fn emit_statement_event_unexecuted(
+		&self,
+		kvs: &Datastore,
+		kind: StatementType,
+		error_class: &'static str,
+	) {
+		kvs.observer().on_statement_complete(&StatementEvent {
+			safe: StatementEventSafe {
+				kind,
+				outcome: Outcome::Error,
+				duration: Duration::ZERO,
+				read_only: false,
+				result_rows: 0,
+				error_class: Some(error_class),
+			},
+			ctx: self.ctx.tenant_identity().map(|t| t.to_statement_ctx(None)).unwrap_or_default(),
+		});
+	}
+
+	/// Compute the row count for a completed statement based on its kind,
+	/// the per-statement counter snapshot, and the result the executor
+	/// produced.
+	///
+	/// For DML statements (CREATE / UPDATE / UPSERT / DELETE / RELATE /
+	/// INSERT) the iterator-side [`StatementCounters::affected`] is the
+	/// source of truth: it correctly reports records mutated even when
+	/// `RETURN NONE` (or a mode whose per-document value happens to be
+	/// `Value::None`) suppresses the post-RETURN payload. The value
+	/// shape is consulted only when no counter snapshot is available,
+	/// which never happens on the production hot path but keeps the
+	/// helper safe to call.
+	///
+	/// For non-DML statements the counter is not consulted and the value
+	/// shape is interpreted as before:
+	///
+	/// - `Value::Array` — `array.len()` (SELECT rows after START/LIMIT);
+	/// - `Value::None` / `Value::Null` — `0`;
+	/// - anything else — `1`;
+	/// - `None` (error path with no value to inspect) — `0`.
+	fn count_result_rows(
+		kind: StatementType,
+		counters: Option<&StatementCounters>,
+		value: Option<&Value>,
+	) -> u64 {
+		if kind.is_dml() {
+			if let Some(counters) = counters {
+				return counters.affected();
+			}
+			// Fallback to the value-shape heuristic if no counter was
+			// installed (legacy / test paths).
+			return match value {
+				Some(Value::Array(arr)) => arr.len() as u64,
+				Some(Value::None) | Some(Value::Null) | None => 0,
+				Some(_) => 1,
+			};
+		}
+		match value {
+			Some(Value::Array(arr)) => arr.len() as u64,
+			Some(Value::None) | Some(Value::Null) | None => 0,
+			Some(_) => 1,
+		}
+	}
+
+	/// Get the cached session info, extracting it on first call.
+	///
+	/// Session values don't change between statements in the same
+	/// executor batch, so we extract once and reuse.
+	fn get_session_info(&mut self) -> Option<Arc<crate::exec::context::SessionInfo>> {
+		if let Some(ref cached) = self.cached_session {
+			return Some(Arc::clone(cached));
+		}
+		let session = self.extract_session_info();
+		self.cached_session.clone_from(&session);
+		session
+	}
+
+	/// Extract session information from the FrozenContext.
+	///
+	/// The session is stored as a Value object in the context with keys like
+	/// "ns", "db", "id", "ip", "or", "ac", "rd", "tk".
+	fn extract_session_info(&self) -> Option<std::sync::Arc<crate::exec::context::SessionInfo>> {
+		use crate::exec::context::SessionInfo;
+		use crate::expr::paths::{AC, DB, ID, IP, NS, OR, RD, TK};
+
+		let session_value = self.ctx.value("session")?;
+
+		// Extract fields from the session Value. `Value::String` holds a `Strand`, so we just
+		// move it into `SessionInfo` without the `Strand -> String -> Strand` round-trip the
+		// previous `into_string()` chain incurred on every batch.
+		let ns = match session_value.pick(NS.as_ref()) {
+			Value::String(s) => Some(s),
+			_ => None,
+		};
+
+		let db = match session_value.pick(DB.as_ref()) {
+			Value::String(s) => Some(s),
+			_ => None,
+		};
+
+		let id = match session_value.pick(ID.as_ref()) {
+			Value::Uuid(u) => Some(*u.as_ref()),
+			_ => None,
+		};
+
+		let ip = match session_value.pick(IP.as_ref()) {
+			Value::String(s) => Some(s),
+			_ => None,
+		};
+
+		let origin = match session_value.pick(OR.as_ref()) {
+			Value::String(s) => Some(s),
+			_ => None,
+		};
+
+		let ac = match session_value.pick(AC.as_ref()) {
+			Value::String(s) => Some(s),
+			_ => None,
+		};
+
+		let rd = match session_value.pick(RD.as_ref()) {
+			Value::None => None,
+			v => Some(v),
+		};
+
+		let token = match session_value.pick(TK.as_ref()) {
+			Value::None => None,
+			v => Some(v),
+		};
+
+		// Note: exp is not in the session object, it's in the Session struct
+		// For now, we leave it as None
+		let exp = None;
+
+		Some(std::sync::Arc::new(SessionInfo {
+			ns,
+			db,
+			id,
+			ip,
+			origin,
+			ac,
+			rd,
+			token,
+			exp,
+		}))
+	}
+
+	/// Execute an OperatorPlan and collect results into a Value.
+	///
+	/// This builds an ExecutionContext from the current session state and executes
+	/// the streaming operator plan, collecting all results into an array.
+	/// `stream_rows` is set by the callers that run a **top-level** statement,
+	/// whose values are the statement's own result. It is false where the
+	/// values are consumed rather than returned — a `LET` binding them to a
+	/// param — because those are not the statement's rows and must not reach
+	/// the consumer as such.
+	async fn execute_operator_plan(
+		&mut self,
+		plan: Arc<dyn crate::exec::ExecOperator>,
+		txn: Arc<Transaction>,
+		stream_rows: bool,
+	) -> FlowResult<Value> {
+		use tokio_util::sync::CancellationToken;
+
+		use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
+		use crate::exec::context::{
+			DatabaseContext, ExecutionContext, NamespaceContext, RootContext,
+		};
+
+		/// Guard that stops the timeout task when dropped, so it does not
+		/// outlive the execution it was bounding.
+		///
+		/// The task has to be spawned rather than raced inside the query
+		/// future: the point is for it to fire while the executor is inside an
+		/// operator that is not otherwise yielding to check the deadline.
+		#[cfg(not(target_family = "wasm"))]
+		struct TimeoutGuard(tokio::task::JoinHandle<()>);
+		#[cfg(not(target_family = "wasm"))]
+		impl Drop for TimeoutGuard {
+			fn drop(&mut self) {
+				self.0.abort();
+			}
+		}
+
+		/// Wasm has no runtime to spawn onto and `spawn_local` returns no
+		/// handle to abort, so the task is stopped by a token it waits on
+		/// alongside the timer.
+		#[cfg(target_family = "wasm")]
+		struct TimeoutGuard(CancellationToken);
+		#[cfg(target_family = "wasm")]
+		impl Drop for TimeoutGuard {
+			fn drop(&mut self) {
+				self.0.cancel();
+			}
+		}
+
+		/// Cancels `token` once `timeout` elapses, unless the returned guard is
+		/// dropped first.
+		fn spawn_timeout(timeout: Duration, token: CancellationToken) -> TimeoutGuard {
+			#[cfg(not(target_family = "wasm"))]
+			{
+				TimeoutGuard(tokio::spawn(async move {
+					common::time::sleep(timeout).await;
+					token.cancel();
+				}))
+			}
+			#[cfg(target_family = "wasm")]
+			{
+				let finished = CancellationToken::new();
+				let stop = finished.clone();
+				wasm_bindgen_futures::spawn_local(async move {
+					tokio::select! {
+						_ = common::time::sleep(timeout) => token.cancel(),
+						_ = stop.cancelled() => {}
+					}
+				});
+				TimeoutGuard(finished)
+			}
+		}
+
+		// Derive the streaming-exec cancellation token from the legacy
+		// context's awaitable cancel handle when one is installed (the WS
+		// RPC layer installs it; embedded callers do not). `child_token()`
+		// gives parent-cancels-child semantics, so the same connection
+		// disconnect that trips the legacy executor's `Context::done`
+		// flag also fires the streaming-exec operators' `select!` against
+		// their token (e.g. `SleepPlan`, long-running scans) — without
+		// linking the two we would silently lose WS cancellation on the
+		// streaming-exec path.
+		let cancellation = match self.ctx.cancel_token() {
+			Some(parent) => parent.child_token(),
+			None => CancellationToken::new(),
+		};
+
+		// If a query timeout is configured, cancel the token when it expires.
+		// This lets operators that check the cancellation token (e.g.
+		// SleepPlan, long-running scans) stop promptly instead of running to
+		// completion. The guard stops the task when execution finishes.
+		let _timeout_guard =
+			self.ctx.timeout().map(|timeout| spawn_timeout(timeout, cancellation.clone()));
+
+		// Build the root context using cached session info. The context
+		// snapshot must be fresh per-query because it contains the
+		// transaction reference which changes between statements.
+		let root_ctx = RootContext {
+			ctx: Context::snapshot(&self.ctx).freeze(),
+			function_registry: Arc::clone(&self.function_registry),
+			options: Some(self.opt.clone()),
+			datastore: None,
+			cancellation,
+			auth: Arc::clone(&self.opt.auth),
+			session: self.get_session_info(),
+			current_value: None,
+			skip_fetch_perms: false,
+			computing_field: false,
+			version_stamp: None,
+		};
+
+		// The plan's declared context level is the minimum it needs (see
+		// `ContextLevel`), not a construction target: materialize the highest
+		// level the session's ns/db selection supports. A closure that
+		// arrives as a runtime value (`LET $f = || (SELECT ...); $f()`)
+		// hides its body from the planner, so a database-touching body must
+		// find the database context already in place even though the plan
+		// only declared root. Above the declared minimum the upgrade is
+		// opportunistic — a session pointing at a missing ns/db falls back
+		// to the declared level rather than failing a statement that never
+		// needed more. At or below the minimum, resolution failures surface
+		// exactly as before.
+		//
+		// SECURITY: `USE` no longer implicitly creates namespaces for
+		// sessions without `DEFINE NAMESPACE`-equivalent authorization, so
+		// this must not paper over a missing target by writing a fresh
+		// namespace into the catalog on the read path (which would also
+		// fail on a read-only transaction). `expect_ns_by_name` /
+		// `expect_db_by_name` surface a clean `NsNotFound` / `DbNotFound`
+		// instead.
+		use crate::exec::context::ContextLevel;
+		let required_level = plan.required_context();
+
+		let ns_def = if required_level >= ContextLevel::Namespace {
+			Some(txn.expect_ns_by_name(self.opt.ns()?).await?)
+		} else if let Ok(ns_name) = self.opt.ns() {
+			txn.expect_ns_by_name(ns_name).await.ok()
+		} else {
+			None
+		};
+
+		let db_def = match &ns_def {
+			Some(_) if required_level >= ContextLevel::Database => {
+				Some(txn.expect_db_by_name(self.opt.ns()?, self.opt.db()?).await?)
+			}
+			Some(_) => match (self.opt.ns(), self.opt.db()) {
+				(Ok(ns_name), Ok(db_name)) => txn.expect_db_by_name(ns_name, db_name).await.ok(),
+				_ => None,
+			},
+			None => None,
+		};
+
+		let exec_ctx = match (ns_def, db_def) {
+			(Some(ns_def), Some(db_def)) => ExecutionContext::Database(DatabaseContext {
+				ns_ctx: NamespaceContext {
+					root: root_ctx,
+					ns: ns_def,
+				},
+				db: db_def,
+				field_state_cache: std::sync::Arc::new(tokio::sync::RwLock::new(
+					std::collections::HashMap::new(),
+				)),
+				table_def_cache: std::sync::Arc::new(tokio::sync::RwLock::new(
+					std::collections::HashMap::new(),
+				)),
+				index_def_cache: std::sync::Arc::new(tokio::sync::RwLock::new(
+					std::collections::HashMap::new(),
+				)),
+			}),
+			(Some(ns_def), None) => ExecutionContext::Namespace(NamespaceContext {
+				root: root_ctx,
+				ns: ns_def,
+			}),
+			(None, _) => ExecutionContext::Root(root_ctx),
+		};
+
+		// Execute the plan
+		// Handle control flow signals from execute()
+		let mut stream = match plan.execute(&exec_ctx) {
+			Ok(s) => s,
+			Err(crate::expr::ControlFlow::Return(v)) => {
+				// RETURN - propagate as control flow signal
+				return Err(ControlFlow::Return(v));
+			}
+			Err(crate::expr::ControlFlow::Break) => {
+				return Err(ControlFlow::Break);
+			}
+			Err(crate::expr::ControlFlow::Continue) => {
+				return Err(ControlFlow::Continue);
+			}
+			Err(crate::expr::ControlFlow::Err(e)) => {
+				return Err(ControlFlow::Err(e));
+			}
+		};
+
+		// A row-shaped statement whose rows nothing is waiting to collect can
+		// send each batch onward as it arrives, rather than building the whole
+		// array first. A scalar one cannot: its value IS the single row, so
+		// there is nothing to stream and one item carries it.
+		let streaming = stream_rows && matches!(plan.output_shape(), OutputShape::Rows);
+		let index = self.current_index();
+
+		// Collect all results
+		let mut results = Vec::new();
+		let mut streamed: u64 = 0;
+		while let Some(batch_result) = stream.next().await {
+			match batch_result {
+				Ok(batch) => {
+					if streaming {
+						let values = batch
+							.into_iter()
+							.map(convert_value_to_public_value)
+							.collect::<Result<Vec<_>>>()
+							.map_err(ControlFlow::Err)?;
+						streamed += values.len() as u64;
+						let sink = self.stream.as_ref().expect("streaming implies a sink");
+						sink.send(QueryStreamItem::Rows {
+							index,
+							values,
+						})
+						.await;
+						// A consumer that stopped reading wants no more rows, and
+						// the statement is about to be abandoned anyway.
+						if sink.is_closed() {
+							break;
+						}
+					} else {
+						results.extend(batch.into_values());
+					}
+				}
+				Err(crate::expr::ControlFlow::Err(e)) => {
+					return Err(ControlFlow::Err(e));
+				}
+				Err(crate::expr::ControlFlow::Return(v)) => {
+					// RETURN - propagate as control flow signal
+					return Err(ControlFlow::Return(v));
+				}
+				Err(crate::expr::ControlFlow::Break) => {
+					return Err(ControlFlow::Break);
+				}
+				Err(crate::expr::ControlFlow::Continue) => {
+					return Err(ControlFlow::Continue);
+				}
+			}
+		}
+
+		if streaming {
+			// The rows are already on their way, so the statement's own value is
+			// empty. `streamed` is what tells the caller not to send it again.
+			self.stream
+				.as_mut()
+				.expect("streaming implies a sink")
+				.streamed
+				.insert(index, streamed);
+			return Ok(Value::None);
+		}
+
+		shape_statement_value(plan.output_shape(), results).map_err(ControlFlow::Err)
+	}
+
+	/// Executes a statement which needs a transaction with the supplied
+	/// transaction.
+	///
+	/// This is where a statement is converted to the expression layer on its
+	/// way to an engine: a batch that ends before reaching a statement never
+	/// converts it. Rendering a statement as text converts one too, and
+	/// `dispatch` converts an `OPTION`'s payload, so this is the conversion
+	/// that runs, not the only one.
+	///
+	/// The transaction is already open by the time this runs, so the
+	/// conversion happens inside it and counts against the transaction
+	/// timeout. That is free for most statements and is not for
+	/// `DEFINE USER`/`ALTER USER ... PASSWORD`, whose conversion derives an
+	/// Argon2 hash and a SCRAM verifier — deliberately expensive, and with no
+	/// yield point. Work added to a `From` impl is added here.
+	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
+	async fn execute_plan_in_transaction(
+		&mut self,
+		txn: Arc<Transaction>,
+		start: &Instant,
+		stmt: TopLevelStatement,
+	) -> FlowResult<Value> {
+		/// Helper method to get mutable access to the context
+		macro_rules! ctx_mut {
+			() => {
+				Arc::get_mut(&mut self.ctx)
+					.ok_or_else(|| {
+						EngineError::unreachable(
+							"Tried to unfreeze a Context with multiple references",
+						)
+					})
+					.map_err(anyhow::Error::new)?
+			};
+		}
+		let res = match stmt.into_expr() {
+			TopLevelExpr::Use(stmt) => {
+				// The namespace and database arguments are expressions, and an
+				// expression may read or write the datastore. They are computed
+				// against `self.ctx` below, so the statement's transaction has
+				// to be installed on it first: `Context::tx()` has no fallback
+				// for a context without one.
+				ctx_mut!().set_transaction(Arc::clone(&txn));
+
+				let opt_ref = self.opt.clone();
+
+				let (use_ns, use_db) = match stmt {
+					UseStatement::Default => {
+						if let Some(x) = txn.get_default_config().await? {
+							(x.namespace.clone(), x.database.clone())
+						} else {
+							(None, None)
+						}
+					}
+					UseStatement::Ns(ns) => {
+						let ns = self
+							.stack
+							.enter(|stk| {
+								expr_to_ident(stk, &self.ctx, &opt_ref, None, &ns, "namespace")
+							})
+							.finish()
+							.await?;
+
+						(Some(ns), None)
+					}
+					UseStatement::Db(db) => {
+						let db = self
+							.stack
+							.enter(|stk| {
+								expr_to_ident(stk, &self.ctx, &opt_ref, None, &db, "database")
+							})
+							.finish()
+							.await?;
+
+						(None, Some(db))
+					}
+					UseStatement::NsDb(ns, db) => {
+						let ns = self
+							.stack
+							.enter(|stk| {
+								expr_to_ident(stk, &self.ctx, &opt_ref, None, &ns, "namespace")
+							})
+							.finish()
+							.await?;
+
+						let db = self
+							.stack
+							.enter(|stk| {
+								expr_to_ident(stk, &self.ctx, &opt_ref, None, &db, "database")
+							})
+							.finish()
+							.await?;
+
+						(Some(ns), Some(db))
+					}
+				};
+
+				// SECURITY (GHSA-2v9j): `USE` moves the session's *selected*
+				// namespace/database to caller-supplied operands. The
+				// authenticated Auth level — not the (about-to-be-overwritten)
+				// selected ns/db — is the source of truth for tenant scope, so
+				// the principal must be verified as authorized for the target
+				// BEFORE the switch takes effect (SECURITY_GUIDE section 3).
+				// Without this gate a Database- or Namespace-level principal
+				// could pivot into a foreign tenant and reach any table there
+				// whose PERMISSIONS are satisfiable (e.g. `PERMISSIONS FULL`),
+				// collapsing the namespace/database isolation boundary. This
+				// mirrors the custom-API tenant gate added for
+				// GHSA-848m-r628-vrxw (`api/invocation.rs`, `kvs/ds.rs`), which
+				// had never been applied to the `USE` / `/sql` executor path.
+				// A switch that only changes one of ns/db keeps the other from
+				// the current session (`or(self.opt...)`); Root and anonymous
+				// (`Level::No`) principals are unrestricted by `can_access_ns_db`.
+				let target_ns = use_ns.as_deref().or(self.opt.ns.as_deref());
+				let target_db = use_db.as_deref().or(self.opt.db.as_deref());
+				if let Some(ns_name) = target_ns {
+					let db_name = target_db.unwrap_or_default();
+					if !self.opt.auth.can_access_ns_db(ns_name, db_name) {
+						// Report the narrowest boundary that failed: if the
+						// namespace itself is in scope, the database is the
+						// offending operand, otherwise the namespace is.
+						let err = if self.opt.auth.level().ns() == Some(ns_name) {
+							ExecError::DbNotAllowed {
+								db: db_name.to_owned(),
+							}
+						} else {
+							ExecError::NsNotAllowed {
+								ns: ns_name.to_owned(),
+							}
+						};
+						return Err(ControlFlow::Err(anyhow::Error::new(err)));
+					}
+				}
+
+				// SECURITY: implicit creation of a namespace or database via
+				// `USE` requires the same authorization as the explicit
+				// `DEFINE NAMESPACE` / `DEFINE DATABASE` statements
+				// (SECURITY_GUIDE section 3). Re-selecting an existing
+				// namespace or database is unrestricted; downstream
+				// operations against a non-existent resource surface
+				// `NsNotFound` / `DbNotFound` naturally rather than a
+				// silently auto-created resource the session was never
+				// allowed to create.
+				let create_ns = if let Some(ns_name) = use_ns.as_deref() {
+					if txn.get_ns_by_name(ns_name, None).await?.is_some()
+						|| (!self.ctx.auth_enabled() && self.opt.auth.is_anon())
+					{
+						true
+					} else {
+						self.opt
+							.auth
+							.is_allowed(Action::Edit, &ResourceKind::Namespace.on_root())
+							.is_ok()
+					}
+				} else {
+					false
+				};
+				let create_db = if let Some(db_name) = use_db.as_deref() {
+					let target_ns = use_ns.as_deref().or(self.opt.ns.as_deref());
+					if let Some(ns_name) = target_ns {
+						if txn.get_db_by_name(ns_name, db_name, None).await?.is_some()
+							|| (!self.ctx.auth_enabled() && self.opt.auth.is_anon())
+						{
+							true
+						} else if txn.get_ns_by_name(ns_name, None).await?.is_none()
+							&& self
+								.opt
+								.auth
+								.is_allowed(Action::Edit, &ResourceKind::Namespace.on_root())
+								.is_err()
+						{
+							// SECURITY: `ensure_ns_db` is
+							// `get_or_add_db_upwards(..., upwards = true)`
+							// and silently `get_or_add_ns`-es a missing
+							// parent (see `kvs/tx.rs::get_or_add_db_upwards`).
+							// Without this gate, a namespace-level Editor —
+							// including one on a stale token whose
+							// namespace has since been dropped — could
+							// recreate the parent namespace as a side
+							// effect of `USE NS dropped DB anything` or
+							// `USE DB anything` against a stale
+							// session-level ns.
+							false
+						} else {
+							self.opt
+								.auth
+								.is_allowed(Action::Edit, &ResourceKind::Database.on_ns(ns_name))
+								.is_ok()
+						}
+					} else {
+						false
+					}
+				} else {
+					false
+				};
+
+				let ctx = ctx_mut!();
+
+				// Apply new namespace
+				if let Some(ns) = use_ns {
+					if create_ns {
+						txn.get_or_add_ns(Some(ctx), &ns).await?;
+					}
+
+					let mut session = ctx.value("session").unwrap_or(&Value::None).clone();
+					self.opt.set_ns(Some(ns.as_str().into()));
+					session.put(NS.as_ref(), ns.into());
+					ctx.add_value("session", session.into());
+				}
+
+				// Apply new database
+				if let Some(db) = use_db {
+					let Some(ns) = &self.opt.ns else {
+						return Err(ControlFlow::Err(anyhow::anyhow!(
+							"Cannot use database without namespace"
+						)));
+					};
+
+					if create_db {
+						txn.ensure_ns_db(Some(ctx), ns, &db).await?;
+					}
+
+					let mut session = ctx.value("session").unwrap_or(&Value::None).clone();
+					self.opt.set_db(Some(db.as_str().into()));
+					session.put(DB.as_ref(), db.into());
+					ctx.add_value("session", session.into());
+				}
+
+				// Invalidate cached session info since USE changes ns/db
+				self.cached_session = None;
+
+				// Return the current namespace and database
+				Ok(Value::from(map! {
+					"namespace" => self.opt.ns.as_deref().map(|x| Value::String(x.into())).unwrap_or(Value::None),
+					"database" => self.opt.db.as_deref().map(|x| Value::String(x.into())).unwrap_or(Value::None),
+				}))
+			}
+			TopLevelExpr::Option(_) => {
+				return Err(ControlFlow::Err(anyhow::Error::new(EngineError::unreachable(
+					"TopLevelExpr::Option should have been handled by a calling function",
+				))));
+			}
+
+			TopLevelExpr::Expr(Expr::Let(stm)) => {
+				// Reject protected names first, before any work: avoids planning
+				// or computing a value we'll throw away.
+				if stm.is_protected_set() {
+					return Err(ControlFlow::from(anyhow::Error::new(ExecError::InvalidParam {
+						name: stm.name.to_string(),
+					})));
+				}
+				ctx_mut!().set_transaction(Arc::clone(&txn));
+
+				// Plan the RHS through the streaming pipeline first; fall back
+				// to the legacy `compute()` path on PlannerUnsupported /
+				// PlannerUnimplemented. The streaming pipeline is the same
+				// one a bare `SELECT * FROM t` uses, so a `LET $x = SELECT * FROM t`
+				// no longer pays the legacy recursive evaluator's cost.
+				//
+				// We plan `stm.what` (the RHS), not the LET itself: routing
+				// through `plan_let_statement` would build a `LetPlan` whose
+				// binding lives in `output_context`, which produces a new
+				// `ExecutionContext` local to `execute_operator_plan` that
+				// never reaches `self.ctx`. Planning the RHS directly keeps
+				// the bind-into-session logic in one place — here.
+				let res = match try_plan_expr!(
+					&stm.what,
+					&self.ctx,
+					&self.function_registry,
+					Arc::clone(&txn),
+					Some(Arc::clone(&self.opt.auth))
+				) {
+					// The RHS binds to a param rather than being returned, so its
+					// values are not the statement's rows and must not stream.
+					Ok(plan) => self.execute_operator_plan(plan, Arc::clone(&txn), false).await,
+					Err(Error::Exec(
+						err @ (ExecError::PlannerUnsupported(_)
+						| ExecError::PlannerUnimplemented(_)),
+					)) => {
+						if let ExecError::PlannerUnimplemented(msg) = &err {
+							tracing::warn!("PlannerUnimplemented fallback in top-level LET: {msg}");
+						}
+						self.stack
+							.enter(|stk| {
+								crate::legacy::expr_compute(
+									&stm.what, stk, &self.ctx, &self.opt, None,
+								)
+							})
+							.finish()
+							.await
+					}
+					Err(e) => Err(ControlFlow::Err(anyhow::Error::new(e))),
+				};
+
+				let res = res?;
+				let result = match &stm.kind {
+					Some(kind) => res
+						.coerce_to_kind(kind)
+						.map_err(|e| ExecError::SetCoerce {
+							name: stm.name.to_string(),
+							error: Box::new(e),
+						})
+						.map_err(anyhow::Error::new)?,
+					None => res,
+				};
+
+				// Set the parameter
+				ctx_mut!().add_value(stm.name.clone(), result.into());
+
+				// Check if we dump the slow log
+				self.check_slow_log(start, stm.as_ref());
+				// Finalise transaction, returning nothing unless it couldn't commit
+				Ok(Value::None)
+			}
+			TopLevelExpr::Begin => {
+				return Err(ControlFlow::Err(anyhow::Error::new(ExecError::InvalidStatement(
+					"Cannot BEGIN a transaction within a transaction".to_string(),
+				))));
+			}
+			TopLevelExpr::Commit => {
+				return Err(ControlFlow::Err(anyhow::Error::new(ExecError::InvalidStatement(
+					"Cannot COMMIT without starting a transaction".to_string(),
+				))));
+			}
+			TopLevelExpr::Cancel => {
+				return Err(ControlFlow::Err(anyhow::Error::new(ExecError::InvalidStatement(
+					"Cannot CANCEL without starting a transaction".to_string(),
+				))));
+			}
+			TopLevelExpr::Kill(s) => {
+				Arc::get_mut(&mut self.ctx)
+					.ok_or_else(|| {
+						err::Error::unreachable(
+							"Tried to unfreeze a Context with multiple references",
+						)
+					})
+					.map_err(anyhow::Error::new)?
+					.set_transaction(txn);
+				self.stack
+					.enter(|stk| {
+						crate::legacy::kill_statement_compute(&s, stk, &self.ctx, &self.opt, None)
+					})
+					.finish()
+					.await
+					.map_err(ControlFlow::Err)
+			}
+			TopLevelExpr::Live(s) => {
+				ctx_mut!().set_transaction(txn);
+				self.stack
+					.enter(|stk| {
+						crate::legacy::live_statement_compute(&s, stk, &self.ctx, &self.opt, None)
+					})
+					.finish()
+					.await
+					.map_err(ControlFlow::Err)
+			}
+			TopLevelExpr::Show(s) => {
+				ctx_mut!().set_transaction(txn);
+				crate::legacy::show_statement_compute(&s, &self.ctx, &self.opt, None)
+					.await
+					.map_err(ControlFlow::Err)
+			}
+			TopLevelExpr::Access(s) => {
+				ctx_mut!().set_transaction(txn);
+				self.stack
+					.enter(|stk| {
+						crate::legacy::access_statement_compute(&s, stk, &self.ctx, &self.opt, None)
+					})
+					.finish()
+					.await
+			}
+			// Process all other normal statements
+			TopLevelExpr::Expr(e) => {
+				// Try the new streaming execution path first
+				match try_plan_expr!(
+					&e,
+					&self.ctx,
+					&self.function_registry,
+					Arc::clone(&txn),
+					Some(Arc::clone(&self.opt.auth))
+				) {
+					Ok(plan) => {
+						// Set the transaction on the context
+						ctx_mut!().set_transaction(Arc::clone(&txn));
+
+						// Every caller of this method runs a top-level statement,
+						// so these values are the statement's own result and may
+						// stream.
+						let stream_rows = self.streams_rows();
+						// Build execution context and execute the plan
+						let exec_result =
+							self.execute_operator_plan(plan, Arc::clone(&txn), stream_rows).await;
+
+						self.check_slow_log(start, &e);
+
+						// exec_result is now FlowResult<Value>, propagate directly
+						exec_result
+					}
+					Err(Error::Exec(
+						err @ (ExecError::PlannerUnsupported(_)
+						| ExecError::PlannerUnimplemented(_)),
+					)) => {
+						if let ExecError::PlannerUnimplemented(msg) = &err {
+							tracing::warn!("PlannerUnimplemented fallback in executor: {msg}");
+						}
+						// Fallback to existing compute path
+						ctx_mut!().set_transaction(txn);
+						let res = self
+							.stack
+							.enter(|stk| {
+								crate::legacy::expr_compute(&e, stk, &self.ctx, &self.opt, None)
+							})
+							.finish()
+							.await;
+						self.check_slow_log(start, &e);
+						res
+					}
+					Err(e) => Err(ControlFlow::Err(anyhow::Error::new(e))),
+				}
+			}
+		};
+
+		// Catch cancellation during running.
+		match self.ctx.done(true)? {
+			None => res,
+			Some(Reason::Timedout(d)) => {
+				Err(ControlFlow::from(anyhow::anyhow!(EngineError::QueryTimedout(d.0))))
+			}
+			Some(Reason::Canceled) => {
+				Err(ControlFlow::from(anyhow::anyhow!(EngineError::QueryCancelled)))
+			}
+		}
+	}
+
+	/// Execute a query not wrapped in a transaction block.
+	async fn execute_bare_statement(
+		&mut self,
+		kvs: &Datastore,
+		start: &Instant,
+		stmt: TopLevelStatement,
+	) -> Result<Value> {
+		// Don't even try to run if the query should already be finished.
+		match self.ctx.done(true)? {
+			None => {}
+			Some(Reason::Timedout(d)) => {
+				bail!(EngineError::QueryTimedout(d.0));
+			}
+			Some(Reason::Canceled) => {
+				bail!(EngineError::QueryCancelled);
+			}
+		}
+
+		self.execute_plan_impl(kvs, start, stmt).await
+	}
+
+	async fn execute_plan_impl(
+		&mut self,
+		kvs: &Datastore,
+		start: &Instant,
+		stmt: TopLevelStatement,
+	) -> Result<Value> {
+		self.broker_owned_by_executor = false;
+		let result = self.execute_plan_impl_inner(kvs, start, stmt).await;
+		if self.broker_owned_by_executor {
+			self.clear_broker();
+		}
+		result
+	}
+
+	async fn execute_plan_impl_inner(
+		&mut self,
+		kvs: &Datastore,
+		start: &Instant,
+		stmt: TopLevelStatement,
+	) -> Result<Value> {
+		// The mode is chosen before anything is converted: the predicate
+		// answers from the statement's syntax alone, so which kind of
+		// transaction to open is known without building the expression tree.
+		let transaction_type = if stmt.read_only() {
+			TransactionType::Read
+		} else {
+			TransactionType::Write
+		};
+		let txn = Arc::new(
+			kvs.transaction(transaction_type)
+				.await?
+				.with_tenant_identity(self.ctx.tenant_identity().cloned())
+				.with_write_keys_limit(kvs.transaction_max_write_keys()),
+		);
+		let receiver = self.prepare_broker(
+			matches!(transaction_type, TransactionType::Write),
+			kvs.live_query_broker(),
+		);
+
+		let exec_result = match kvs.transaction_timeout() {
+			Some(timeout) => {
+				match common::time::timeout(
+					timeout,
+					self.execute_plan_in_transaction(Arc::clone(&txn), start, stmt),
+				)
+				.await
+				{
+					Ok(res) => res,
+					Err(_) => {
+						let _ = txn.cancel().await;
+						bail!(DatastoreError::TransactionTimedout(timeout.into()))
+					}
+				}
+			}
+			None => self.execute_plan_in_transaction(Arc::clone(&txn), start, stmt).await,
+		};
+
+		match exec_result {
+			Ok(value) | Err(ControlFlow::Return(value)) => {
+				// non-writable transactions might return an error on commit.
+				// So cancel them instead. This is fine since a non-writable transaction
+				// has nothing to commit anyway.
+				if let TransactionType::Read = transaction_type {
+					let _ = txn.cancel().await;
+					return Ok(value);
+				}
+
+				if let Err(e) = txn.commit().await {
+					// Propagate a transaction conflict unwrapped so its
+					// structured kind (`TransactionConflict`, wire -32009)
+					// survives the conversion to a result row and SDK
+					// `.retry()` can recognise it. Wrapping it in
+					// `QueryNotExecuted` (as non-conflict commit failures are)
+					// would erase that signal.
+					if crate::kvs::is_retryable_transaction_conflict(&e) {
+						return Err(e);
+					}
+					// A commit whose outcome is unknown propagates unwrapped for
+					// the same reason: `QueryNotExecuted` asserts the work did
+					// not happen, and here it may have. Callers that read that
+					// as "safe to replay" would double-apply a non-idempotent
+					// statement.
+					if crate::kvs::is_indeterminate_commit(&e) {
+						return Err(e);
+					}
+					bail!(DatastoreError::QueryNotExecuted {
+						message: e.to_string(),
+					});
+				}
+
+				// Flush buffered notifications only after the write is durable. Failed commits and
+				// cancelled transactions drop the receiver without delivery.
+				if let Some(prepared) = receiver {
+					Self::flush_live_query_notifications(prepared);
+				}
+
+				Ok(value)
+			}
+			Err(ControlFlow::Continue) | Err(ControlFlow::Break) => {
+				let _ = txn.cancel().await;
+				bail!(ExecError::InvalidControlFlow)
+			}
+			Err(ControlFlow::Err(e)) => {
+				let _ = txn.cancel().await;
+				Err(e)
+			}
+		}
+	}
+
+	/// Execute the begin statement and all statements after which are within a
+	/// transaction block.
+	async fn execute_begin_statement<S>(
+		&mut self,
+		kvs: &Datastore,
+		stream: Pin<&mut S>,
+	) -> Result<()>
+	where
+		S: Stream<Item = Result<TopLevelStatement>>,
+	{
+		self.broker_owned_by_executor = false;
+		let result = self.execute_begin_statement_impl(kvs, stream).await;
+		if self.broker_owned_by_executor {
+			self.clear_broker();
+		}
+		result
+	}
+
+	async fn execute_begin_statement_impl<S>(
+		&mut self,
+		kvs: &Datastore,
+		mut stream: Pin<&mut S>,
+	) -> Result<()>
+	where
+		S: Stream<Item = Result<TopLevelStatement>>,
+	{
+		let Ok(txn) = kvs.transaction(TransactionType::Write).await.map(|tx| {
+			tx.with_tenant_identity(self.ctx.tenant_identity().cloned())
+				.with_write_keys_limit(kvs.transaction_max_write_keys())
+		}) else {
+			// couldn't create a transaction.
+			// Fast forward until we hit CANCEL or COMMIT
+			while let Some(stmt) = stream.next().await {
+				yield_now!();
+				let stmt = stmt?;
+				if let Dispatch::Cancel | Dispatch::Commit = stmt.dispatch() {
+					return Ok(());
+				}
+
+				let kind = stmt.statement_type();
+				self.results.push(QueryResult {
+					time: Duration::ZERO,
+					result: Err(TypesError::query(
+						"Tried to start a transaction while another transaction was open"
+							.to_string(),
+						Some(QueryError::NotExecuted),
+					)),
+					query_type: QueryType::Other,
+				});
+				self.emit_statement_event_unexecuted(
+					kvs,
+					kind,
+					crate::observe::error_class::TXN_CREATE_FAILED,
+				);
+			}
+
+			// Ran out of statements but still didn't hit a COMMIT or CANCEL
+			// Just break as we can't do anything else since the query is already
+			// effectively canceled.
+			return Ok(());
+		};
+		let txn = Arc::new(txn);
+
+		match kvs.transaction_timeout() {
+			Some(timeout) => {
+				let start_results = self.results.len();
+				match common::time::timeout(
+					timeout,
+					self.execute_begin_statement_inner(kvs, Arc::clone(&txn), stream),
+				)
+				.await
+				{
+					Ok(result) => result,
+					Err(_) => {
+						let _ = txn.cancel().await;
+						let timed_out_count = self.results.len().saturating_sub(start_results);
+						for res in &mut self.results[start_results..] {
+							res.query_type = QueryType::Other;
+							res.result = Err(TypesError::query(
+								format!(
+									"The transaction timed out: {}",
+									crate::val::Duration::from(timeout)
+								),
+								Some(QueryError::TimedOut {
+									duration: timeout,
+								}),
+							));
+						}
+						// Emit one statement event per result that the
+						// timeout retroactively turned into a failure.
+						// We don't have the original statement kind any
+						// more (the ast was consumed), so collapse to
+						// `Other`; consumers care primarily about the
+						// `error_class` and the `outcome` here.
+						for _ in 0..timed_out_count {
+							self.emit_statement_event_unexecuted(
+								kvs,
+								StatementType::Other,
+								crate::observe::error_class::TXN_TIMEOUT,
+							);
+						}
+						bail!(DatastoreError::TransactionTimedout(timeout.into()))
+					}
+				}
+			}
+			None => self.execute_begin_statement_inner(kvs, txn, stream).await,
+		}
+	}
+
+	async fn execute_begin_statement_inner<S>(
+		&mut self,
+		kvs: &Datastore,
+		txn: Arc<Transaction>,
+		mut stream: Pin<&mut S>,
+	) -> Result<()>
+	where
+		S: Stream<Item = Result<TopLevelStatement>>,
+	{
+		// Create a sender for this transaction only if the context allows for
+		// notifications.
+		let receiver = self.prepare_broker(true, kvs.live_query_broker());
+		let start_results = self.results.len();
+		let mut skip_remaining = false;
+
+		// loop over the statements until we hit a cancel or a commit statement.
+		while let Some(stmt) = stream.next().await {
+			// A block whose consumer has gone away is abandoned mid-way, which
+			// falls through to the missing-COMMIT tail below and cancels the
+			// transaction. Rolling back is the safe reading of "nobody is
+			// waiting for this": the alternative is committing writes for a
+			// query the caller stopped listening to.
+			if self.consumer_gone() {
+				break;
+			}
+			yield_now!();
+			let stmt = match stmt {
+				Ok(x) => x,
+				Err(e) => {
+					// make sure the transaction is properly canceled.
+					let _ = txn.cancel().await;
+					return Err(e);
+				}
+			};
+
+			// check for timeout and cancellation.
+			//
+			// `done` reports a timeout or cancellation as `Ok(Some(reason))` and a
+			// crossed memory threshold as `Err`. Both must cancel the transaction
+			// before unwinding: an abandoned transaction keeps its buffered writes
+			// alive, so returning the memory error without cancelling holds on to
+			// the very memory the threshold check exists to release.
+			let done = match self.ctx.done(true) {
+				Ok(done) => done,
+				Err(e) => {
+					let _ = txn.cancel().await;
+					// The rollback discards the statements already recorded as
+					// successful, so their results have to say so.
+					for res in &mut self.results[start_results..] {
+						res.query_type = QueryType::Other;
+						res.result = Err(TypesError::query(
+							"The query was not executed due to a cancelled transaction".to_string(),
+							Some(QueryError::Cancelled),
+						));
+					}
+					return Err(e);
+				}
+			};
+			if let Some(done) = done {
+				// A cancellation happened. Cancel the transaction, fast-forward the remaining
+				// results and then return.
+				let _ = txn.cancel().await;
+
+				let cancelled_count = self.results.len().saturating_sub(start_results);
+				for res in &mut self.results[start_results..] {
+					res.query_type = QueryType::Other;
+					res.result = Err(TypesError::query(
+						"The query was not executed due to a cancelled transaction".to_string(),
+						Some(QueryError::Cancelled),
+					));
+				}
+				let cancel_class = match done {
+					Reason::Timedout(_) => crate::observe::error_class::CTX_TIMEOUT,
+					Reason::Canceled => crate::observe::error_class::CTX_CANCELLED,
+				};
+				for _ in 0..cancelled_count {
+					self.emit_statement_event_unexecuted(kvs, StatementType::Other, cancel_class);
+				}
+
+				while let Some(stmt) = stream.next().await {
+					yield_now!();
+					let stmt = stmt?;
+					let kind = stmt.statement_type();
+					match stmt.dispatch() {
+						Dispatch::Commit => {
+							// After timeout/cancel the txn is already gone: COMMIT cannot succeed.
+							// Still emit one `QueryResult` for this COMMIT statement so the batch
+							// has one row per statement (mirrors successful COMMIT, which
+							// pushes Ok(NONE) in the main `TopLevelExpr::Commit` branch
+							// below) (#7207).
+							self.results.push(QueryResult {
+								time: Duration::ZERO,
+								result: Err(match done {
+									Reason::Timedout(d) => TypesError::query(
+										format!("Cannot COMMIT: timed out ({d})"),
+										Some(QueryError::TimedOut {
+											duration: d.0,
+										}),
+									),
+									Reason::Canceled => TypesError::query(
+										"Cannot COMMIT: the transaction was cancelled".to_string(),
+										Some(QueryError::Cancelled),
+									),
+								}),
+								query_type: QueryType::Other,
+							});
+							self.emit_statement_event_unexecuted(kvs, kind, cancel_class);
+							return Ok(());
+						}
+						dispatch => {
+							let result = Err(match done {
+								Reason::Timedout(d) => TypesError::query(
+									format!("Timed out: {d}"),
+									Some(QueryError::TimedOut {
+										duration: d.0,
+									}),
+								),
+								Reason::Canceled => TypesError::query(
+									"The query was not executed due to a cancelled transaction"
+										.to_string(),
+									Some(QueryError::Cancelled),
+								),
+							});
+							self.results.push(QueryResult {
+								time: Duration::ZERO,
+								result,
+								query_type: QueryType::Other,
+							});
+							self.emit_statement_event_unexecuted(kvs, kind, cancel_class);
+							if matches!(dispatch, Dispatch::Cancel) {
+								return Ok(());
+							}
+						}
+					}
+				}
+
+				// Missing CANCEL/COMMIT statement, statement already canceled so nothing todo.
+				return Ok(());
+			}
+
+			let dispatch = stmt.dispatch();
+			if skip_remaining && !matches!(dispatch, Dispatch::Cancel | Dispatch::Commit) {
+				continue;
+			}
+
+			trace!(target: TARGET, statement = %stmt.to_sql(), "Executing statement");
+
+			let query_type = stmt.query_type();
+
+			// Capture classification up-front so we can emit a
+			// `StatementEvent` regardless of which control-flow branch the
+			// match below takes. The statement itself is moved into the
+			// match, so anything the observer needs must be derived here.
+			let statement_type = stmt.statement_type();
+			let statement_read_only = stmt.read_only();
+			let sql_text = kvs.observer().needs_statement_text().then(|| stmt.to_sql());
+
+			let before = Instant::now();
+			// Row count populated by the `stmt =>` arm below before it
+			// consumes the internal `Value`. Every other arm of the
+			// match either returns early or contributes a non-DML
+			// statement, so 0 is the right default.
+			let mut stmt_result_rows: u64 = 0;
+			let result = match dispatch {
+				Dispatch::Begin => {
+					let _ = txn.cancel().await;
+					// tried to begin a transaction within a transaction.
+
+					for res in &mut self.results[start_results..] {
+						res.query_type = QueryType::Other;
+						res.result = Err(TypesError::query(
+							"The query was not executed due to a failed transaction".to_string(),
+							Some(QueryError::NotExecuted),
+						));
+					}
+
+					self.results.push(QueryResult {
+						time: Duration::ZERO,
+						result: Err(TypesError::internal(
+							"Tried to start a transaction while another transaction was open"
+								.to_string(),
+						)),
+						query_type: QueryType::Other,
+					});
+
+					self.emit_statement_event_cached(
+						kvs,
+						statement_type,
+						statement_read_only,
+						sql_text,
+						&before,
+						Outcome::Error,
+						0,
+						Some(crate::observe::error_class::INTERNAL),
+					);
+
+					while let Some(stmt) = stream.next().await {
+						yield_now!();
+						let stmt = stmt?;
+						match stmt.dispatch() {
+							Dispatch::Commit => {
+								self.results.push(QueryResult {
+									time: Duration::ZERO,
+									result: Err(TypesError::query(
+										"Cannot COMMIT: the transaction was aborted due to a nested BEGIN"
+											.to_string(),
+										Some(QueryError::NotExecuted),
+									)),
+									query_type: QueryType::Other,
+								});
+								return Ok(());
+							}
+							dispatch => {
+								self.results.push(QueryResult {
+									time: Duration::ZERO,
+									result: Err(TypesError::query(
+										"The query was not executed due to a failed transaction"
+											.to_string(),
+										Some(QueryError::NotExecuted),
+									)),
+									query_type: QueryType::Other,
+								});
+								if matches!(dispatch, Dispatch::Cancel) {
+									return Ok(());
+								}
+							}
+						}
+					}
+
+					// Missing CANCEL/COMMIT statement, statement already canceled so nothing todo.
+					return Ok(());
+				}
+				Dispatch::Cancel => {
+					let _ = txn.cancel().await;
+
+					// update the results indicating cancelation.
+					for res in &mut self.results[start_results..] {
+						res.query_type = QueryType::Other;
+						res.result = Err(TypesError::query(
+							"The query was not executed due to a cancelled transaction".to_string(),
+							Some(QueryError::Cancelled),
+						));
+					}
+
+					// CANCEL returns NONE
+					self.results.push(QueryResult {
+						time: before.elapsed(),
+						result: Ok(convert_value_to_public_value(Value::None)?),
+						query_type: QueryType::Other,
+					});
+
+					self.emit_statement_event_cached(
+						kvs,
+						statement_type,
+						statement_read_only,
+						sql_text,
+						&before,
+						Outcome::Success,
+						0,
+						None,
+					);
+
+					return Ok(());
+				}
+				Dispatch::Commit => {
+					// Commit the transaction.
+					// If error undo results.
+					let e = if let Err(e) = txn.commit().await {
+						e
+					} else {
+						// Successfully commited. everything is fine.
+
+						// Flush buffered notifications only after COMMIT succeeds. Rollback and
+						// failed COMMIT paths drop the receiver without delivery.
+						if let Some(prepared) = receiver {
+							Self::flush_live_query_notifications(prepared);
+						}
+
+						// COMMIT returns NONE
+						self.results.push(QueryResult {
+							time: before.elapsed(),
+							result: Ok(convert_value_to_public_value(Value::None)?),
+							query_type: QueryType::Other,
+						});
+
+						self.emit_statement_event_cached(
+							kvs,
+							statement_type,
+							statement_read_only,
+							sql_text,
+							&before,
+							Outcome::Success,
+							0,
+							None,
+						);
+
+						return Ok(());
+					};
+
+					// `txn.commit()` failed (e.g. constraint on commit, or txn already finished).
+					// Surface the failure on a dedicated COMMIT result row; mark prior statement
+					// slots as not executed so nothing implies a successful commit (#7207).
+					//
+					// Unless the commit's outcome is unknown, in which case "not
+					// executed" is a false statement about statements that may
+					// well have been applied.
+					let indeterminate = crate::kvs::is_indeterminate_commit(&e);
+					for res in &mut self.results[start_results..] {
+						res.query_type = QueryType::Other;
+						res.result = Err(if indeterminate {
+							TypesError::query(
+								"The transaction's commit outcome is unknown, so whether this \
+								 query was applied is undetermined"
+									.to_string(),
+								None,
+							)
+						} else {
+							TypesError::query(
+								"The query was not executed due to a failed transaction"
+									.to_string(),
+								Some(QueryError::NotExecuted),
+							)
+						});
+					}
+
+					// A retryable write conflict keeps its structured
+					// TransactionConflict kind (wire -32009) so SDK
+					// `isRetryableConflict()`/`.retry()` fire. An unknown
+					// outcome carries no kind, so neither the conflict-retry
+					// path nor a not-executed reading applies. Anything else
+					// (constraint failure, txn already finished) stays
+					// NotExecuted.
+					let commit_error_kind = if crate::kvs::is_retryable_transaction_conflict(&e) {
+						Some(QueryError::TransactionConflict)
+					} else if indeterminate {
+						None
+					} else {
+						Some(QueryError::NotExecuted)
+					};
+					self.results.push(QueryResult {
+						time: before.elapsed(),
+						result: Err(TypesError::query(
+							format!("Cannot COMMIT: {e}"),
+							commit_error_kind,
+						)),
+						query_type: QueryType::Other,
+					});
+
+					// `Cannot COMMIT` surfaces as a caller-visible failure ("the
+					// transaction your statements ran inside could not
+					// commit"), not an internal fault. An unknown outcome still
+					// reaches storage alerting through the `surrealdb.transaction.*`
+					// family, which classifies the same error independently.
+					self.emit_statement_event_cached(
+						kvs,
+						statement_type,
+						statement_read_only,
+						sql_text,
+						&before,
+						Outcome::Error,
+						0,
+						Some(crate::observe::error_class::CLIENT),
+					);
+
+					return Ok(());
+				}
+				Dispatch::Option(option) => match self.execute_option_statement(&option) {
+					Ok(_) => {
+						// OPTION returns NONE
+						self.results.push(QueryResult {
+							time: before.elapsed(),
+							result: Ok(convert_value_to_public_value(Value::None)?),
+							query_type: QueryType::Other,
+						});
+						self.emit_statement_event_cached(
+							kvs,
+							statement_type,
+							statement_read_only,
+							sql_text,
+							&before,
+							Outcome::Success,
+							0,
+							None,
+						);
+						continue;
+					}
+					Err(e) => Err(TypesError::internal(e.to_string())),
+				},
+				Dispatch::Runnable => {
+					// Install fresh per-statement counters so DML
+					// iterators inside this BEGIN/COMMIT block can
+					// surface affected-row counts independently of the
+					// post-RETURN value shape.
+					let counters = self.install_statement_counters();
+					let statement_index = self.current_index();
+					let r: Result<Value> = match self
+						.execute_plan_in_transaction(Arc::clone(&txn), &before, stmt)
+						.await
+					{
+						Ok(x) => Ok(x),
+						Err(ControlFlow::Return(value)) => {
+							skip_remaining = true;
+							Ok(value)
+						}
+						Err(ControlFlow::Break) | Err(ControlFlow::Continue) => {
+							Err(anyhow!(ExecError::InvalidControlFlow))
+						}
+						Err(ControlFlow::Err(e)) => {
+							for res in &mut self.results[start_results..] {
+								res.query_type = QueryType::Other;
+								res.result = Err(TypesError::query(
+									"The query was not executed due to a failed transaction"
+										.to_string(),
+									Some(QueryError::NotExecuted),
+								));
+							}
+
+							// Convert the anyhow error before pushing so we can both
+							// classify it for the metric attribute and store it on the
+							// result row in a single move.
+							let typed_err = types_error_from_anyhow(e);
+							let error_class =
+								Some(crate::observe::error_class::classify_types_error(&typed_err));
+
+							// statement return an error. Consume all the other statement until
+							// we hit a cancel or commit.
+							self.results.push(QueryResult {
+								time: before.elapsed(),
+								result: Err(typed_err),
+								query_type,
+							});
+
+							self.emit_statement_event_cached(
+								kvs,
+								statement_type,
+								statement_read_only,
+								sql_text,
+								&before,
+								Outcome::Error,
+								0,
+								error_class,
+							);
+
+							let _ = txn.cancel().await;
+
+							while let Some(stmt) = stream.next().await {
+								yield_now!();
+								let stmt = stmt?;
+								match stmt.dispatch() {
+									Dispatch::Commit => {
+										// Aborted txn: COMMIT must error (same intent as
+										// `txn.commit()` failure above — descriptive
+										// `Cannot COMMIT:` prefix) (#7207).
+										self.results.push(QueryResult {
+												time: Duration::ZERO,
+												result: Err(TypesError::query(
+													"Cannot COMMIT: the transaction was aborted due to a prior error"
+														.to_string(),
+													Some(QueryError::NotExecuted),
+												)),
+												query_type: QueryType::Other,
+											});
+										return Ok(());
+									}
+									Dispatch::Cancel => {
+										return Ok(());
+									}
+									_ => {
+										self.results.push(QueryResult {
+												time: Duration::ZERO,
+												result: Err(TypesError::query(
+													"The query was not executed due to a cancelled transaction"
+														.to_string(),
+													Some(QueryError::Cancelled),
+												)),
+												query_type: QueryType::Other,
+											});
+									}
+								}
+							}
+
+							// ran out of statements before the transaction ended.
+							// Just break as we have nothing else we can do.
+							return Ok(());
+						}
+					};
+
+					// Count rows from the internal Value before it's
+					// consumed by the conversion to PublicValue. Non-DML
+					// statement kinds collapse to 0 inside the helper;
+					// DML statements consult the iterator-side counter
+					// so RETURN NONE / fresh CREATE etc. report
+					// accurately.
+					// A streamed statement's rows never reach its value, so the
+					// count comes from what the sink sent rather than from the
+					// value shape, which would read as zero.
+					let rows = match self.streamed_rows(statement_index) {
+						Some(streamed) => streamed,
+						None => Self::count_result_rows(
+							statement_type,
+							Some(counters.as_ref()),
+							r.as_ref().ok(),
+						),
+					};
+					stmt_result_rows = rows;
+
+					match r {
+						Ok(value) => match convert_value_to_public_value(value) {
+							Ok(value) => Ok(value),
+							Err(err) => {
+								// This returns from the function with the
+								// transaction still open, so cancel it first:
+								// an abandoned transaction is never rolled
+								// back and holds its buffered writes.
+								let _ = txn.cancel().await;
+								return Err(err);
+							}
+						},
+						Err(err) => Err(TypesError::internal(err.to_string())),
+					}
+				}
+			};
+
+			let outcome = Outcome::from(&result);
+			let error_class =
+				result.as_ref().err().map(crate::observe::error_class::classify_types_error);
+			self.emit_statement_event_cached(
+				kvs,
+				statement_type,
+				statement_read_only,
+				sql_text,
+				&before,
+				outcome,
+				stmt_result_rows,
+				error_class,
+			);
+
+			self.results.push(QueryResult {
+				time: before.elapsed(),
+				result,
+				query_type,
+			});
+		}
+
+		// we ran out of query but we still have an open transaction.
+		// Be conservative and treat this essentially as a CANCEL statement.
+		let _ = txn.cancel().await;
+
+		for res in &mut self.results[start_results..] {
+			res.query_type = QueryType::Other;
+			res.result = Err(TypesError::internal("Missing COMMIT statement".to_string()));
+		}
+
+		Ok(())
+	}
+
+	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
+	pub(crate) async fn execute_statements(
+		kvs: &Datastore,
+		ctx: FrozenContext,
+		opt: Options,
+		statements: Vec<TopLevelStatement>,
+	) -> Result<Vec<QueryResult>> {
+		let stream = futures::stream::iter(statements.into_iter().map(Ok));
+		Self::execute_statement_stream(kvs, ctx, opt, false, stream).await
+	}
+
+	/// Execute a batch of statements with an existing transaction
+	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
+	pub(crate) async fn execute_statements_with_transaction(
+		kvs: &Datastore,
+		ctx: FrozenContext,
+		opt: Options,
+		statements: Vec<TopLevelStatement>,
+	) -> Result<Vec<QueryResult>> {
+		let mut executor = Self::new(kvs, ctx, opt);
+		executor.run_with_transaction(kvs, statements).await?;
+		Ok(executor.results)
+	}
+
+	/// Execute a logical plan with an existing transaction, streaming results
+	/// into `items` as they are produced.
+	///
+	/// The transaction spans requests and only its owner can commit it, so a
+	/// statement's result is final as soon as the statement ends — there is no
+	/// block resolution to wait for, and whether the caller later commits is
+	/// its own affair, exactly as on the buffered path.
+	pub(crate) async fn execute_statements_streaming_with_transaction(
+		kvs: &Datastore,
+		ctx: FrozenContext,
+		opt: Options,
+		statements: Vec<TopLevelStatement>,
+		items: Sender<QueryStreamItem>,
+	) -> Result<Vec<QueryResult>> {
+		let mut executor = Self::new_streaming(kvs, ctx, opt, items);
+		let outcome = executor.run_with_transaction(kvs, statements).await;
+		executor.finalise_results().await;
+		outcome.map(|()| executor.results)
+	}
+
+	/// Shared body: run every statement against the transaction already on the
+	/// context, accumulating results on `self` and streaming them when this
+	/// executor streams.
+	async fn run_with_transaction(
+		&mut self,
+		kvs: &Datastore,
+		statements: Vec<TopLevelStatement>,
+	) -> Result<()> {
+		// The transaction is already set in the context
+		// Execute each expression with the transaction
+		let tx = self.ctx.tx();
+		let batch_start = Instant::now();
+		let results_start = self.results.len();
+
+		for stmt in statements {
+			// See `consumer_gone`: the rest of the batch is abandoned rather
+			// than run. The transaction spans requests and its owner still
+			// decides whether to commit.
+			if self.consumer_gone() {
+				break;
+			}
+			let start = Instant::now();
+			// Capture classification before the statement is moved
+			// into `execute_plan_in_transaction` so we can emit a
+			// matching `StatementEvent` regardless of which control-flow
+			// branch the result lands in (mirrors the cached helper
+			// pattern used in `run_statement_stream`).
+			let statement_type = stmt.statement_type();
+			let statement_read_only = stmt.kind_reads_only();
+			// A `LIVE SELECT` run inside a caller-owned transaction has to
+			// report itself as one: the transports register the subscription
+			// off this field, and one they never see is one they never tear
+			// down when the session ends or its principal changes.
+			let query_type = stmt.query_type();
+			let counters = self.install_statement_counters();
+			let result = self.execute_plan_in_transaction(Arc::clone(&tx), &start, stmt).await;
+
+			let time = start.elapsed();
+			let query_result = match result {
+				Ok(value) | Err(ControlFlow::Return(value)) => QueryResult {
+					time,
+					result: crate::val::convert_value_to_public_value(value)
+						.map_err(|e| TypesError::internal(e.to_string())),
+					query_type,
+				},
+				Err(ControlFlow::Err(e)) => QueryResult {
+					time,
+					result: Err(types_error_from_anyhow(e)),
+					query_type: QueryType::Other,
+				},
+				Err(ControlFlow::Continue) | Err(ControlFlow::Break) => QueryResult {
+					time,
+					result: Err(TypesError::internal("Invalid control flow".to_string())),
+					query_type: QueryType::Other,
+				},
+			};
+			let outcome = Outcome::from(&query_result.result);
+			let error_class = query_result
+				.result
+				.as_ref()
+				.err()
+				.map(crate::observe::error_class::classify_types_error);
+			// Counters are accurate for DML (SELECT row counts come
+			// from the value shape, which we no longer have post
+			// conversion — passing `None` is fine since the helper
+			// short-circuits to counter-driven counts on DML and
+			// returns 0 on non-DML when value is `None`, matching the
+			// previous behaviour for this entry point).
+			let stmt_result_rows =
+				Self::count_result_rows(statement_type, Some(counters.as_ref()), None);
+			self.emit_statement_event_cached(
+				kvs,
+				statement_type,
+				statement_read_only,
+				None,
+				&start,
+				outcome,
+				stmt_result_rows,
+				error_class,
+			);
+			self.results.push(query_result);
+			// The statement is over and this transaction spans requests, so
+			// nothing later in this plan can rewrite it.
+			self.finalise_results().await;
+		}
+
+		self.emit_query_event_for_results(kvs, batch_start, &self.results[results_start..]);
+		Ok(())
+	}
+
+	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
+	pub(crate) async fn execute_stream<S>(
+		kvs: &Datastore,
+		ctx: FrozenContext,
+		opt: Options,
+		skip_success_results: bool,
+		stream: S,
+	) -> Result<Vec<QueryResult>>
+	where
+		S: Stream<Item = Result<sql::TopLevelExpr>>,
+	{
+		Self::execute_statement_stream(
+			kvs,
+			ctx,
+			opt,
+			skip_success_results,
+			stream.map(|x| x.map(TopLevelStatement::Ast)),
+		)
+		.await
+	}
+
+	#[instrument(
+		level = "debug",
+		name = "executor",
+		target = "surrealdb::core::dbs",
+		skip_all,
+		fields(
+			// Pre-declared placeholder fields populated by the
+			// enterprise OTEL enrichment observer. Tracing's
+			// `Span::record(field, value)` only updates fields that
+			// were declared at span-creation time; declaring them as
+			// `tracing::field::Empty` here lets the observer fill in
+			// tenant attributes without touching every executor
+			// internal. Community builds pay zero cost — the
+			// enrichment observer never attaches and the placeholders
+			// stay empty.
+			surrealdb.namespace = tracing::field::Empty,
+			surrealdb.database = tracing::field::Empty,
+			surrealdb.user = tracing::field::Empty,
+			surrealdb.session_id = tracing::field::Empty,
+			surrealdb.statement_type = tracing::field::Empty,
+		),
+	)]
+	pub(crate) async fn execute_statement_stream<S>(
+		kvs: &Datastore,
+		ctx: FrozenContext,
+		opt: Options,
+		skip_success_results: bool,
+		stream: S,
+	) -> Result<Vec<QueryResult>>
+	where
+		S: Stream<Item = Result<TopLevelStatement>>,
+	{
+		let mut this = Executor::new(kvs, ctx, opt);
+		this.run_statement_stream(kvs, skip_success_results, stream).await?;
+		Ok(this.results)
+	}
+
+	/// Execute a batch of statements, sending results into `items` as they are
+	/// produced rather than collecting them.
+	///
+	/// Returns the results as well, so an embedded caller that wants both the
+	/// streamed items and the assembled answer pays for the query once.
+	pub(crate) async fn execute_statements_streaming(
+		kvs: &Datastore,
+		ctx: FrozenContext,
+		opt: Options,
+		statements: Vec<TopLevelStatement>,
+		items: Sender<QueryStreamItem>,
+	) -> Result<Vec<QueryResult>> {
+		let stream = futures::stream::iter(statements.into_iter().map(Ok));
+		let mut this = Executor::new_streaming(kvs, ctx, opt, items);
+		let outcome = this.run_statement_stream(kvs, false, stream).await;
+		// However the execution ended, every result it produced is now final.
+		// A consumer is owed a terminal item for each one, including on the
+		// paths that returned an error before the loop finalised them.
+		this.finalise_results().await;
+		outcome.map(|()| this.results)
+	}
+
+	/// Execute every statement in `stream`, accumulating results and, when this
+	/// executor streams, sending them onward as they become final.
+	///
+	/// The results stay on `self` rather than being returned so that a caller
+	/// can finalise whatever was produced even on the paths that fail — a
+	/// streaming consumer is owed a terminal item for every statement that
+	/// produced a result, however the execution ended.
+	async fn run_statement_stream<S>(
+		&mut self,
+		kvs: &Datastore,
+		skip_success_results: bool,
+		stream: S,
+	) -> Result<()>
+	where
+		S: Stream<Item = Result<TopLevelStatement>>,
+	{
+		// Capture batch boundaries up-front so the `QueryEvent` emitted
+		// at every return path measures the full span of the batch even
+		// when an early parse error short-circuits the loop. The slice
+		// of `QueryResult`s the executor produced is the source of
+		// truth for the per-batch counters.
+		let batch_start = Instant::now();
+		let batch_results_start = self.results.len();
+		let mut stream = pin!(stream);
+
+		if skip_success_results {
+			// The import path requires OPTION IMPORT as the first statement.
+			// This sets opt.import which skips events, live queries, field
+			// processing, table views, and result output for performance.
+			match stream.as_mut().next().await.map(|stmt| stmt.map(|stmt| stmt.dispatch())) {
+				Some(Ok(Dispatch::Option(ref stmt)))
+					if stmt.name.eq_ignore_ascii_case("IMPORT") && stmt.what =>
+				{
+					self.execute_option_statement(stmt)?;
+				}
+				Some(Err(e)) => {
+					bail!(ExecError::InvalidStatement(e.to_string()));
+				}
+				_ => {
+					bail!(ExecError::InvalidStatement(
+						"Import requires `OPTION IMPORT;` as the first statement. \
+						 This disables events, live queries, field processing, and result \
+						 output for optimal import performance. To execute queries with \
+						 full side effects, use the /sql endpoint instead."
+							.to_string()
+					));
+				}
+			}
+		}
+
+		while let Some(stmt) = stream.next().await {
+			// Nothing is reading the results any more, so the statements after
+			// this one are abandoned rather than run.
+			if self.consumer_gone() {
+				break;
+			}
+			let stmt = match stmt {
+				Ok(x) => x,
+				Err(e) => {
+					self.results.push(QueryResult {
+						time: Duration::ZERO,
+						result: Err(TypesError::internal(e.to_string())),
+						query_type: QueryType::Other,
+					});
+
+					self.emit_query_event_for_results(
+						kvs,
+						batch_start,
+						&self.results[batch_results_start..],
+					);
+					return Ok(());
+				}
+			};
+
+			// Capture classification up-front so we can emit a
+			// `StatementEvent` from whichever branch of the match consumes
+			// `stmt`. None of these helpers retain any data that could leak
+			// customer values to an unauthenticated sink -- `StatementType`
+			// is a bounded enum and `to_sql` is only invoked when the
+			// installed observer explicitly opts in.
+			let statement_type = stmt.statement_type();
+			let statement_read_only = stmt.read_only();
+			let sql_text = kvs.observer().needs_statement_text().then(|| stmt.to_sql());
+			let start = Instant::now();
+
+			match stmt.dispatch() {
+				Dispatch::Option(stmt) => {
+					if skip_success_results && stmt.name.eq_ignore_ascii_case("IMPORT") {
+						bail!(ExecError::InvalidStatement(
+							"Cannot change OPTION IMPORT during an import stream. \
+						 Import mode is locked for the duration of the /import request."
+								.to_string()
+						));
+					}
+					let result = self.execute_option_statement(&stmt);
+					let outcome = Outcome::from(&result);
+					// `execute_option_statement` returns `anyhow::Result`; the
+					// only failure today is a permission denial via the
+					// capability gate (`is_allowed(..., Action::Edit,
+					// ResourceKind::Option, ...)`), so the bounded error class
+					// is `permission`, not the generic `client` bucket.
+					let error_class =
+						result.as_ref().err().map(|_| crate::observe::error_class::PERMISSION);
+					self.emit_statement_event_cached(
+						kvs,
+						statement_type,
+						statement_read_only,
+						sql_text,
+						&start,
+						outcome,
+						0,
+						error_class,
+					);
+					result?;
+					if !skip_success_results {
+						self.results.push(QueryResult {
+							time: Duration::ZERO,
+							result: Ok(convert_value_to_public_value(Value::None)?),
+							query_type: QueryType::Other,
+						});
+					}
+				}
+				Dispatch::Begin => {
+					if !skip_success_results {
+						self.results.push(QueryResult {
+							time: Duration::ZERO,
+							result: Ok(convert_value_to_public_value(Value::None)?),
+							query_type: QueryType::Other,
+						});
+					}
+
+					let begin_result = self.execute_begin_statement(kvs, stream.as_mut()).await;
+					let outcome = Outcome::from(&begin_result);
+					// `execute_begin_statement` returns `anyhow::Result`; on
+					// failure the result is wrapped via
+					// `types_error_from_anyhow` below (see the `if let
+					// Err(e)` arm). We can't classify before that conversion
+					// because we'd consume the error twice, so reach for the
+					// `txn_create_failed` constant: the only way
+					// `execute_begin_statement` errors today is when the
+					// transaction creation itself failed.
+					let error_class = begin_result
+						.as_ref()
+						.err()
+						.map(|_| crate::observe::error_class::TXN_CREATE_FAILED);
+					self.emit_statement_event_cached(
+						kvs,
+						statement_type,
+						statement_read_only,
+						sql_text,
+						&start,
+						outcome,
+						0,
+						error_class,
+					);
+
+					if let Err(e) = begin_result {
+						self.results.push(QueryResult {
+							time: Duration::ZERO,
+							result: Err(types_error_from_anyhow(e)),
+							query_type: QueryType::Other,
+						});
+
+						self.emit_query_event_for_results(
+							kvs,
+							batch_start,
+							&self.results[batch_results_start..],
+						);
+						return Ok(());
+					}
+				}
+				Dispatch::Cancel | Dispatch::Commit | Dispatch::Runnable => {
+					let query_type: QueryType = stmt.query_type();
+
+					// Install fresh per-statement counters so DML
+					// iterators can record affected rows independently of
+					// the post-RETURN value shape.
+					let counters = self.install_statement_counters();
+					let statement_index = self.current_index();
+					let result = self.execute_bare_statement(kvs, &start, stmt).await;
+					let outcome = Outcome::from(&result);
+					// A streamed statement's rows never reach its value, so the
+					// count comes from what the sink sent rather than from the
+					// value shape, which would read as zero.
+					let result_rows = match self.streamed_rows(statement_index) {
+						Some(streamed) => streamed,
+						None => Self::count_result_rows(
+							statement_type,
+							Some(counters.as_ref()),
+							result.as_ref().ok(),
+						),
+					};
+					let error_class = result.as_ref().err().map(classify_anyhow_error);
+					self.emit_statement_event_cached(
+						kvs,
+						statement_type,
+						statement_read_only,
+						sql_text,
+						&start,
+						outcome,
+						result_rows,
+						error_class,
+					);
+
+					if skip_success_results {
+						if let Err(err) = result {
+							self.results.push(QueryResult {
+								time: start.elapsed(),
+								result: Err(types_error_from_anyhow(err)),
+								query_type,
+							});
+						}
+					} else {
+						let result = match result {
+							Ok(value) => Ok(convert_value_to_public_value(value)?),
+							Err(err) => Err(types_error_from_anyhow(err)),
+						};
+						self.results.push(QueryResult {
+							time: start.elapsed(),
+							result,
+							query_type,
+						});
+					}
+				}
+			}
+			// This statement's outcome can no longer change, so it — and, when
+			// the statement was a `BEGIN` that has now resolved, every statement
+			// its block held — can be sent onward.
+			self.finalise_results().await;
+			yield_now!();
+		}
+		self.emit_query_event_for_results(kvs, batch_start, &self.results[batch_results_start..]);
+		Ok(())
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::shape_statement_value;
+	use crate::dbs::Session;
+	use crate::exec::OutputShape;
+	use crate::iam::{Level, Role};
+	use crate::kvs::Datastore;
+	use crate::val::{Array, Value};
+
+	fn values(n: usize) -> Vec<Value> {
+		(0..n).map(|i| Value::from(i as i64)).collect()
+	}
+
+	/// A `Rows` plan's result is an array of everything it emitted, however many
+	/// that turns out to be -- including none.
+	#[test]
+	fn rows_are_always_an_array() {
+		for n in [0, 1, 2, 7] {
+			let shaped = shape_statement_value(OutputShape::Rows, values(n))
+				.expect("rows are shapeable at any count");
+			assert_eq!(shaped, Value::Array(Array::from(values(n))), "{n} values");
+		}
+	}
+
+	/// A `Scalar` plan's result is the value it emitted, unwrapped -- not a
+	/// one-element array.
+	#[test]
+	fn a_scalar_is_unwrapped() {
+		let shaped = shape_statement_value(OutputShape::Scalar, vec![Value::from(42i64)])
+			.expect("one value is what Scalar promises");
+		assert_eq!(shaped, Value::from(42i64));
+	}
+
+	/// The declared shape is authoritative: a `Scalar` plan that emits the wrong
+	/// number of values is reported rather than quietly reshaped into an array.
+	/// Falling back would hide the operator's bug behind a result that merely
+	/// looks plausible, and a streaming consumer cannot fall back at all --
+	/// by the time the count is known the values have already been sent.
+	#[test]
+	fn a_scalar_plan_that_emits_the_wrong_count_is_reported() {
+		for n in [0, 2, 5] {
+			let error = shape_statement_value(OutputShape::Scalar, values(n))
+				.expect_err("a scalar plan emits exactly one value");
+			assert!(
+				error.to_string().contains(&format!("produced {n} values")),
+				"the error should name the count that arrived, got: {error}"
+			);
+		}
+	}
+
+	#[tokio::test]
+	async fn check_execute_option_permissions() {
+		let tests = vec![
+			// Root level
+			(
+				Session::for_level(Level::Root, Role::Owner).with_ns("NS").with_db("DB"),
+				true,
+				"owner at root level should be able to set options",
+			),
+			(
+				Session::for_level(Level::Root, Role::Editor).with_ns("NS").with_db("DB"),
+				true,
+				"editor at root level should be able to set options",
+			),
+			(
+				Session::for_level(Level::Root, Role::Viewer).with_ns("NS").with_db("DB"),
+				false,
+				"viewer at root level should not be able to set options",
+			),
+			// Namespace level
+			(
+				Session::for_level(Level::Namespace("NS".to_string()), Role::Owner)
+					.with_ns("NS")
+					.with_db("DB"),
+				true,
+				"owner at namespace level should be able to set options on its namespace",
+			),
+			(
+				Session::for_level(Level::Namespace("NS".to_string()), Role::Owner)
+					.with_ns("OTHER_NS")
+					.with_db("DB"),
+				false,
+				"owner at namespace level should not be able to set options on another namespace",
+			),
+			(
+				Session::for_level(Level::Namespace("NS".to_string()), Role::Editor)
+					.with_ns("NS")
+					.with_db("DB"),
+				true,
+				"editor at namespace level should be able to set options on its namespace",
+			),
+			(
+				Session::for_level(Level::Namespace("NS".to_string()), Role::Editor)
+					.with_ns("OTHER_NS")
+					.with_db("DB"),
+				false,
+				"editor at namespace level should not be able to set options on another namespace",
+			),
+			(
+				Session::for_level(Level::Namespace("NS".to_string()), Role::Viewer)
+					.with_ns("NS")
+					.with_db("DB"),
+				false,
+				"viewer at namespace level should not be able to set options on its namespace",
+			),
+			// Database level
+			(
+				Session::for_level(
+					Level::Database("NS".to_string(), "DB".to_string()),
+					Role::Owner,
+				)
+				.with_ns("NS")
+				.with_db("DB"),
+				true,
+				"owner at database level should be able to set options on its database",
+			),
+			(
+				Session::for_level(
+					Level::Database("NS".to_string(), "DB".to_string()),
+					Role::Owner,
+				)
+				.with_ns("NS")
+				.with_db("OTHER_DB"),
+				false,
+				"owner at database level should not be able to set options on another database",
+			),
+			(
+				Session::for_level(
+					Level::Database("NS".to_string(), "DB".to_string()),
+					Role::Owner,
+				)
+				.with_ns("OTHER_NS")
+				.with_db("DB"),
+				false,
+				"owner at database level should not be able to set options on another namespace even if the database name matches",
+			),
+			(
+				Session::for_level(
+					Level::Database("NS".to_string(), "DB".to_string()),
+					Role::Editor,
+				)
+				.with_ns("NS")
+				.with_db("DB"),
+				true,
+				"editor at database level should be able to set options on its database",
+			),
+			(
+				Session::for_level(
+					Level::Database("NS".to_string(), "DB".to_string()),
+					Role::Editor,
+				)
+				.with_ns("NS")
+				.with_db("OTHER_DB"),
+				false,
+				"editor at database level should not be able to set options on another database",
+			),
+			(
+				Session::for_level(
+					Level::Database("NS".to_string(), "DB".to_string()),
+					Role::Editor,
+				)
+				.with_ns("OTHER_NS")
+				.with_db("DB"),
+				false,
+				"editor at database level should not be able to set options on another namespace even if the database name matches",
+			),
+			(
+				Session::for_level(
+					Level::Database("NS".to_string(), "DB".to_string()),
+					Role::Viewer,
+				)
+				.with_ns("NS")
+				.with_db("DB"),
+				false,
+				"viewer at database level should not be able to set options on its database",
+			),
+		];
+		let statement = "OPTION IMPORT = false";
+
+		for test in tests.iter() {
+			let (session, should_succeed, msg) = test;
+
+			{
+				let ds =
+					Datastore::builder().with_auth(true).build_with_path("memory").await.unwrap();
+
+				let res = ds.execute(statement, session, None).await;
+
+				if *should_succeed {
+					assert!(res.is_ok(), "{}: {:?}", msg, res);
+				} else {
+					let err = res.unwrap_err();
+					assert!(err.is_not_allowed(), "{msg}: expected NotAllowed error, got {err}")
+				}
+			}
+		}
+
+		// Anonymous with auth enabled
+		{
+			let ds = Datastore::builder().with_auth(true).build_with_path("memory").await.unwrap();
+
+			let res =
+				ds.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None).await;
+
+			let err = res.unwrap_err();
+			assert!(
+				err.is_not_allowed(),
+				"anonymous user should not be able to set options: {}",
+				err
+			)
+		}
+
+		// Anonymous with auth disabled
+		{
+			let ds = Datastore::builder().with_auth(false).build_with_path("memory").await.unwrap();
+
+			let res =
+				ds.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None).await;
+
+			assert!(
+				res.is_ok(),
+				"anonymous user should be able to set options when auth is disabled: {:?}",
+				res
+			)
+		}
+	}
+
+	#[tokio::test]
+	async fn check_execute_timeout() {
+		// With small timeout
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let stmt = "UPDATE test TIMEOUT 2s";
+			let res = ds.execute(stmt, &Session::default().with_ns("NS").with_db("DB"), None).await;
+			assert!(res.is_ok(), "Failed to execute statement with small timeout: {:?}", res);
+		}
+		// With large timeout
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let stmt = "UPDATE test TIMEOUT 31540000s"; // 1 year
+			let res = ds.execute(stmt, &Session::default().with_ns("NS").with_db("DB"), None).await;
+			assert!(res.is_ok(), "Failed to execute statement with large timeout: {:?}", res);
+		}
+		// With very large timeout
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let stmt = "UPDATE test TIMEOUT 9460800000000000000s"; // 300 billion years
+			let res = ds.execute(stmt, &Session::default().with_ns("NS").with_db("DB"), None).await;
+			assert!(res.is_ok(), "Failed to execute statement with very large timeout: {:?}", res);
+			let results = res.unwrap();
+			let err = results[0].result.as_ref().unwrap_err();
+			assert!(
+				err.is_validation()
+					|| (err.is_internal() && err.message().contains("Invalid timeout")),
+				"Expected to find invalid timeout error: {:?}",
+				err
+			);
+		}
+	}
+
+	#[tokio::test]
+	async fn import_stream_suppresses_results_but_persists_data() {
+		use bytes::Bytes;
+
+		let ds = Datastore::new("memory").await.unwrap();
+		let sess = Session::default().with_ns("NS").with_db("DB");
+
+		ds.execute("DEFINE NAMESPACE NS; USE NS NS; DEFINE DATABASE DB", &sess, None)
+			.await
+			.unwrap();
+
+		let sql =
+			"OPTION IMPORT; INSERT INTO person [{ name: 'a' }, { name: 'b' }, { name: 'c' }];";
+		let body = futures::stream::once(async { Ok(Bytes::from(sql)) });
+		let results = ds.import_stream(&sess, body).await.unwrap();
+
+		assert!(
+			results.is_empty(),
+			"import_stream should suppress successful results, got {} results",
+			results.len()
+		);
+
+		let verify = ds.execute("SELECT * FROM person ORDER BY name", &sess, None).await.unwrap();
+		let rows = verify[0].result.as_ref().unwrap();
+		assert!(rows.is_array(), "Expected an array of results");
+		let arr = rows.as_array().unwrap();
+		assert_eq!(arr.len(), 3, "Expected 3 inserted records, got {}", arr.len());
+	}
+
+	#[tokio::test]
+	async fn import_stream_still_reports_errors() {
+		use bytes::Bytes;
+
+		let ds = Datastore::new("memory").await.unwrap();
+		let sess = Session::default().with_ns("NS").with_db("DB");
+
+		ds.execute("DEFINE NAMESPACE NS; USE NS NS; DEFINE DATABASE DB", &sess, None)
+			.await
+			.unwrap();
+
+		let sql = "OPTION IMPORT; INSERT INTO person { name: 'ok' }; BREAK;";
+		let body = futures::stream::once(async { Ok(Bytes::from(sql)) });
+		let results = ds.import_stream(&sess, body).await.unwrap();
+
+		assert!(!results.is_empty(), "import_stream should report errors");
+		assert!(
+			results.iter().any(|r| r.result.is_err()),
+			"Expected at least one error result from invalid BREAK statement"
+		);
+
+		let verify = ds.execute("SELECT * FROM person", &sess, None).await.unwrap();
+		let rows = verify[0].result.as_ref().unwrap();
+		let arr = rows.as_array().unwrap();
+		assert_eq!(arr.len(), 1, "The successful INSERT before the error should have persisted");
+	}
+
+	#[tokio::test]
+	async fn import_stream_rejects_without_option_import() {
+		use bytes::Bytes;
+
+		let ds = Datastore::new("memory").await.unwrap();
+		let sess = Session::default().with_ns("NS").with_db("DB");
+
+		ds.execute("DEFINE NAMESPACE NS; USE NS NS; DEFINE DATABASE DB", &sess, None)
+			.await
+			.unwrap();
+
+		let sql = "INSERT INTO person { name: 'a' };";
+		let body = futures::stream::once(async { Ok(Bytes::from(sql)) });
+		let result = ds.import_stream(&sess, body).await;
+
+		assert!(result.is_err(), "import_stream should reject input without OPTION IMPORT");
+		let err = result.unwrap_err().to_string();
+		assert!(err.contains("OPTION IMPORT"), "Error should mention OPTION IMPORT, got: {err}");
+	}
+
+	#[tokio::test]
+	async fn import_stream_rejects_option_import_change_midstream() {
+		use bytes::Bytes;
+
+		let ds = Datastore::new("memory").await.unwrap();
+		let sess = Session::default().with_ns("NS").with_db("DB");
+
+		ds.execute("DEFINE NAMESPACE NS; USE NS NS; DEFINE DATABASE DB", &sess, None)
+			.await
+			.unwrap();
+
+		let sql = "OPTION IMPORT; OPTION IMPORT = false; INSERT INTO person { name: 'a' };";
+		let body = futures::stream::once(async { Ok(Bytes::from(sql)) });
+		let result = ds.import_stream(&sess, body).await;
+
+		assert!(result.is_err(), "import_stream should reject OPTION IMPORT changes mid-stream");
+		let err = result.unwrap_err().to_string();
+		assert!(
+			err.contains("Cannot change OPTION IMPORT"),
+			"Error should explain that import mode is locked, got: {err}"
+		);
+	}
+
+	mod result_rows_observer {
+		//! Regression coverage for the affected-row contract on
+		//! `StatementEventSafe.result_rows` and the per-batch
+		//! `QueryEvent` dispatch. The iterator-side counter must report
+		//! the actual number of records mutated for DML statements --
+		//! including those that suppress the per-document value via
+		//! `RETURN NONE` or that lack a "before" value (fresh `CREATE`).
+		//! The executor must also emit one `QueryEvent` per query batch
+		//! so authenticated `surrealdb_queries_total` /
+		//! `surrealdb_query_errors_total` /
+		//! `surrealdb_query_duration_seconds` keep advancing under load.
+
+		use std::sync::{Arc, Mutex};
+
+		use crate::dbs::Session;
+		use crate::kvs::Datastore;
+		use crate::observe::{
+			ExecutionObserver, Outcome, QueryEvent, StatementEvent, StatementType,
+		};
+
+		#[derive(Default)]
+		struct CapturingObserver {
+			events: Mutex<Vec<(StatementType, u64)>>,
+			queries: Mutex<Vec<(Outcome, u32, u32, u32)>>,
+		}
+
+		impl CapturingObserver {
+			fn snapshot(&self) -> Vec<(StatementType, u64)> {
+				self.events.lock().unwrap().clone()
+			}
+
+			fn queries(&self) -> Vec<(Outcome, u32, u32, u32)> {
+				self.queries.lock().unwrap().clone()
+			}
+		}
+
+		impl ExecutionObserver for CapturingObserver {
+			fn on_statement_complete(&self, event: &StatementEvent) {
+				self.events.lock().unwrap().push((event.safe.kind, event.safe.result_rows));
+			}
+
+			fn on_query_complete(&self, event: &QueryEvent) {
+				let c = event.safe.counters;
+				self.queries.lock().unwrap().push((event.safe.outcome, c.total, c.ok, c.err));
+			}
+		}
+
+		async fn run(sql: &str) -> Vec<(StatementType, u64)> {
+			let (events, _) = run_capturing(sql).await;
+			events
+		}
+
+		#[allow(clippy::clone_on_ref_ptr)]
+		async fn run_capturing(sql: &str) -> (Vec<(StatementType, u64)>, Arc<CapturingObserver>) {
+			let observer = Arc::new(CapturingObserver::default());
+			let obs: Arc<dyn ExecutionObserver> = observer.clone();
+			let ds =
+				Datastore::builder().with_observer(obs).build_with_path("memory").await.unwrap();
+			let sess = Session::default().with_ns("NS").with_db("DB");
+			// The capturing observer also receives the DEFINE bootstrap
+			// events; drain them before running the test SQL so the
+			// assertions only see the statements they care about.
+			ds.execute("DEFINE NAMESPACE NS; USE NS NS; DEFINE DATABASE DB", &sess, None)
+				.await
+				.unwrap();
+			observer.events.lock().unwrap().clear();
+			observer.queries.lock().unwrap().clear();
+			ds.execute(sql, &sess, None).await.unwrap();
+			(observer.snapshot(), observer)
+		}
+
+		fn rows_for(events: &[(StatementType, u64)], kind: StatementType) -> Vec<u64> {
+			events.iter().filter(|(k, _)| *k == kind).map(|(_, n)| *n).collect()
+		}
+
+		#[tokio::test]
+		async fn update_return_none_reports_affected_count() {
+			let events = run("\
+				 CREATE foo:1; CREATE foo:2; CREATE foo:3;\
+				 UPDATE foo SET x = 1 RETURN NONE;\
+				 ")
+			.await;
+			let updates = rows_for(&events, StatementType::Update);
+			assert_eq!(updates, vec![3], "UPDATE RETURN NONE should report 3 affected rows");
+		}
+
+		#[tokio::test]
+		async fn create_return_before_reports_one() {
+			let events = run("CREATE foo:bar RETURN BEFORE;").await;
+			let creates = rows_for(&events, StatementType::Create);
+			assert_eq!(creates, vec![1], "CREATE RETURN BEFORE should report 1 affected row");
+		}
+
+		#[tokio::test]
+		async fn delete_return_none_reports_affected_count() {
+			let events = run("\
+				 CREATE foo:1; CREATE foo:2;\
+				 DELETE foo RETURN NONE;\
+				 ")
+			.await;
+			let deletes = rows_for(&events, StatementType::Delete);
+			assert_eq!(deletes, vec![2], "DELETE RETURN NONE should report 2 affected rows");
+		}
+
+		#[tokio::test]
+		async fn update_where_no_match_reports_zero() {
+			// `WHERE` filter that no row satisfies must report zero
+			// affected rows, even though the iterator visits every
+			// scanned record. Pre-mutation `IgnoreError::Ignore` from
+			// `check_where_condition` must not bump the counter.
+			let events = run("\
+				 CREATE foo:1 SET x = 1; CREATE foo:2 SET x = 2; CREATE foo:3 SET x = 3;\
+				 UPDATE foo SET x = 99 WHERE x = 999;\
+				 ")
+			.await;
+			let updates = rows_for(&events, StatementType::Update);
+			assert_eq!(
+				updates,
+				vec![0],
+				"UPDATE with WHERE matching no rows should report 0 affected rows"
+			);
+		}
+
+		#[tokio::test]
+		async fn update_nonexistent_record_reports_zero() {
+			// Targeting a record id that does not exist makes
+			// `check_record_exists` return `IgnoreError::Ignore`
+			// before any KV write; the counter must stay at zero.
+			let events = run("UPDATE foo:does_not_exist SET x = 1;").await;
+			let updates = rows_for(&events, StatementType::Update);
+			assert_eq!(
+				updates,
+				vec![0],
+				"UPDATE on a non-existent record id should report 0 affected rows"
+			);
+		}
+
+		#[tokio::test]
+		async fn delete_where_no_match_reports_zero() {
+			// DELETE with a WHERE clause that filters every row out
+			// must report zero affected rows even when the iterator
+			// visits each record.
+			let events = run("\
+				 CREATE foo:1 SET x = 1; CREATE foo:2 SET x = 2;\
+				 DELETE foo WHERE x = 999;\
+				 ")
+			.await;
+			let deletes = rows_for(&events, StatementType::Delete);
+			assert_eq!(
+				deletes,
+				vec![0],
+				"DELETE with WHERE matching no rows should report 0 affected rows"
+			);
+		}
+
+		#[tokio::test]
+		async fn update_unchanged_record_reports_zero() {
+			// `set_record` is suppressed when `!self.changed()`, so
+			// no KV write happens and the counter must stay at zero
+			// even though the iterator returned `Ok` from
+			// `Document::process`.
+			let events = run("\
+				 CREATE foo:1 SET x = 1;\
+				 UPDATE foo:1 SET x = 1;\
+				 ")
+			.await;
+			let updates = rows_for(&events, StatementType::Update);
+			assert_eq!(
+				updates,
+				vec![0],
+				"UPDATE that does not change a record should report 0 affected rows"
+			);
+		}
+
+		#[tokio::test]
+		async fn upsert_existing_record_where_no_match_reports_zero() {
+			// Baseline coverage for the UPSERT-falls-back-to-update
+			// path: `upsert_create` fails with `RecordExists` from
+			// `store_record_data` (which returns Err before flipping
+			// `doc.mutated`), the dispatch rolls back the empty
+			// savepoint, and `upsert_update` returns `Ignore` from
+			// `check_where_condition`. No KV write survives, so the
+			// affected-row count must be zero.
+			let events = run("\
+				 CREATE foo:1 SET x = 1;\
+				 UPSERT foo:1 SET x = 99 WHERE x = 999;\
+				 ")
+			.await;
+			let upserts = rows_for(&events, StatementType::Upsert);
+			assert_eq!(
+				upserts,
+				vec![0],
+				"UPSERT on an existing record with an unmatched WHERE should report 0 affected rows"
+			);
+		}
+
+		#[tokio::test]
+		async fn upsert_index_collision_then_where_no_match_reports_zero() {
+			// Direct regression for the rollback-time `mutated`
+			// reset: UPSERT on a fresh id passes
+			// `upsert_create.store_record_data` (which sets
+			// `doc.mutated = true`) and then trips a unique-index
+			// collision in `store_index_data` against an existing
+			// record. The dispatch rolls back the savepoint and
+			// retries as an update against the colliding row, where
+			// a WHERE clause filters it out. Without resetting
+			// `doc.mutated` after the rollback, the stale flag from
+			// the rolled-back create would inflate the affected-row
+			// count even though no net KV write survives.
+			let events = run("\
+				 DEFINE INDEX uniq_x ON foo FIELDS x UNIQUE;\
+				 CREATE foo:a SET x = 1;\
+				 UPSERT foo:b SET x = 1 WHERE x = 999;\
+				 ")
+			.await;
+			let upserts = rows_for(&events, StatementType::Upsert);
+			assert_eq!(
+				upserts,
+				vec![0],
+				"UPSERT that rolls back a unique-index collision and finds no WHERE match must report 0 affected rows"
+			);
+		}
+
+		#[tokio::test]
+		async fn select_unaffected_by_counter_path() {
+			let events = run("\
+				 CREATE foo:1; CREATE foo:2; CREATE foo:3;\
+				 SELECT * FROM foo;\
+				 ")
+			.await;
+			let selects = rows_for(&events, StatementType::Select);
+			assert_eq!(selects, vec![3], "SELECT should still report rows from value-shape");
+		}
+
+		#[tokio::test]
+		async fn query_event_emitted_for_successful_batch() {
+			let (_, observer) = run_capturing("CREATE foo:1; SELECT * FROM foo;").await;
+			let queries = observer.queries();
+			assert_eq!(queries.len(), 1, "expected one QueryEvent per batch");
+			let (outcome, total, ok, err) = queries[0];
+			assert_eq!(outcome, Outcome::Success);
+			assert_eq!(total, 2);
+			assert_eq!(ok, 2);
+			assert_eq!(err, 0);
+		}
+
+		#[tokio::test]
+		async fn query_event_records_errors() {
+			// Use an invalid runtime statement (THROW) so the parse step
+			// still succeeds and the executor reaches the dispatch site.
+			let (_, observer) = run_capturing("CREATE foo:1; THROW 'boom';").await;
+			let queries = observer.queries();
+			assert_eq!(queries.len(), 1, "expected one QueryEvent per batch");
+			let (outcome, total, ok, err) = queries[0];
+			assert_eq!(outcome, Outcome::Error);
+			assert_eq!(total, 2);
+			assert_eq!(ok, 1);
+			assert_eq!(err, 1);
+		}
+	}
+}

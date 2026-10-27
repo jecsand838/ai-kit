@@ -2,6 +2,24 @@
 members = ["agent-sdk", "app-sdk", "provider-sdk", "storage-sdk", "tool-sdk"]
 default-members = ["agent-sdk", "app-sdk", "provider-sdk", "storage-sdk", "tool-sdk"]
 resolver = "2"
+exclude = [
+  "third-party/security/arrow-ipc-58.4.1",
+  "third-party/security/lance-encoding-13.0.0",
+  "third-party/security/include-flate-compress-0.3.4",
+  "third-party/security/object_store-0.13.2",
+  "third-party/security/surrealdb-core-3.3.0",
+  "third-party/security/geo-0.32.0",
+  "third-party/security/surrealdb-expr-3.3.0",
+]
+
+[patch.crates-io]
+arrow-ipc = { path = "third-party/security/arrow-ipc-58.4.1" }
+lance-encoding = { path = "third-party/security/lance-encoding-13.0.0" }
+include-flate-compress = { path = "third-party/security/include-flate-compress-0.3.4" }
+object_store_013 = { package = "object_store", path = "third-party/security/object_store-0.13.2" }
+surrealdb-core = { path = "third-party/security/surrealdb-core-3.3.0" }
+geo_032 = { package = "geo", path = "third-party/security/geo-0.32.0" }
+surrealdb-expr = { path = "third-party/security/surrealdb-expr-3.3.0" }
 
 [profile.capacity]
 inherits = "release"
@@ -31,7 +49,7 @@ sha2 = { version = "=0.10.9", default-features = false }
 tempfile = "3.27"
 thiserror = "2.0"
 time = "0.3"
-tokio = "1.51"
+tokio = "1.54.1"
 tokio-stream = "0.1"
 tokio-tungstenite = "0.29"
 tracing = "0.1"

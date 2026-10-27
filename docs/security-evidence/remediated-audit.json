@@ -1,0 +1,98 @@
+{
+  "schema": 1,
+  "status": "PASS",
+  "scans": [
+    {
+      "name": "committed-lockfile",
+      "command": [
+        "/private/tmp/ai-kit-cargo-audit-0.22.2/cargo-audit",
+        "audit",
+        "--file",
+        "/Users/connorsanders/l-language/ai-kit/Cargo.lock",
+        "--db",
+        "/private/tmp/ai-kit-cargo-audit-0.22.2/advisory-db",
+        "--no-yanked",
+        "--deny",
+        "unsound",
+        "--color",
+        "never"
+      ],
+      "log": "/private/tmp/ai-kit-security-audit-coherent-arrow/committed-lockfile.log",
+      "status": "PASS",
+      "returncode": 0
+    },
+    {
+      "name": "patched-parents",
+      "command": [
+        "/private/tmp/ai-kit-cargo-audit-0.22.2/cargo-audit",
+        "audit",
+        "--file",
+        "/private/tmp/ai-kit-security-audit-coherent-arrow/patched-parents.lock",
+        "--db",
+        "/private/tmp/ai-kit-cargo-audit-0.22.2/advisory-db",
+        "--no-yanked",
+        "--deny",
+        "unsound",
+        "--color",
+        "never",
+        "--no-fetch"
+      ],
+      "log": "/private/tmp/ai-kit-security-audit-coherent-arrow/patched-parents.log",
+      "status": "PASS",
+      "returncode": 0
+    }
+  ],
+  "started_utc": "2026-10-27T05:05:30.370926+00:00",
+  "policy": {
+    "deny": [
+      "unsound"
+    ],
+    "check_yanked": false
+  },
+  "lockfile_sha256": "5514d324b46de72d48edc393d18ca30f1f4c9c5cf48166a7d2413443047782fe",
+  "patch_fingerprint": "1bce7f024601e225034641b7c5d8d4c7f0aab4933c276936ee7556374f1522b4",
+  "parents": [
+    {
+      "name": "arrow-ipc",
+      "version": "58.4.1",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "checksum": "165051f1f996f19b50c4d2cdb7ed02ddd400d8d984b422bf6848507eee099c3d"
+    },
+    {
+      "name": "lance-encoding",
+      "version": "13.0.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "checksum": "3c04a91e545b505b5e6ec98854c7eadc56689cbc072f138dd26805ef0095e81a"
+    },
+    {
+      "name": "include-flate-compress",
+      "version": "0.3.4",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "checksum": "44fbb9c5ccb9a5b67b4afa2974c27e5507ea1bf6d22828cef418e4dfaeca51dd"
+    },
+    {
+      "name": "object_store",
+      "version": "0.13.2",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "checksum": "622acbc9100d3c10e2ee15804b0caa40e55c933d5aa53814cd520805b7958a49"
+    },
+    {
+      "name": "surrealdb-core",
+      "version": "3.3.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "checksum": "1490b831b5090b9bdbdacec5e8060d9dbc1944574809d157fabb4de25e53b1aa"
+    },
+    {
+      "name": "geo",
+      "version": "0.32.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "checksum": "3f3901269ec6d4f6068d3f09e5f02f995bd076398dcd1dfec407cd230b02d11b"
+    },
+    {
+      "name": "surrealdb-expr",
+      "version": "3.3.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "checksum": "2e494e4696ac372ead8c0a8b38f830db056a34c8f4192be4cfadeea3089c8687"
+    }
+  ]
+}

@@ -340,6 +340,48 @@ class ReceiptTests(unittest.TestCase):
         (self.root / "provider-sdk" / "src" / "lib.rs").write_text("pub struct DependencyChanged;\n")
         self.assertNotEqual(before, SourceIdentity.capture(self.root, self.command))
 
+    def test_security_patch_inputs_are_required_in_all_source_scopes(self):
+        relative = "third-party/security/arrow-ipc-58.4.1/fixture.bin"
+        source = self.root / relative
+        source.parent.mkdir(parents=True)
+        source.write_bytes(b"compressed fixture")
+        with mock.patch("scripts.release_evidence.SecurityPatches", create=True) as patches:
+            patches.return_value.inputs.return_value = (relative,)
+            for command in (self.command, ["bash", "scripts/gate.sh"]):
+                with self.subTest(command=command):
+                    before = SourceIdentity.capture(self.root, command)
+                    self.assertIn(relative, before["files"])
+                    source.write_bytes(source.read_bytes() + b"changed")
+                    self.assertNotEqual(before, SourceIdentity.capture(self.root, command))
+                    before_mode = SourceIdentity.capture(self.root, command)
+                    source.chmod(0o755 if source.stat().st_mode & 0o111 == 0 else 0o644)
+                    self.assertNotEqual(before_mode, SourceIdentity.capture(self.root, command))
+
+    def test_invalid_security_patch_provenance_rejects_release_receipts(self):
+        with mock.patch("scripts.release_evidence.SecurityPatches", create=True) as patches:
+            patches.return_value.inputs.side_effect = ValueError("security patch hash differs")
+            with self.assertRaisesRegex(EvidenceError, "security patch"):
+                SourceIdentity.capture(self.root, self.command)
+
+    def test_scope_review_cannot_exclude_a_verified_patch_input(self):
+        relative = "third-party/security/arrow-ipc-58.4.1/fixture.bin"
+        source = self.root / relative
+        source.parent.mkdir(parents=True)
+        source.write_bytes(b"\x00upstream-build-input\xff")
+        with mock.patch("scripts.release_evidence.SecurityPatches", create=True) as patches:
+            patches.return_value.inputs.return_value = (relative,)
+            paths = SourceIdentity.paths(self.root, self.command)
+            selected = [name for name in paths if name != relative]
+            audit_path = self.root / "target" / "scope.json"
+            audit_path.write_text(json.dumps({
+                "schema": 1, "status": "APPROVED", "reviewer": "independent fixture",
+                "reason": "bounded source audit", "command": Command.canonical(self.command),
+                "paths": selected, "excluded_paths": {relative: "cannot omit patched build inputs"},
+            }))
+            override = {"paths": selected, "audit": {"path": str(audit_path), "sha256": JsonFile.digest(audit_path)}}
+            with self.assertRaisesRegex(EvidenceError, "root build authority"):
+                SourceIdentity.capture(self.root, self.command, scope_override=override)
+
     def test_contract_scope_includes_scripts_and_documentation(self):
         command = self.command.copy()
         command[command.index("behavior")] = "source_contract"

@@ -20,7 +20,7 @@ pub(crate) use point_decode::decode_records_page;
 pub(crate) use point_encode::{encode_point, encode_point_id};
 pub(crate) use profile::{
     VectorProfile, build_remote_collection_body, edge_unnamed_default_vector_unsupported,
-    edge_uses_unnamed_default_dense, ensure_edge_named_dense_vectors, infer_collection_profile,
+    ensure_edge_named_dense_vectors, infer_collection_profile,
     remote_unnamed_default_vector_unsupported,
 };
 pub(crate) use projection::{

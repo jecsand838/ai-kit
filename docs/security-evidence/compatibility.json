@@ -1,0 +1,147 @@
+{
+  "schema": 1,
+  "status": "PASS",
+  "scope": "local dependency compatibility",
+  "stages": [
+    {
+      "name": "resolve-local-harness",
+      "command": [
+        "cargo",
+        "+1.99.0",
+        "generate-lockfile",
+        "--manifest-path",
+        "/private/tmp/ai-kit-security-compatibility-network/package/Cargo.toml"
+      ],
+      "log": "/private/tmp/ai-kit-security-compatibility-network/resolve-local-harness.log",
+      "status": "PASS",
+      "returncode": 0
+    },
+    {
+      "name": "compatibility-inventory",
+      "command": [
+        "cargo",
+        "+1.99.0",
+        "test",
+        "--locked",
+        "--manifest-path",
+        "/private/tmp/ai-kit-security-compatibility-network/package/Cargo.toml",
+        "--test",
+        "compatibility",
+        "--",
+        "--list",
+        "--format",
+        "terse"
+      ],
+      "log": "/private/tmp/ai-kit-security-compatibility-network/compatibility-inventory.log",
+      "status": "PASS",
+      "returncode": 0,
+      "inventory": [
+        "arrow_reads_pre_update_compressed_ipc_and_round_trips",
+        "include_flate_reads_pre_update_frame_and_round_trips",
+        "object_store_reads_escaped_s3_xml",
+        "object_store_rejects_malformed_xml_and_unresolved_entities",
+        "zstd_reads_pre_update_frame_and_round_trips"
+      ]
+    },
+    {
+      "name": "compatibility",
+      "command": [
+        "cargo",
+        "+1.99.0",
+        "test",
+        "--locked",
+        "--manifest-path",
+        "/private/tmp/ai-kit-security-compatibility-network/package/Cargo.toml",
+        "--test",
+        "compatibility",
+        "--",
+        "--test-threads=1"
+      ],
+      "log": "/private/tmp/ai-kit-security-compatibility-network/compatibility.log",
+      "status": "PASS",
+      "returncode": 0,
+      "counts": {
+        "passed": 5,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 0
+      }
+    },
+    {
+      "name": "geometry-inventory",
+      "command": [
+        "cargo",
+        "+1.99.0",
+        "test",
+        "--locked",
+        "--manifest-path",
+        "/private/tmp/ai-kit-security-compatibility-network/package/Cargo.toml",
+        "--test",
+        "geometry",
+        "--",
+        "--list",
+        "--format",
+        "terse"
+      ],
+      "log": "/private/tmp/ai-kit-security-compatibility-network/geometry-inventory.log",
+      "status": "PASS",
+      "returncode": 0,
+      "inventory": [
+        "overlapping_rectangles_preserve_boolean_areas_and_regions",
+        "polygon_holes_and_boundaries_preserve_contains_and_intersects",
+        "square_capped_buffer_preserves_extents_and_area"
+      ]
+    },
+    {
+      "name": "geometry",
+      "command": [
+        "cargo",
+        "+1.99.0",
+        "test",
+        "--locked",
+        "--manifest-path",
+        "/private/tmp/ai-kit-security-compatibility-network/package/Cargo.toml",
+        "--test",
+        "geometry",
+        "--",
+        "--test-threads=1"
+      ],
+      "log": "/private/tmp/ai-kit-security-compatibility-network/geometry.log",
+      "status": "PASS",
+      "returncode": 0,
+      "counts": {
+        "passed": 3,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 0
+      }
+    }
+  ],
+  "patch_fingerprint": "1bce7f024601e225034641b7c5d8d4c7f0aab4933c276936ee7556374f1522b4",
+  "fixture_inputs": {
+    "arrow-ipc-58.3.0-zstd.arrow": "9047277c25bb1765070b3bb888daf7762d00907356fd416156b61fbfbcf4bdd6",
+    "include-flate-compress-0.3.2.zst": "9a92323bd2939cc23c5e1d5ec8521161763d25c679290f96eae448917bac0474",
+    "legacy-Cargo.lock": "2253c4172fbb522fb0ba6da43dbeca3865d6713c6298f507f24aa8fdae1be083",
+    "legacy-Cargo.toml": "bad895fc62992266f742b742ffe4a04a2c2f421f2660a5381934c7701b048594",
+    "legacy-writer.rs": "37c89cf23ec63937454c81e4085c08b09e99e49c290a0ffdd7350e59abf7f371",
+    "payload.txt": "b20754e06924b93580d772ef967e82d979d215aea5cc711c3800bf11bda6e034",
+    "zstd-0.13.3.zst": "9a92323bd2939cc23c5e1d5ec8521161763d25c679290f96eae448917bac0474",
+    "fixtures.json": "a5d7f1456a892a4056c5da0bf29770d5c76796e5f04b649a5a539287e8df4ce5",
+    "compatibility.rs": "8efa2a613818c78febfa834a4590843d410c017106673a0e277b7af5414796d3",
+    "geometry.rs": "7849e0796d445a92982504f974110c948d7cef4ae60c024cbf6eff73599344a7"
+  },
+  "versions": {
+    "arrow-ipc": "58.4.1",
+    "include-flate-compress": "0.3.4",
+    "object_store": "0.13.2",
+    "geo": "0.32.0",
+    "zstd": "0.14.3",
+    "zstd-safe": "8.2.0",
+    "zstd-sys": "2.1.2+zstd.1.5.7",
+    "quick-xml": "0.41.0",
+    "i_overlay": "4.5.2"
+  },
+  "lockfile_sha256": "993e2e536ecfb1af8297c9b8b5202ebbd47bd5b2d5ec2ba501678e6646e910da"
+}

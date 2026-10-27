@@ -1,0 +1,16 @@
+{
+  "baseline_commit": "061f62b77e9caa9763408305fc6e290442bfbaea",
+  "github_run": "https://github.com/jecsand838/ai-kit/actions/runs/40447600438",
+  "audit_json_sha256": "bfab71e6202401abad9307f012c03723524cb0b7cd66ac8619f12edccf558af7",
+  "database": {
+    "advisory-count": 1378,
+    "last-commit": "3279c99911354c400e1d41e47c7d60e39258b147",
+    "last-updated": "2026-10-26T22:32:25+01:00"
+  },
+  "vulnerabilities": 35,
+  "warnings": {
+    "unmaintained": 12,
+    "unsound": 13
+  },
+  "audit_log_sha256": "abf20ebc24bcb588933ca1f940ca87e459b3d5f6cfdb03b3298a2ebc39ab7166"
+}

@@ -14,6 +14,11 @@ import sys
 import time
 import uuid
 
+if __package__:
+    from .security_dependencies import SecurityPatches
+else:
+    from security_dependencies import SecurityPatches
+
 
 TARGETS = {
     "provider-sdk": ("mock_contracts",),
@@ -105,6 +110,7 @@ class Runner:
 
     def fingerprint(self):
         files = set()
+        files.update(self.root / relative for relative in SecurityPatches(self.root).inputs())
         for folder in (*TARGETS, "scripts", "docs", ".cargo"):
             directory = self.root / folder
             if directory.is_dir():
@@ -116,6 +122,7 @@ class Runner:
         for path in sorted(files):
             digest.update(str(path.relative_to(self.root)).encode() + b"\0")
             digest.update(hashlib.sha256(path.read_bytes()).digest())
+            digest.update(str(path.stat().st_mode & 0o111).encode() + b"\0")
         return {"sha256": digest.hexdigest(), "files": len(files)}
 
     def command(self, name, command, kind="gate", cwd=None):
@@ -263,9 +270,13 @@ class Runner:
     def ci(self):
         if self.mode != "ci-lint":
             gates = [
+                ("security-provenance", [sys.executable, "scripts/security_dependencies.py", "verify", "--root", str(self.root)]),
                 ("no-path-wiring", ["bash", "scripts/check_no_path_wiring.sh"]),
                 ("no-type-aliases", ["bash", "scripts/check_no_type_aliases.sh"]),
                 ("runner-contracts", [sys.executable, "-m", "unittest", "discover", "-s", "scripts/tests", "-p", "test_mock_contract_runner.py", "-v"]),
+                ("security-contracts", [sys.executable, "-m", "unittest", "discover", "-s", "scripts/tests", "-p", "test_security_dependencies.py", "-v"]),
+                ("wiring-contracts", [sys.executable, "-m", "unittest", "discover", "-s", "scripts/tests", "-p", "test_workspace_wiring_guards.py", "-v"]),
+                ("release-source-contracts", [sys.executable, "-m", "unittest", "discover", "-s", "scripts/tests", "-p", "test_release_evidence.py", "-v"]),
             ]
             if self.mode == "ci":
                 gates.insert(0, ("format", ["cargo", "fmt", "--all", "--check"]))
@@ -311,7 +322,7 @@ class Runner:
         selected = (args.crate,) if args.mode == "mocks" and args.crate else tuple(TARGETS)
         try:
             return cls(Path(__file__).resolve().parent.parent, selected, args.mode).run()
-        except (OSError, KeyboardInterrupt) as error:
+        except (OSError, ValueError, KeyboardInterrupt) as error:
             print(f"INCOMPLETE: evidence capture or execution interrupted: {error}", file=sys.stderr)
             return 1
 

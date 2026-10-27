@@ -1,0 +1,44 @@
+   Compiling storage-sdk v0.1.0 (/Users/connorsanders/l-language/ai-kit/storage-sdk)
+warning: linker stderr: ld: __eh_frame section too large (max 16MB) to encode dwarf unwind offsets in compact unwind table, performance of exception handling might be affected
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `storage-sdk` (test "strict_live") generated 1 warning
+    Finished `test` profile [unoptimized] target(s) in 16.61s
+warning: the following packages contain code that will be rejected by a future version of Rust: proc-macro-error2 v2.0.1
+note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`
+     Running tests/strict_live.rs (target/debug/deps/strict_live-29eeb6a5c25eb81b)
+
+running 1 test
+test database_cases::qdrant_edge_query_index ... QdrantEdge Nearest: passed
+
+thread 'database_cases::qdrant_edge_query_index' (2023136) panicked at storage-sdk/tests/database_cases/mod.rs:4655:13:
+assertion `left == right` failed
+  left: 2
+ right: 3
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+QdrantEdge SearchById: passed
+QdrantEdge Scroll: passed
+QdrantEdge Sample: passed
+QdrantEdge ScalarIndex: passed
+QdrantEdge FullTextIndex: passed
+QdrantEdge VectorIndex: passed
+QdrantEdge InvalidIndex: passed
+QdrantEdge Overwrite: passed
+QdrantEdge EmptyOverwrite: passed
+
+thread 'database_cases::qdrant_edge_query_index' (2023136) panicked at storage-sdk/tests/database_cases/mod.rs:312:9:
+real database cases failed:
+QdrantEdge NearestOffset: assertion `left == right` failed
+  left: 2
+ right: 3
+FAILED
+
+failures:
+
+failures:
+    database_cases::qdrant_edge_query_index
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 54 filtered out; finished in 5.20s
+
+error: test failed, to rerun pass `-p storage-sdk --test strict_live`

@@ -1,0 +1,118 @@
+{
+  "schema": 1,
+  "status": "PASS",
+  "packages": [
+    {
+      "name": "arrow-ipc",
+      "version": "58.4.1",
+      "archive_sha256": "165051f1f996f19b50c4d2cdb7ed02ddd400d8d984b422bf6848507eee099c3d",
+      "archive": "/private/tmp/ai-kit-arrow-ipc-58.4.1.crate",
+      "patch_sha256": "d5a993e98c32ab44670f9cdab99ae9b5b974976071ddb8d19b32f559055977b5",
+      "upstream_files": 22,
+      "patched_files": 22,
+      "changed_files": [
+        "Cargo.toml"
+      ],
+      "added_files": [],
+      "removed_files": [],
+      "status": "PASS"
+    },
+    {
+      "name": "lance-encoding",
+      "version": "13.0.0",
+      "archive_sha256": "3c04a91e545b505b5e6ec98854c7eadc56689cbc072f138dd26805ef0095e81a",
+      "archive": "/Users/connorsanders/.cargo/registry/cache/index.crates.io-1949cf8c6b5b557f/lance-encoding-13.0.0.crate",
+      "patch_sha256": "0a73e05b59b6ae9ce7ae16e558a56c8ae8ad484c276111eea64dc933fc4b6513",
+      "upstream_files": 91,
+      "patched_files": 92,
+      "changed_files": [
+        "Cargo.toml"
+      ],
+      "added_files": [
+        "LICENSE"
+      ],
+      "removed_files": [],
+      "status": "PASS"
+    },
+    {
+      "name": "include-flate-compress",
+      "version": "0.3.4",
+      "archive_sha256": "44fbb9c5ccb9a5b67b4afa2974c27e5507ea1bf6d22828cef418e4dfaeca51dd",
+      "archive": "/Users/connorsanders/.cargo/registry/cache/index.crates.io-1949cf8c6b5b557f/include-flate-compress-0.3.4.crate",
+      "patch_sha256": "c6f39aa90953296f71f80152da8db9d173a6599f4f1af07adb97f2b9cab2edc8",
+      "upstream_files": 5,
+      "patched_files": 6,
+      "changed_files": [
+        "Cargo.toml"
+      ],
+      "added_files": [
+        "LICENSE"
+      ],
+      "removed_files": [],
+      "status": "PASS"
+    },
+    {
+      "name": "object_store",
+      "version": "0.13.2",
+      "archive_sha256": "622acbc9100d3c10e2ee15804b0caa40e55c933d5aa53814cd520805b7958a49",
+      "archive": "/Users/connorsanders/.cargo/registry/cache/index.crates.io-1949cf8c6b5b557f/object_store-0.13.2.crate",
+      "patch_sha256": "cdcff636879e6ca0cd0688550795d872d9596fa64d9dfc12a0b8faff35ba2ffc",
+      "upstream_files": 64,
+      "patched_files": 64,
+      "changed_files": [
+        "Cargo.toml"
+      ],
+      "added_files": [],
+      "removed_files": [],
+      "status": "PASS"
+    },
+    {
+      "name": "surrealdb-core",
+      "version": "3.3.0",
+      "archive_sha256": "1490b831b5090b9bdbdacec5e8060d9dbc1944574809d157fabb4de25e53b1aa",
+      "archive": "/Users/connorsanders/.cargo/registry/cache/index.crates.io-1949cf8c6b5b557f/surrealdb-core-3.3.0.crate",
+      "patch_sha256": "45131a37fefd67a905b7aba69c98ae66afc7120ee551fa02898d3ea78c753dec",
+      "upstream_files": 724,
+      "patched_files": 724,
+      "changed_files": [
+        "Cargo.toml"
+      ],
+      "added_files": [],
+      "removed_files": [],
+      "status": "PASS"
+    },
+    {
+      "name": "geo",
+      "version": "0.32.0",
+      "archive_sha256": "3f3901269ec6d4f6068d3f09e5f02f995bd076398dcd1dfec407cd230b02d11b",
+      "archive": "/Users/connorsanders/.cargo/registry/cache/index.crates.io-1949cf8c6b5b557f/geo-0.32.0.crate",
+      "patch_sha256": "3b73e95aeea8c0bbd51b8480538b76a64b3e3a6be09112b43028cbb976668581",
+      "upstream_files": 217,
+      "patched_files": 219,
+      "changed_files": [
+        "Cargo.toml"
+      ],
+      "added_files": [
+        "LICENSE-APACHE",
+        "LICENSE-MIT"
+      ],
+      "removed_files": [],
+      "status": "PASS"
+    },
+    {
+      "name": "surrealdb-expr",
+      "version": "3.3.0",
+      "archive_sha256": "2e494e4696ac372ead8c0a8b38f830db056a34c8f4192be4cfadeea3089c8687",
+      "archive": "/Users/connorsanders/.cargo/registry/cache/index.crates.io-1949cf8c6b5b557f/surrealdb-expr-3.3.0.crate",
+      "patch_sha256": "43bc617b6b49718b5a8110e87d21bfd617d46ed72bf3c58a2581141834b7c44d",
+      "upstream_files": 327,
+      "patched_files": 327,
+      "changed_files": [
+        "Cargo.toml"
+      ],
+      "added_files": [],
+      "removed_files": [],
+      "status": "PASS"
+    }
+  ]
+}

@@ -1,7 +1,6 @@
 """Runner faults use command recording, never a stand-in backend service."""
 
 import contextlib
-import importlib.util
 import io
 import json
 import os
@@ -14,9 +13,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-SPEC = importlib.util.spec_from_file_location("mock_contract_runner", Path(__file__).resolve().parents[1] / "mock_contract_runner.py")
-RUNNER = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(RUNNER)
+from scripts import mock_contract_runner as RUNNER
 
 
 class Commands:
@@ -178,6 +175,36 @@ class RunnerTests(unittest.TestCase):
         with patch.object(runner, "mocks", side_effect=lambda: source.write_text("// changed\n")), contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(runner.run(), 1)
         self.assertEqual(runner.report["status"], "INCOMPLETE")
+
+    def test_verified_patch_binary_inputs_and_modes_change_fingerprint(self):
+        relative = "third-party/security/arrow-ipc-58.4.1/fixture.bin"
+        source = self.root / relative
+        source.parent.mkdir(parents=True)
+        source.write_bytes(b"original compressed bytes")
+        runner = RUNNER.Runner(self.root, ("tool-sdk",), "mocks", Commands())
+        with patch.object(RUNNER, "SecurityPatches", create=True) as patches:
+            patches.return_value.inputs.return_value = (relative,)
+            before = runner.fingerprint()
+            source.write_bytes(b"different compressed bytes")
+            after_content = runner.fingerprint()
+            self.assertNotEqual(before, after_content)
+            source.chmod(0o755)
+            self.assertNotEqual(after_content, runner.fingerprint())
+            patches.assert_called_with(self.root)
+
+    def test_invalid_patch_provenance_prevents_any_cargo_execution(self):
+        commands = Commands()
+        runner = RUNNER.Runner(self.root, tuple(RUNNER.TARGETS), "ci-tests", commands)
+        with patch.object(RUNNER, "SecurityPatches", create=True) as patches:
+            patches.return_value.inputs.side_effect = ValueError("patch source hash differs")
+            with self.assertRaisesRegex(ValueError, "patch source hash differs"):
+                runner.run()
+        self.assertFalse(any(call[0] == "cargo" for call in commands.calls))
+
+    def test_ci_bootstrap_runs_security_and_wiring_regressions(self):
+        _, _, commands, _ = self.run_fixture(mode="ci-tests")
+        for pattern in ("test_security_dependencies.py", "test_workspace_wiring_guards.py", "test_release_evidence.py"):
+            self.assertTrue(any(pattern in call for call in commands.calls), pattern)
 
     def test_provenance_failure_cannot_report_a_pass(self):
         commands = Commands()

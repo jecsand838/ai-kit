@@ -368,12 +368,13 @@ dispatchers and require exact absence of deleted public symbols.
 - `scripts/vendor_update.py` and crate-local vendor metadata own pinned-source
   refreshes.
 
-The integrated registry graph uses LanceDB 0.40.0 and Lance 13.0.0 for the
-local Database and StateStore products. Qdrant Edge remains at the explicitly
-selected 0.6.1 release so its geometry requirements coexist with SurrealDB
-3.3.0 without a Cargo patch or vendored dependency override. Remote Qdrant uses
-1.19.2. Consumer packages must resolve independently of workspace configuration
-and source trees; dependency guards have no third-party source exception.
+The integrated graph uses LanceDB 0.40.0 and Lance 13.0.0 for the local Database
+and StateStore products, Qdrant Edge 0.9.0, and SurrealDB 3.3.0. Remote Qdrant
+uses 1.19.2. Seven verified upstream source patches remediate the workspace
+dependency graph and reconcile Geo's overlay version requirement. The path and
+alias guards exempt only the verified source roots. Published consumers do not
+inherit root Cargo patches: their own workspace must provide the configuration
+in [the dependency security policy](docs/security-dependencies.md).
 
 LanceDB 0.40.0 enables its single approved `remote` feature because published
 job decoding references error variants guarded by that feature. The adapter

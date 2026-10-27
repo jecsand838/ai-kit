@@ -25,6 +25,11 @@ import time
 import tomllib
 import uuid
 
+if __package__:
+    from .security_dependencies import SecurityPatches
+else:
+    from security_dependencies import SecurityPatches
+
 
 CRATES = ("provider-sdk", "storage-sdk", "tool-sdk", "agent-sdk", "app-sdk")
 SUMMARY = re.compile(r"^test result: (ok|FAILED)\. (\d+) passed; (\d+) failed; (\d+) ignored; (\d+) measured; (\d+) filtered out", re.M)
@@ -278,6 +283,13 @@ class Command:
 
 class SourceIdentity:
     @staticmethod
+    def security_inputs(root):
+        try:
+            return set(SecurityPatches(root).inputs())
+        except (OSError, ValueError) as error:
+            raise EvidenceError(f"security patch provenance: {error}") from error
+
+    @staticmethod
     def doctest_output_independence(root, paths):
         # Admission for the narrow current-workspace directory equivalence. A
         # future doctest observing its executable/build environment needs a new
@@ -341,6 +353,7 @@ class SourceIdentity:
         arguments, _ = Command.unwrap(arguments)
         result = {name for name in ("Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "rustfmt.toml", ".rustfmt.toml") if (root / name).is_file()}
         result |= cls._tree(root, ".cargo")
+        result |= cls.security_inputs(root)
         cargo = Path(arguments[0]).name == "cargo"
         owners = set(Command.values(arguments, "-p", "--package")) if cargo else set()
         if cargo and not owners:
@@ -452,6 +465,7 @@ class SourceIdentity:
                 raise EvidenceError("scope review must explain every omitted input")
             # Root build inputs can never be removed by a scoped source audit.
             mandatory = {name for name in ("Cargo.toml", "Cargo.lock", "rust-toolchain.toml") if (root / name).is_file()}
+            mandatory |= cls.security_inputs(root)
             if not mandatory <= set(selected):
                 raise EvidenceError("scope override omits root build authority")
             paths = selected

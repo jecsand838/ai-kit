@@ -1,0 +1,11 @@
+      Loaded 1 security advisories (from /private/tmp/ai-kit-security-seven-parent-proof/advisory-db)
+    Scanning /private/tmp/ai-kit-security-seven-parent-proof/audit/patched-parents.lock for vulnerabilities (7 crate dependencies)
+Crate:     arrow-ipc
+Version:   58.4.1
+Title:     Injected patched-parent advisory
+Date:      2026-01-01
+ID:        RUSTSEC-2026-9999
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-9999
+Solution:  No fixed upgrade is available!
+
+error: 1 vulnerability found!

@@ -180,11 +180,22 @@ defaults and cloud object-store features disabled. This does not authorize
 remote supplied Storage routes, additional public behavior or unrelated
 dependency features; the local filesystem/memory boundary remains required.
 
-A separate approved exception permits exact registry `webbrowser =1.2.1`,
+A separate approved exception permits exact registry `webbrowser =1.2.5`,
 optional on macOS and activated only by Storage's `qdrant` feature, with defaults
-disabled. It constrains the demonstrated Edge 0.6.1 compiler failure without
-adding a browser API or Cargo patch. Preserve the broader lock-resolution impact
-and downstream limits in [Storage's dependency policy](storage-sdk/AGENTS.md#backend-and-secret-ownership).
+disabled. Qdrant Edge uses 0.9.0. This replaces the former 1.2.1 compiler
+workaround without adding a browser API. Preserve the broader lock-resolution
+impact and downstream limits in [Storage's dependency policy](storage-sdk/AGENTS.md#backend-and-secret-ownership).
+
+Seven explicitly approved upstream source patches under `third-party/security/`
+are excluded from workspace membership and verified by
+`scripts/security_dependencies.py`. Only successfully verified roots may retain
+upstream implementation conventions, including aliases, macros, unsafe code and
+test placement; all SDK architecture prohibitions and unrelated-path rejection
+remain binding. No other Cargo patches are authorized. Preserve the exact
+identities, original manifests, licenses, reviewed diffs, inventories and hashes
+described in [the dependency security policy](docs/security-dependencies.md).
+These root patches remediate workspace source builds; published SDK consumers
+must supply their own root patch configuration.
 
 ### Agents
 

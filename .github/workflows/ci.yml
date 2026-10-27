@@ -47,6 +47,9 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Verify checked-in dependency patches
+        run: python3 scripts/security_dependencies.py verify --root "$GITHUB_WORKSPACE"
+
       - name: Install the repository Rust toolchain
         run: |
           toolchain="$(python3 -c 'import tomllib; print(tomllib.load(open("rust-toolchain.toml", "rb"))["toolchain"]["channel"])')"
@@ -69,10 +72,10 @@ jobs:
             ~/.cargo/git
             target/debug
           # Bump v1 when changing artifact-affecting build settings, not timeouts/triggers.
-          key: cargo-unified-v1-nodebug-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'provider-sdk/Cargo.toml', 'storage-sdk/Cargo.toml', 'tool-sdk/Cargo.toml', 'agent-sdk/Cargo.toml', 'app-sdk/Cargo.toml') }}-tests
+          key: cargo-unified-v1-nodebug-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'provider-sdk/Cargo.toml', 'storage-sdk/Cargo.toml', 'tool-sdk/Cargo.toml', 'agent-sdk/Cargo.toml', 'app-sdk/Cargo.toml', 'third-party/security/**') }}-tests
           restore-keys: |
-            cargo-unified-v1-nodebug-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'provider-sdk/Cargo.toml', 'storage-sdk/Cargo.toml', 'tool-sdk/Cargo.toml', 'agent-sdk/Cargo.toml', 'app-sdk/Cargo.toml') }}-linting
-            cargo-unified-v1-nodebug-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'provider-sdk/Cargo.toml', 'storage-sdk/Cargo.toml', 'tool-sdk/Cargo.toml', 'agent-sdk/Cargo.toml', 'app-sdk/Cargo.toml') }}
+            cargo-unified-v1-nodebug-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'provider-sdk/Cargo.toml', 'storage-sdk/Cargo.toml', 'tool-sdk/Cargo.toml', 'agent-sdk/Cargo.toml', 'app-sdk/Cargo.toml', 'third-party/security/**') }}-linting
+            cargo-unified-v1-nodebug-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'provider-sdk/Cargo.toml', 'storage-sdk/Cargo.toml', 'tool-sdk/Cargo.toml', 'agent-sdk/Cargo.toml', 'app-sdk/Cargo.toml', 'third-party/security/**') }}
             cargo-unified-v1-nodebug-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-
 
       - name: Run all seven public-trait mock targets
@@ -140,6 +143,9 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Verify checked-in dependency patches
+        run: python3 scripts/security_dependencies.py verify --root "$GITHUB_WORKSPACE"
+
       - name: Install the repository Rust toolchain
         run: |
           toolchain="$(python3 -c 'import tomllib; print(tomllib.load(open("rust-toolchain.toml", "rb"))["toolchain"]["channel"])')"
@@ -162,10 +168,10 @@ jobs:
             ~/.cargo/git
             target/debug
           # Bump v1 when changing artifact-affecting build settings, not timeouts/triggers.
-          key: cargo-unified-v1-nodebug-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'provider-sdk/Cargo.toml', 'storage-sdk/Cargo.toml', 'tool-sdk/Cargo.toml', 'agent-sdk/Cargo.toml', 'app-sdk/Cargo.toml') }}-linting
+          key: cargo-unified-v1-nodebug-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'provider-sdk/Cargo.toml', 'storage-sdk/Cargo.toml', 'tool-sdk/Cargo.toml', 'agent-sdk/Cargo.toml', 'app-sdk/Cargo.toml', 'third-party/security/**') }}-linting
           restore-keys: |
-            cargo-unified-v1-nodebug-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'provider-sdk/Cargo.toml', 'storage-sdk/Cargo.toml', 'tool-sdk/Cargo.toml', 'agent-sdk/Cargo.toml', 'app-sdk/Cargo.toml') }}-tests
-            cargo-unified-v1-nodebug-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'provider-sdk/Cargo.toml', 'storage-sdk/Cargo.toml', 'tool-sdk/Cargo.toml', 'agent-sdk/Cargo.toml', 'app-sdk/Cargo.toml') }}
+            cargo-unified-v1-nodebug-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'provider-sdk/Cargo.toml', 'storage-sdk/Cargo.toml', 'tool-sdk/Cargo.toml', 'agent-sdk/Cargo.toml', 'app-sdk/Cargo.toml', 'third-party/security/**') }}-tests
+            cargo-unified-v1-nodebug-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'provider-sdk/Cargo.toml', 'storage-sdk/Cargo.toml', 'tool-sdk/Cargo.toml', 'agent-sdk/Cargo.toml', 'app-sdk/Cargo.toml', 'third-party/security/**') }}
             cargo-unified-v1-nodebug-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-
 
       - name: Lint libraries and mock targets with Clippy
@@ -227,6 +233,9 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Verify checked-in dependency patches
+        run: python3 scripts/security_dependencies.py verify --root "$GITHUB_WORKSPACE"
+
       - name: Install the pinned prebuilt security scanner
         working-directory: ${{ runner.temp }}
         run: |
@@ -238,20 +247,21 @@ jobs:
             cargo-audit.tgz | sha256sum --check --strict
           tar -xzf cargo-audit.tgz --strip-components=1
 
-      - name: Audit the committed lockfile against current RustSec advisories
+      - name: Audit the committed lockfile and verified upstream parents
         shell: bash
         working-directory: ${{ runner.temp }}
         run: |
-          ./cargo-audit audit \
-            --file "$GITHUB_WORKSPACE/Cargo.lock" \
-            --db "$RUNNER_TEMP/advisory-db" \
-            --no-yanked --deny unsound --color never 2>&1 | tee security-audit.log
+          python3 "$GITHUB_WORKSPACE/scripts/security_dependencies.py" audit \
+            --root "$GITHUB_WORKSPACE" \
+            --scanner "$RUNNER_TEMP/cargo-audit" \
+            --database "$RUNNER_TEMP/advisory-db" \
+            --output "$RUNNER_TEMP/security-audit"
 
       - name: Upload security audit diagnostics
         if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: security-audit-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/security-audit.log
+          path: ${{ runner.temp }}/security-audit/
           retention-days: 7
           if-no-files-found: warn

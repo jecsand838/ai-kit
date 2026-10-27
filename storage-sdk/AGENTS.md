@@ -154,16 +154,22 @@ ObjectStoreProvider and CommitHandler seams add no public behavior. Directory
 qualification remains scoped to macOS and Linux.
 
 For macOS builds with `qdrant`, retain the approved optional, exact
-`webbrowser =1.2.1` constraint with its direct default features disabled. This
-constrains LanceDB's transitive browser selection to avoid the Objective-C
-feature combination that triggers Edge 0.6.1's native `E0275` compile failure;
-SDK code does not call the added dependency. It is a registry-only compilation
-workaround, not a native patch or new public capability. A shared lock may select
-that version for other lanes too; review the complete graph and extracted
-consumer resolution. Another dependency can independently enable the same
-`objc2` features, so this constraint does not guarantee all downstream graphs
-compile. Keep those limits explicit; require current graph and runtime evidence
-before claiming qualification.
+`webbrowser =1.2.5` constraint with its direct default features disabled.
+Qdrant Edge uses exact 0.9.0; the former 1.2.1/Edge 0.6.1 compiler workaround
+is superseded. SDK code does not call the browser dependency. A shared lock may
+select that version for other lanes too; review the complete graph and extracted
+consumer resolution. This constraint does not guarantee arbitrary downstream
+Objective-C feature combinations compile. Require current graph and runtime
+evidence before claiming qualification.
+
+The workspace uses seven narrowly patched upstream packages under
+`third-party/security/`, including Geo 0.32's compatible overlay range and the
+native-only SurrealDB core/expression JWT configuration. Retain LanceDB 0.40.0,
+Lance 13, SurrealDB SDK/Core 3.3.0 and registry ObjectStore 0.14.2. Resolve the
+Arrow 58 family together at 58.4.1. Preserve all existing dependency features;
+the SurrealDB patches make no WASM compatibility promise. Follow the exact
+approved provenance, auditing and downstream root-patch configuration in
+[the dependency security policy](../docs/security-dependencies.md).
 
 The supplied StateStore has one direct Lance 13 implementation. Preserve its
 private schema version 1, Lance file format 2.0 and disabled stable row IDs;

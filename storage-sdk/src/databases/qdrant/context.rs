@@ -173,7 +173,10 @@ impl QdrantManager {
         match &self.config().mode {
             QdrantModeConfig::Edge { .. } => {
                 let collection = self.edge_collection(&locator)?;
-                let info = collection.shard().info();
+                let info = collection
+                    .shard()
+                    .info()
+                    .map_err(|error| self.map_err("edge_collection_info", error))?;
                 Ok(super::mapper::edge_shard_collection_info(
                     locator,
                     physical_name,

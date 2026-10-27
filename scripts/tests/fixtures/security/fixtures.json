@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "baseline_commit": "061f62b",
+  "toolchain": "1.99.0",
+  "generator_versions": {
+    "arrow-array": "58.3.0",
+    "arrow-buffer": "58.3.0",
+    "arrow-ipc": "58.3.0",
+    "arrow-schema": "58.3.0",
+    "include-flate-compress": "0.3.2",
+    "zstd": "0.13.3",
+    "zstd-safe": "7.2.4",
+    "zstd-sys": "2.0.16+zstd.1.5.7"
+  },
+  "files": {
+    "legacy-writer.rs": "37c89cf23ec63937454c81e4085c08b09e99e49c290a0ffdd7350e59abf7f371",
+    "legacy-Cargo.toml": "bad895fc62992266f742b742ffe4a04a2c2f421f2660a5381934c7701b048594",
+    "legacy-Cargo.lock": "2253c4172fbb522fb0ba6da43dbeca3865d6713c6298f507f24aa8fdae1be083",
+    "payload.txt": "b20754e06924b93580d772ef967e82d979d215aea5cc711c3800bf11bda6e034",
+    "zstd-0.13.3.zst": "9a92323bd2939cc23c5e1d5ec8521161763d25c679290f96eae448917bac0474",
+    "include-flate-compress-0.3.2.zst": "9a92323bd2939cc23c5e1d5ec8521161763d25c679290f96eae448917bac0474",
+    "arrow-ipc-58.3.0-zstd.arrow": "9047277c25bb1765070b3bb888daf7762d00907356fd416156b61fbfbcf4bdd6"
+  }
+}

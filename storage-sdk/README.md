@@ -242,17 +242,23 @@ existing feature-conditional configuration availability. Public traits and
 caller-defined static implementations are unchanged.
 
 On macOS, `qdrant` also activates an optional exact registry constraint on
-`webbrowser =1.2.1`. This keeps LanceDB's browser dependency from enabling the
-Objective-C trait combination that causes the selected Edge 0.6.1 to fail
-compilation. Storage exposes no browser API or separate browser feature.
+`webbrowser =1.2.5`, alongside Qdrant Edge 0.9.0. This replaces the former
+1.2.1/Edge 0.6.1 compiler workaround. Storage exposes no browser API or separate browser feature.
 Cargo resolves optional workspace features and target tables when generating
-the lockfile, so this constraint can also select 1.2.1 for other platforms and
+the lockfile, so this constraint can also select 1.2.5 for other platforms and
 feature lanes. Consumers requiring a newer incompatible browser constraint
 may fail dependency resolution. Independently enabling the same Objective-C
-features can still expose the native Edge compiler limitation; this mitigation
-does not establish compatibility with arbitrary downstream dependency graphs.
+features requires independent native validation; this constraint does not
+establish compatibility with arbitrary downstream dependency graphs.
 See the [dependency policy](AGENTS.md#backend-and-secret-ownership) for its
 validation boundaries.
+
+Workspace source builds use seven verified upstream patches for dependency
+security and native compatibility. Cargo does not propagate those patches from
+a published SDK dependency to your project. Follow the required downstream
+root configuration in [the dependency security policy](../docs/security-dependencies.md)
+to obtain the same remediation. SurrealDB support here targets native builds;
+the patches make no WASM compatibility promise.
 
 `sqlite` and `qdrant` cannot be enabled together: their pinned dependencies
 require incompatible `parking_lot` features. Cargo combines features across

@@ -1,0 +1,260 @@
+//! User-defined function expression - fn::my_function(), etc.
+
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use surrealdb_strand::Strand;
+use surrealdb_types::{SqlFormat, ToSql};
+
+use super::helpers::{
+	args_access_mode, args_required_context, check_permission, evaluate_args, validate_arg_count,
+	validate_return,
+};
+use crate::catalog::providers::DatabaseProvider;
+use crate::dbs::capabilities::Error as CapabilitiesError;
+use crate::exec::physical_expr::{BlockPhysicalExpr, EvalContext, PhysicalExpr};
+use crate::exec::{AccessMode, BoxFut, Error as ExecError};
+use crate::expr::{ControlFlow, Error as ExprError, FlowResult};
+use crate::val::Value;
+
+/// User-defined function expression - fn::my_function(), etc.
+///
+/// These functions are stored in the database and retrieved at runtime.
+#[derive(Debug, Clone)]
+pub struct UserDefinedFunctionExec {
+	/// Function name without the "fn::" prefix
+	pub(crate) name: String,
+	pub(crate) arguments: Vec<Arc<dyn PhysicalExpr>>,
+	/// Expression-nesting depth recorded when this call was planned. The body,
+	/// planned lazily on call, is seeded with it so nested `eval`/UDF recursion
+	/// keeps counting toward `max_computation_depth` instead of resetting.
+	pub(crate) plan_depth: u32,
+	/// Access mode of the callee's body, resolved at plan time against the call
+	/// graph in the plan-time snapshot ([`crate::fnc::mutability`], conservative
+	/// polarity: opaque bodies and undefined callees count as `ReadWrite`).
+	/// `ReadWrite` when the planner had no transaction to resolve against — the
+	/// safe over-approximation, matching `resolve_module_writeable`. Combined
+	/// with the arguments' access modes in [`Self::access_mode`].
+	pub(crate) body_access_mode: AccessMode,
+}
+impl PhysicalExpr for UserDefinedFunctionExec {
+	fn name(&self) -> &'static str {
+		"UserDefinedFunction"
+	}
+
+	fn as_any(&self) -> &dyn std::any::Any {
+		self
+	}
+
+	fn required_context(&self) -> crate::exec::ContextLevel {
+		// User-defined functions are stored in the database, and arguments
+		// may have their own context requirements
+		args_required_context(&self.arguments).max(crate::exec::ContextLevel::Database)
+	}
+
+	fn evaluate<'a>(&'a self, ctx: EvalContext<'a>) -> BoxFut<'a, FlowResult<Value>> {
+		Box::pin(async move {
+			let func_name = format!("fn::{}", self.name);
+
+			// 1. Require database context (propagate core Error so it downcasts to Validation)
+			let db_ctx =
+				ctx.exec_ctx.database().map_err(|e| ControlFlow::Err(anyhow::Error::new(e)))?;
+
+			// 2. Check if function is allowed by capabilities
+			if !ctx.capabilities().allows_function_name(&func_name) {
+				return Err(
+					anyhow::Error::new(CapabilitiesError::FunctionNotAllowed(func_name)).into()
+				);
+			}
+
+			// 3. Retrieve function definition
+			let ns_id = db_ctx.ns_ctx.ns.namespace_id;
+			let db_id = db_ctx.db.database_id;
+			let func_def = ctx
+				.txn()
+				.get_db_function(ns_id, db_id, &self.name, ctx.exec_ctx.version_stamp())
+				.await
+				.map_err(|e| anyhow::anyhow!("Function '{}' not found: {}", func_name, e))?;
+
+			// 4. Apply auth limiting — cap the caller's privileges to the definer's auth level,
+			//    matching the old compute path behaviour.
+			let auth_limit =
+				crate::iam::AuthLimit::try_from(&func_def.auth_limit).map_err(|e| {
+					anyhow::anyhow!("Invalid auth limit on function '{}': {}", func_name, e)
+				})?;
+			let limited_ctx = ctx.exec_ctx.with_limited_auth(&auth_limit);
+			let ctx = EvalContext {
+				exec_ctx: &limited_ctx,
+				current_value: ctx.current_value,
+				local_params: ctx.local_params,
+				recursion_ctx: ctx.recursion_ctx,
+				document_root: ctx.document_root,
+				skip_fetch_perms: ctx.skip_fetch_perms,
+				computing_record: ctx.computing_record,
+				plan_depth: ctx.plan_depth,
+			};
+
+			// 5. Check permissions (with limited auth)
+			if ctx.exec_ctx.should_check_perms(crate::iam::Action::View)? {
+				check_permission(&func_def.permissions, &func_name, &ctx).await?;
+			}
+
+			// 6. Evaluate all arguments
+			let evaluated_args = evaluate_args(&self.arguments, ctx.clone()).await?;
+
+			// 7. Validate argument count
+			validate_arg_count(&func_name, evaluated_args.len(), &func_def.args)?;
+
+			// 8. Create isolated context with function parameters bound
+			let mut local_params: HashMap<Strand, Value> = HashMap::new();
+			for ((param_name, kind), arg_value) in func_def.args.iter().zip(evaluated_args) {
+				let coerced = arg_value.coerce_to_kind(kind).map_err(|e| {
+					ExprError::InvalidFunctionArguments {
+						name: func_name.clone(),
+						message: format!("Failed to coerce argument `${param_name}`: {e}"),
+					}
+				})?;
+				local_params.insert(param_name.as_str().into(), coerced);
+			}
+
+			// 9. Create a new execution context with the parameters
+			let mut isolated_ctx = limited_ctx.clone();
+			for (name, value) in &local_params {
+				isolated_ctx = isolated_ctx.with_param(name.clone(), value.clone());
+			}
+
+			// 9. Execute the function block. The block is re-planned into physical expressions on
+			//    every call (see `BlockPhysicalExpr`'s doc comment -- deliberately not cached, to
+			//    let the planner see resolved LET bindings).
+			let block_expr = BlockPhysicalExpr {
+				block: func_def.block.clone(),
+				// The body is stored separately from any caller and is planned
+				// in its own scope, so it inherits no MATCHES registrations
+				// from the statement that called it.
+				matches_scope: None,
+			};
+			let eval_ctx = EvalContext {
+				exec_ctx: &isolated_ctx,
+				current_value: ctx.current_value,
+				local_params: Some(&local_params),
+				recursion_ctx: None,
+				document_root: None,
+				skip_fetch_perms: ctx.skip_fetch_perms,
+				computing_record: ctx.computing_record.clone(),
+				// The body is one re-entry deeper than the call, so continue the
+				// depth count at `plan_depth + 1` (it is planned lazily below, in
+				// BlockPhysicalExpr) to keep nested recursion bounded.
+				plan_depth: self.plan_depth + 1,
+			};
+			let result = match block_expr.evaluate(eval_ctx).await {
+				Ok(v) => v,
+				Err(ControlFlow::Return(v)) => v,
+				Err(ControlFlow::Break) | Err(ControlFlow::Continue) => {
+					// BREAK/CONTINUE inside a function (outside of loop) is an error
+					return Err(ExecError::InvalidControlFlow.into());
+				}
+				Err(e) => return Err(e),
+			};
+
+			// 10. Validate and coerce return type
+			Ok(validate_return(&func_name, func_def.returns.as_ref(), result)?)
+		})
+	}
+
+	fn access_mode(&self) -> AccessMode {
+		// The body's access mode was resolved at plan time through the call
+		// graph; combine it with the arguments, which are evaluated at the call
+		// site. A body that provably only reads lets the caller keep its
+		// read-only fast paths (fan-out overlap, buffered read streams).
+		self.body_access_mode.combine(args_access_mode(&self.arguments))
+	}
+}
+
+impl ToSql for UserDefinedFunctionExec {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		f.push_str("fn::");
+		f.push_str(&self.name);
+		f.push_str("(...)");
+	}
+}
+
+#[cfg(all(test, feature = "kv-mem"))]
+#[allow(clippy::unwrap_used)]
+mod tests {
+	use crate::exec::AccessMode;
+	use crate::exec::operators::test_util::TestDb;
+	use crate::exec::planner::Planner;
+
+	/// Plan `expression` against a txn-backed planner over `db` and return the
+	/// resolved access mode of the resulting physical expression tree.
+	async fn access_mode_of(db: &TestDb, expression: &str) -> AccessMode {
+		let ctx = db.exec_ctx().await;
+		let crate::exec::ExecutionContext::Database(db_ctx) = &ctx else {
+			panic!("exec_ctx builds a Database context");
+		};
+		let txn = ctx.txn();
+		let planner = Planner::with_txn(
+			ctx.ctx(),
+			&db_ctx.ns_ctx.root.function_registry,
+			txn,
+			Some("test".to_owned()),
+			Some("test".to_owned()),
+		);
+		let expr: crate::expr::Expr = crate::syn::expr(expression).unwrap().into();
+		planner.physical_expr(expr).await.unwrap().access_mode()
+	}
+
+	#[tokio::test]
+	async fn a_read_only_udf_resolves_read_only() {
+		let db = TestDb::new(
+			"DEFINE FUNCTION fn::pure() { RETURN 1; };
+			 DEFINE FUNCTION fn::relay() { RETURN fn::pure(); };",
+		)
+		.await;
+		assert_eq!(access_mode_of(&db, "fn::pure()").await, AccessMode::ReadOnly);
+		// Read-only through a call hop stays read-only.
+		assert_eq!(access_mode_of(&db, "fn::relay()").await, AccessMode::ReadOnly);
+	}
+
+	#[tokio::test]
+	async fn a_writing_udf_resolves_read_write() {
+		let db = TestDb::new(
+			"DEFINE TABLE log SCHEMALESS;
+			 DEFINE FUNCTION fn::sink() { CREATE log; RETURN 1; };",
+		)
+		.await;
+		assert_eq!(access_mode_of(&db, "fn::sink()").await, AccessMode::ReadWrite);
+	}
+
+	#[tokio::test]
+	async fn an_undefined_callee_resolves_read_write() {
+		// Late binding: the callee may be defined to write later, so the
+		// conservative resolution must not license a read-only fast path now.
+		let db = TestDb::new("").await;
+		assert_eq!(access_mode_of(&db, "fn::ghost()").await, AccessMode::ReadWrite);
+	}
+
+	#[tokio::test]
+	async fn a_body_invoking_a_closure_field_resolves_read_write() {
+		// `$o.w()` is not a registered method, so it invokes a closure stored
+		// on the receiver — a body the facts walk cannot see. The body must
+		// count as opaque and force a conservative read-write resolution.
+		let db =
+			TestDb::new("DEFINE FUNCTION fn::call_field($o: object) { RETURN $o.w(); };").await;
+		assert_eq!(access_mode_of(&db, "fn::call_field({ w: || 1 })").await, AccessMode::ReadWrite);
+	}
+
+	#[tokio::test]
+	async fn a_read_only_body_with_a_writing_argument_is_read_write() {
+		// The body only reads, but a writing function passed as the argument is
+		// evaluated at the call site, so the call as a whole is read-write —
+		// `access_mode` combines the resolved body mode with the arguments'.
+		let db = TestDb::new(
+			"DEFINE TABLE log SCHEMALESS;
+			 DEFINE FUNCTION fn::id($x: any) { RETURN $x; };
+			 DEFINE FUNCTION fn::sink() { CREATE log; RETURN 1; };",
+		)
+		.await;
+		assert_eq!(access_mode_of(&db, "fn::id(fn::sink())").await, AccessMode::ReadWrite);
+	}
+}

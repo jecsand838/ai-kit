@@ -103,7 +103,11 @@ impl QdrantManager {
         tokio::time::timeout(Duration::from_millis(request.timeout_ms), async {
             let missing = match &self.config().mode {
                 QdrantModeConfig::Edge { .. } => {
-                    let info = self.edge_collection(&request.locator)?.shard().info();
+                    let info = self
+                        .edge_collection(&request.locator)?
+                        .shard()
+                        .info()
+                        .map_err(|error| self.map_err("edge_wait_for_index", error))?;
                     request
                         .index_names
                         .iter()

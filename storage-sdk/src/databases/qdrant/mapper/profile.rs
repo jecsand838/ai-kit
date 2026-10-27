@@ -96,25 +96,14 @@ impl VectorProfile {
         for (name, size) in &self.dense {
             vectors.insert(
                 name.clone(),
-                qdrant_edge::EdgeVectorParams {
-                    size: *size,
-                    distance: qdrant_edge::Distance::Cosine,
-                    on_disk: None,
-                    multivector_config: None,
-                    datatype: None,
-                    quantization_config: None,
-                    hnsw_config: None,
-                },
+                qdrant_edge::EdgeVectorParams::builder(*size, qdrant_edge::Distance::Cosine)
+                    .build(),
             );
         }
-        qdrant_edge::EdgeConfig {
-            on_disk_payload: false,
-            vectors,
-            sparse_vectors: HashMap::new(),
-            hnsw_config: qdrant_edge::HnswIndexConfig::default(),
-            quantization_config: None,
-            optimizers: qdrant_edge::EdgeOptimizersConfig::default(),
-        }
+        qdrant_edge::EdgeConfig::builder()
+            .vectors(vectors)
+            .payload_memory(qdrant_edge::Memory::Cached)
+            .build()
     }
 }
 

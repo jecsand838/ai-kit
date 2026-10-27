@@ -1,0 +1,60 @@
+    Fetching advisory database from `https://github.com/RustSec/advisory-db.git`
+      Loaded 1378 security advisories (from /private/tmp/ai-kit-cargo-audit-0.22.2/advisory-db)
+    Scanning /Users/connorsanders/l-language/ai-kit/Cargo.lock for vulnerabilities (999 crate dependencies)
+Crate:     atomic-polyfill
+Version:   1.0.3
+Warning:   unmaintained
+Title:     atomic-polyfill is unmaintained
+Date:      2023-07-11
+ID:        RUSTSEC-2023-0089
+URL:       https://rustsec.org/advisories/RUSTSEC-2023-0089
+
+Crate:     bincode
+Version:   1.3.3
+Warning:   unmaintained
+Title:     Bincode is unmaintained
+Date:      2025-12-16
+ID:        RUSTSEC-2025-0141
+URL:       https://rustsec.org/advisories/RUSTSEC-2025-0141
+
+Crate:     bincode
+Version:   2.0.1
+Warning:   unmaintained
+Title:     Bincode is unmaintained
+Date:      2025-12-16
+ID:        RUSTSEC-2025-0141
+URL:       https://rustsec.org/advisories/RUSTSEC-2025-0141
+
+Crate:     paste
+Version:   1.0.15
+Warning:   unmaintained
+Title:     paste - no longer maintained
+Date:      2024-10-07
+ID:        RUSTSEC-2024-0436
+URL:       https://rustsec.org/advisories/RUSTSEC-2024-0436
+
+Crate:     proc-macro-error2
+Version:   2.0.1
+Warning:   unmaintained
+Title:     proc-macro-error2 is unmaintained
+Date:      2026-06-07
+ID:        RUSTSEC-2026-0173
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0173
+
+Crate:     serde_cbor
+Version:   0.11.2
+Warning:   unmaintained
+Title:     serde_cbor is unmaintained
+Date:      2021-08-15
+ID:        RUSTSEC-2021-0127
+URL:       https://rustsec.org/advisories/RUSTSEC-2021-0127
+
+Crate:     unsafe-libyaml
+Version:   0.2.11
+Warning:   unmaintained
+Title:     unsafe-libyaml is unmaintained
+Date:      2024-03-25
+ID:        RUSTSEC-2024-0449
+URL:       https://rustsec.org/advisories/RUSTSEC-2024-0449
+
+warning: 7 allowed warnings found

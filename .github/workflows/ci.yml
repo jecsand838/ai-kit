@@ -61,9 +61,10 @@ jobs:
 
       - name: Check formatting, Clippy, and all public-trait mocks
         id: validation
-        # Leave time for diagnostics after the CI runner is interrupted.
+        # Signal the runner directly so it joins its Cargo process group before
+        # caches are archived. GitHub's step timeout is a final backstop.
         timeout-minutes: 12
-        run: bash scripts/check_ci.sh
+        run: exec timeout --signal=TERM --kill-after=10s 11m bash scripts/check_ci.sh
 
       - name: Report build disk usage
         if: ${{ always() }}

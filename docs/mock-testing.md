@@ -72,16 +72,20 @@ failures early. Local runners default to one compiler worker unless callers set
 `CARGO_BUILD_JOBS`; Cargo commands themselves remain serial.
 
 After a failed cache-miss validation, the workflow preserves partial compiled
-outputs under a unique key extending the normal cache key. This includes a CI
-step timeout, but excludes cancelled runs. A later run can restore that prefix
-match, let Cargo validate and finish compilation, and execute all required tests
+outputs under a unique key extending the normal cache key. This includes a
+controlled validation timeout, but excludes cancelled runs. A later run can
+restore that prefix match, let Cargo validate and finish compilation, and execute all required tests
 again. Only a successful run saves the normal complete-cache key. Partial caches
 contain no reports, never satisfy a check by themselves, and never turn the
 original failure into a pass. They prevent a cold build from repeatedly losing
 completed work when it exceeds one run's budget.
 
 Superseded runs for the same PR or branch are cancelled. The job has a provisional
-15-minute ceiling, with a 12-minute CI step limit to leave time for diagnostics.
+15-minute ceiling. GNU `timeout` sends TERM directly to the CI runner after
+11 minutes, allowing its existing signal handler to terminate and join the
+owned Cargo process group before cache archiving. A ten-second forced-kill
+backstop and GitHub's 12-minute step limit bound failed cleanup. This avoids
+archiving files while a compiler continues writing after a hard step timeout.
 Timeouts fail validation; they do not waive tests. Fresh reports and logs from
 `target/mock-contracts/` are uploaded after success or failure when available and
 retained for seven days. GitHub step timings, report durations, and the final

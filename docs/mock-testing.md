@@ -43,64 +43,83 @@ produce PASS evidence. There are no automatic retries or reused pass receipts.
 
 ## GitHub Actions
 
-[The CI workflow](../.github/workflows/ci.yml) runs this same entrypoint in one
-`ubuntu-24.04` job on pull requests targeting `main`, pushes to `main`, and manual
-dispatch. It uses the repository's pinned Rust toolchain with Clippy and rustfmt,
-read-only repository permissions, and no provider credentials or service
-containers. Select **Deterministic CI** as the required status check in the
-repository's branch protection or ruleset after its first GitHub run.
+[The CI workflow](../.github/workflows/ci.yml) runs four `ubuntu-24.04` jobs on
+pull requests targeting `main`, pushes to `main`, and manual dispatch. It uses
+read-only repository permissions and no provider credentials or service
+containers. Configure **Formatting**, **Tests**, **Linting**, and **Security audit**
+as required status checks; replace any former **Deterministic CI** requirement.
 
-The workflow requires all seven mock targets, including on cache hits.
-It does not run strict-live, native backend integration, capacity,
-dependency test suites, optional-backend matrices, or the macOS-only restricted
-runtime qualifier. App's existing `compile_contract` is compiled but not run.
+| Check | Work | Job ceiling |
+| --- | --- | --- |
+| Formatting | Pinned Rust toolchain, `cargo fmt --all --check` | 5 minutes |
+| Tests | `python3 scripts/mock_contract_runner.py ci-tests`: guards, runner contracts, unified compile proofs, all seven public-trait mock targets | 20 minutes |
+| Linting | `python3 scripts/mock_contract_runner.py ci-lint`: one Clippy invocation over the five libraries and selected mock targets, with warnings denied | 10 minutes |
+| Security audit | Pinned prebuilt `cargo-audit`, committed `Cargo.lock`, current RustSec advisories | 5 minutes |
+
+Formatting gates Tests, and Tests gates Linting so Clippy can reuse compiled
+outputs instead of starting a second cold build concurrently. Failed or cancelled
+prerequisite jobs prevent their dependent jobs from running. Security audit runs
+independently. Separate jobs add runner setup and cache transfer overhead in
+exchange for distinct checks. The existing local `bash scripts/check_ci.sh`
+entrypoint still runs formatting, guards, runner contracts, build, Clippy, and
+all mocks together; it does not perform the security audit. The split runner
+modes preserve the same feature selection and complete-inventory requirements.
+
+Tests requires all seven mock targets on every run, including cache hits.
+Strict-live, native backend integration, capacity, dependency test suites,
+optional-backend matrices, and the macOS-only restricted runtime qualifier stay
+outside this workflow. App's existing `compile_contract` is compiled but not run.
 These exclusions do not change the separate release gates.
 
 Cargo dependencies still compile, including unconditional LanceDB/Lance/Arrow
-dependencies. The workflow installs their native build prerequisites and uses
+dependencies. Tests and Linting install their native build prerequisites and use
 two build workers, no incremental compilation, and no development/test debug
-information. Cargo downloads and `target/debug` are cached by Ubuntu version,
+information. Both cache Cargo downloads and `target/debug` by Ubuntu version,
 architecture, toolchain, explicit build-settings version, lockfile, and workspace
-manifests. Timeout/trigger changes do not invalidate compiled dependencies.
-Dependency changes can restore an older cache for the same toolchain/settings;
-Cargo decides which outputs need rebuilding. Successful runs save missing cache
-entries, including PR-local caches for dependency-changing PRs. Exact cache hits
-do not upload another copy. `main` runs maintain the shared cache; GitHub isolates
-PR-created caches to that PR, so the first `main` run must create its own cache.
-Test receipts are never cached. Formatting is also
-checked before native package installation and cache transfer to reject cheap
-failures early. Local runners default to one compiler worker unless callers set
-`CARGO_BUILD_JOBS`; Cargo commands themselves remain serial.
+manifests. Separate `-tests` and `-linting` primary keys let each job preserve its
+own outputs. A cache miss can restore the other job's current dependency cache,
+the previous combined CI cache, or an older dependency cache under the same
+toolchain/settings prefix. Cargo decides what needs rebuilding. Exact hits do
+not upload another copy. Formatting and Security audit do not transfer build
+caches or install native build prerequisites.
 
-After a failed cache-miss validation, the workflow preserves partial compiled
-outputs under a unique key extending the normal cache key. This includes a
-controlled validation timeout, but excludes cancelled runs. A later run can
-restore that prefix match, let Cargo validate and finish compilation, and execute all required tests
-again. Only a successful run saves the normal complete-cache key. Partial caches
-contain no reports, never satisfy a check by themselves, and never turn the
-original failure into a pass. They prevent a cold build from repeatedly losing
-completed work when it exceeds one run's budget.
+`main` maintains the shared cache. GitHub isolates PR-created caches to their PR,
+so the first `main` run creates its own cache. Test receipts are never cached.
+After a failed cache-miss validation, Tests or Linting preserves partial compiled
+outputs under a unique key extending its primary key. Cancelled runs do not save
+partial caches. A rerun can restore the partial cache, let Cargo validate it, and
+execute its required checks again. Partial caches never satisfy a check or turn
+the original failure into a pass; only a successful run saves its normal key.
 
-Superseded runs for the same PR or branch are cancelled. The job has a
-20-minute ceiling. GNU `timeout` sends TERM directly to the CI runner after
-18 minutes, allowing its existing signal handler to terminate and join the
-owned Cargo process group before cache archiving. A ten-second forced-kill
-backstop and GitHub's 19-minute step limit bound failed cleanup. This avoids
-archiving files while a compiler continues writing after a hard step timeout.
-Timeouts fail validation; they do not waive tests. Fresh reports and logs from
-`target/mock-contracts/` are uploaded after success or failure when available and
-retained for seven days. GitHub step timings, report durations, and the final
-disk-usage step provide cold/cached build measurements. Initial hosted runs
-exhausted shorter validation budgets during native dependency compilation.
-The 20-minute ceiling gives cold compilation more headroom to avoid making a
-failed run and retry the normal bootstrap path; cached runs finish as soon as
-checks complete.
-If an unusually slow cold build still times out, rerun the failed job to reuse
-its partial cache. Incomplete runs remain failed and cannot authorize merging.
-The timeout is a spending ceiling, not a target duration. Routine runs still
-require the complete current-source test inventory, regardless of the cache
-restored. Local timings and cached recovery do not establish a single cold
-hosted run's duration.
+Superseded runs for the same PR or branch are cancelled. Tests sends TERM to the
+runner after 18 minutes with a 19-minute hard step backstop; Linting uses 8 and
+9 minutes respectively. GNU `timeout` permits the runner to terminate and join
+its Cargo process group before archiving, with a ten-second forced-kill backstop.
+Timeouts fail validation and do not waive tests. Job ceilings bound spending;
+checks finish as soon as work completes. An unusually slow cold build can reuse
+its partial cache on a failed-job rerun, but incomplete runs cannot authorize
+merging. Local timings and cached recovery do not establish cold hosted timing.
+Fresh reports and logs are uploaded under separate job-specific artifact names
+and retained for seven days. Local runners default to one compiler worker unless
+callers set `CARGO_BUILD_JOBS`; Cargo commands themselves remain serial.
+
+### Security audit policy
+
+The security job downloads the official cargo-audit 0.22.2 Linux binary and checks
+its pinned SHA-256 before executing it. It fetches current RustSec advisories and
+scans the entire committed lockfile, including optional and target-specific
+packages. It neither compiles nor tests dependencies, updates the lockfile, nor
+runs provider requests. Scanner download, checksum, database, and audit failures
+fail the job. The audit runs outside the checkout with an explicit lockfile path;
+repository-local scanner configuration cannot silently weaken the check.
+
+Known vulnerabilities and unsoundness advisories are blocking. Unmaintained
+package warnings remain visible but are not denied. `--no-yanked` omits registry
+yank checks, not security advisories. There are no ignored advisory IDs, baseline
+exceptions, or `continue-on-error`. Explicit Bash pipefail preserves the scanner's
+failure status while `tee` retains the complete diagnostic log as an artifact.
+Existing dependency findings require remediation or a separately reviewed policy
+decision; adding the job does not approve dependency changes or suppressions.
 
 ## Test ownership and boundaries
 

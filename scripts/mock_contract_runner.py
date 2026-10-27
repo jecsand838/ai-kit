@@ -22,6 +22,7 @@ TARGETS = {
     "agent-sdk": ("mock_contracts", "custom_mock_composition"),
     "app-sdk": ("mock_contracts", "workflow_mock_composition"),
 }
+CI_MODES = ("ci", "ci-tests", "ci-lint")
 SUMMARY = re.compile(
     r"^test result: (ok|FAILED)\. (\d+) passed; (\d+) failed; (\d+) ignored; "
     r"(\d+) measured; (\d+) filtered out;", re.M
@@ -154,10 +155,10 @@ class Runner:
             stage, output = self.command(name, command, "provenance")
             self.report[name] = output.strip() if stage["status"] == "PASS" else None
         self.report["features"] = {
-            crate: ["--no-default-features"] if self.mode == "ci" else self.features(crate) or ["default"]
+            crate: ["--no-default-features"] if self.mode in CI_MODES else self.features(crate) or ["default"]
             for crate in self.selected
         }
-        self.report["dependency_features"] = "unified across five packages" if self.mode == "ci" else "per selected package"
+        self.report["dependency_features"] = "unified across five packages" if self.mode in CI_MODES else "per selected package"
         self.report["build_environment"] = {key: self.environment[key] for key in ("CARGO_INCREMENTAL", "CARGO_BUILD_JOBS")}
         self.save()
 
@@ -260,29 +261,35 @@ class Runner:
         return executables
 
     def ci(self):
-        for name, command in (
-            ("format", ["cargo", "fmt", "--all", "--check"]),
-            ("no-path-wiring", ["bash", "scripts/check_no_path_wiring.sh"]),
-            ("no-type-aliases", ["bash", "scripts/check_no_type_aliases.sh"]),
-            ("runner-contracts", [sys.executable, "-m", "unittest", "discover", "-s", "scripts/tests", "-p", "test_mock_contract_runner.py", "-v"]),
-        ):
-            stage, _ = self.command(name, command)
-            if stage["status"] != "PASS":
-                return
+        if self.mode != "ci-lint":
+            gates = [
+                ("no-path-wiring", ["bash", "scripts/check_no_path_wiring.sh"]),
+                ("no-type-aliases", ["bash", "scripts/check_no_type_aliases.sh"]),
+                ("runner-contracts", [sys.executable, "-m", "unittest", "discover", "-s", "scripts/tests", "-p", "test_mock_contract_runner.py", "-v"]),
+            ]
+            if self.mode == "ci":
+                gates.insert(0, ("format", ["cargo", "fmt", "--all", "--check"]))
+            for name, command in gates:
+                stage, _ = self.command(name, command)
+                if stage["status"] != "PASS":
+                    return
         targets = list(dict.fromkeys(target for targets in TARGETS.values() for target in targets))
         arguments = [argument for target in targets for argument in ("--test", target)]
-        build, output = self.command("workspace-mock-build", self.ci_cargo(
-            "build", "--profile", "test", "--keep-going", *arguments,
-            "--test", "compile_contract", "--message-format=json"), "dependency-preparation")
-        executables = self.compiled_executables(output, build)
-        self.command("workspace-mock-clippy", self.ci_cargo(
-            "clippy", "--lib", "--keep-going", *arguments, "--", "--no-deps", "-D", "warnings"))
+        executables = {}
+        if self.mode != "ci-lint":
+            build, output = self.command("workspace-mock-build", self.ci_cargo(
+                "build", "--profile", "test", "--keep-going", *arguments,
+                "--test", "compile_contract", "--message-format=json"), "dependency-preparation")
+            executables = self.compiled_executables(output, build)
+        if self.mode != "ci-tests":
+            self.command("workspace-mock-clippy", self.ci_cargo(
+                "clippy", "--lib", "--keep-going", *arguments, "--", "--no-deps", "-D", "warnings"))
         for (crate, target), executable in executables.items():
             self.behavioral(crate, target, executable)
 
     def run(self):
         self.metadata()
-        self.ci() if self.mode == "ci" else self.mocks()
+        self.ci() if self.mode in CI_MODES else self.mocks()
         self.report["source_after"] = self.fingerprint()
         if self.report["source_after"] != self.report["source_before"]:
             self.report["stages"].append({"name": "source-stability", "status": "INCOMPLETE", "error": "source changed during validation; results are not one coherent source snapshot"})
@@ -298,7 +305,8 @@ class Runner:
         subparsers = parser.add_subparsers(dest="mode", required=True)
         mocks = subparsers.add_parser("mocks", allow_abbrev=False)
         mocks.add_argument("--crate", choices=tuple(TARGETS))
-        subparsers.add_parser("ci", allow_abbrev=False)
+        for mode in CI_MODES:
+            subparsers.add_parser(mode, allow_abbrev=False)
         args = parser.parse_args(arguments)
         selected = (args.crate,) if args.mode == "mocks" and args.crate else tuple(TARGETS)
         try:

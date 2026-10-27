@@ -303,6 +303,70 @@ class RunnerTests(unittest.TestCase):
                 self.assertEqual(Path(cwd), self.root / Path(command[0]).parent.name)
         self.assertEqual(report["features"], {crate: ["--no-default-features"] for crate in RUNNER.TARGETS})
 
+    def test_ci_tests_runs_the_full_mock_inventory_without_formatting_or_clippy(self):
+        result, report, commands, _ = self.run_fixture(mode="ci-tests")
+        self.assertEqual(result, 0)
+        self.assertEqual(report["mode"], "ci-tests")
+        cargo = [call for call in commands.calls if call[0] == "cargo"]
+        self.assertEqual(len(cargo), 1)
+        self.assertEqual(cargo[0][:2], ["cargo", "build"])
+        self.assertIn("--locked", cargo[0])
+        self.assertIn("--no-default-features", cargo[0])
+        self.assertEqual(len([row for row in report["stages"] if row["kind"] == "compile-only"]), 8)
+        executed = [row for row in report["stages"] if row["kind"] == "behavioral"]
+        self.assertEqual(len(executed), 7)
+        self.assertTrue(all(row["counts"]["passed"] == 2 for row in executed))
+        self.assertFalse(any(Path(call[0]).name == "compile_contract" for call in commands.calls))
+        for required in ("scripts/check_no_path_wiring.sh", "scripts/check_no_type_aliases.sh", "test_mock_contract_runner.py"):
+            self.assertTrue(any(required in call for call in commands.calls))
+        self.assertEqual(report["features"], {crate: ["--no-default-features"] for crate in RUNNER.TARGETS})
+        self.assertEqual(report["dependency_features"], "unified across five packages")
+
+    def test_ci_lint_checks_only_the_selected_libraries_and_mock_targets(self):
+        result, report, commands, _ = self.run_fixture(mode="ci-lint")
+        self.assertEqual(result, 0)
+        self.assertEqual(report["mode"], "ci-lint")
+        work = [call for call in commands.calls if call[0] not in ("git", "rustc")]
+        self.assertEqual(len(work), 1)
+        command = work[0]
+        self.assertEqual(command[:2], ["cargo", "clippy"])
+        self.assertEqual([command[i + 1] for i, value in enumerate(command) if value == "-p"], list(RUNNER.TARGETS))
+        self.assertEqual([command[i + 1] for i, value in enumerate(command) if value == "--test"],
+                         ["mock_contracts", "custom_mock_composition", "workflow_mock_composition"])
+        for required in ("--locked", "--no-default-features", "--lib", "--keep-going"):
+            self.assertIn(required, command)
+        self.assertEqual(command[-4:], ["--", "--no-deps", "-D", "warnings"])
+        self.assertFalse(any(row["kind"] in ("behavioral", "compile-only", "inventory") for row in report["stages"]))
+        self.assertEqual(report["features"], {crate: ["--no-default-features"] for crate in RUNNER.TARGETS})
+        self.assertEqual(report["dependency_features"], "unified across five packages")
+
+    def test_ci_lint_failure_cannot_pass(self):
+        result, report, _, _ = self.run_fixture(mode="ci-lint", gate_fault="clippy")
+        self.assertEqual(result, 1)
+        self.assertEqual(report["status"], "FAIL")
+
+    def test_ci_tests_retains_failure_and_complete_inventory_requirements(self):
+        for fault in ({"artifact_fault": "missing"}, {"artifact_fault": "partial"},
+                      {"artifact_fault": "compile-only-missing"}, {"fault": "ignored"},
+                      {"fault": "filtered"}, {"fault": "wrong-name"}, {"fault": "crash"},
+                      {"gate_fault": "scripts/check_no_path_wiring.sh"},
+                      {"gate_fault": "scripts/check_no_type_aliases.sh"},
+                      {"gate_fault": "test_mock_contract_runner.py"}):
+            with self.subTest(fault=fault):
+                result, report, commands, _ = self.run_fixture(mode="ci-tests", **fault)
+                self.assertEqual(result, 1)
+                self.assertNotEqual(report["status"], "PASS")
+                if "gate_fault" in fault:
+                    self.assertFalse(any(call[0] == "cargo" for call in commands.calls))
+
+    def test_split_ci_commands_are_accepted_by_the_cli(self):
+        for mode in ("ci-tests", "ci-lint"):
+            commands = Commands()
+            with self.subTest(mode=mode), patch.object(RUNNER, "__file__", str(self.root / "scripts/mock_contract_runner.py")), \
+                    patch.object(RUNNER.Runner, "owned_process", commands), contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(RUNNER.Runner.main([mode]), 0)
+            self.assertTrue(any(call[:2] == ["cargo", "build" if mode == "ci-tests" else "clippy"] for call in commands.calls))
+
     def test_ci_artifact_faults_cannot_reuse_stale_binaries_or_pass(self):
         for fault in ("missing", "duplicate", "manifest", "source", "kind", "profile", "absent-file"):
             with self.subTest(fault=fault):
@@ -360,7 +424,9 @@ class RunnerTests(unittest.TestCase):
     def test_invalid_cli_arguments_fail_before_execution(self):
         for args in (("mocks", "--crate", "unknown"), ("mocks", "case_filter"),
                      ("mocks", "--ignored"), ("mocks", "--crate"),
-                     ("ci", "--crate", "tool-sdk"), ("mocks", "--cr", "tool-sdk")):
+                     ("ci", "--crate", "tool-sdk"), ("mocks", "--cr", "tool-sdk"),
+                     ("ci-tests", "--crate", "tool-sdk"), ("ci-tests", "case_filter"),
+                     ("ci-lint", "--crate", "tool-sdk"), ("ci-lint", "--all-targets")):
             with self.subTest(args=args), contextlib.redirect_stderr(io.StringIO()):
                 with self.assertRaises(SystemExit) as failure:
                     RUNNER.Runner.main(args)

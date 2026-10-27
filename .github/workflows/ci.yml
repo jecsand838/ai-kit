@@ -15,8 +15,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  deterministic:
-    name: Deterministic CI
+  formatting:
+    name: Formatting
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check formatting with the repository Rust toolchain
+        run: |
+          toolchain="$(python3 -c 'import tomllib; print(tomllib.load(open("rust-toolchain.toml", "rb"))["toolchain"]["channel"])')"
+          rustup toolchain install "$toolchain" --profile minimal --component rustfmt
+          cargo +"$toolchain" fmt --all --check
+
+  tests:
+    name: Tests
+    needs: formatting
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
@@ -36,9 +53,6 @@ jobs:
           rustup toolchain install "$toolchain" --profile minimal --component clippy,rustfmt
           rustup show active-toolchain
 
-      - name: Check formatting before native setup and cache transfer
-        run: cargo fmt --all --check
-
       - name: Install native build prerequisites
         run: |
           sudo apt-get update
@@ -55,16 +69,18 @@ jobs:
             ~/.cargo/git
             target/debug
           # Bump v1 when changing artifact-affecting build settings, not timeouts/triggers.
-          key: cargo-unified-v1-nodebug-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'provider-sdk/Cargo.toml', 'storage-sdk/Cargo.toml', 'tool-sdk/Cargo.toml', 'agent-sdk/Cargo.toml', 'app-sdk/Cargo.toml') }}
+          key: cargo-unified-v1-nodebug-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'provider-sdk/Cargo.toml', 'storage-sdk/Cargo.toml', 'tool-sdk/Cargo.toml', 'agent-sdk/Cargo.toml', 'app-sdk/Cargo.toml') }}-tests
           restore-keys: |
+            cargo-unified-v1-nodebug-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'provider-sdk/Cargo.toml', 'storage-sdk/Cargo.toml', 'tool-sdk/Cargo.toml', 'agent-sdk/Cargo.toml', 'app-sdk/Cargo.toml') }}-linting
+            cargo-unified-v1-nodebug-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'provider-sdk/Cargo.toml', 'storage-sdk/Cargo.toml', 'tool-sdk/Cargo.toml', 'agent-sdk/Cargo.toml', 'app-sdk/Cargo.toml') }}
             cargo-unified-v1-nodebug-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-
 
-      - name: Check formatting, Clippy, and all public-trait mocks
+      - name: Run all seven public-trait mock targets
         id: validation
         # Signal the runner directly so it joins its Cargo process group before
         # caches are archived. GitHub's step timeout is a final backstop.
         timeout-minutes: 19
-        run: exec timeout --signal=TERM --kill-after=10s 18m bash scripts/check_ci.sh
+        run: exec timeout --signal=TERM --kill-after=10s 18m python3 scripts/mock_contract_runner.py ci-tests
 
       - name: Report build disk usage
         if: ${{ always() }}
@@ -78,7 +94,7 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: mock-contracts-${{ github.run_id }}-${{ github.run_attempt }}
+          name: tests-${{ github.run_id }}-${{ github.run_attempt }}
           path: target/mock-contracts/
           retention-days: 7
           if-no-files-found: warn
@@ -107,3 +123,135 @@ jobs:
             ~/.cargo/git
             target/debug
           key: ${{ steps.cargo-cache.outputs.cache-primary-key }}-partial-${{ github.run_id }}-${{ github.run_attempt }}
+
+  linting:
+    name: Linting
+    needs: tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the repository Rust toolchain
+        run: |
+          toolchain="$(python3 -c 'import tomllib; print(tomllib.load(open("rust-toolchain.toml", "rb"))["toolchain"]["channel"])')"
+          rustup toolchain install "$toolchain" --profile minimal --component clippy,rustfmt
+          rustup show active-toolchain
+
+      - name: Install native build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            clang libclang-dev cmake protobuf-compiler libprotobuf-dev \
+            python3 pkg-config libssl-dev
+
+      - name: Restore Cargo downloads and build outputs
+        id: cargo-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/debug
+          # Bump v1 when changing artifact-affecting build settings, not timeouts/triggers.
+          key: cargo-unified-v1-nodebug-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'provider-sdk/Cargo.toml', 'storage-sdk/Cargo.toml', 'tool-sdk/Cargo.toml', 'agent-sdk/Cargo.toml', 'app-sdk/Cargo.toml') }}-linting
+          restore-keys: |
+            cargo-unified-v1-nodebug-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'provider-sdk/Cargo.toml', 'storage-sdk/Cargo.toml', 'tool-sdk/Cargo.toml', 'agent-sdk/Cargo.toml', 'app-sdk/Cargo.toml') }}-tests
+            cargo-unified-v1-nodebug-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'provider-sdk/Cargo.toml', 'storage-sdk/Cargo.toml', 'tool-sdk/Cargo.toml', 'agent-sdk/Cargo.toml', 'app-sdk/Cargo.toml') }}
+            cargo-unified-v1-nodebug-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-
+
+      - name: Lint libraries and mock targets with Clippy
+        id: validation
+        # Signal the runner directly so it joins its Cargo process group before
+        # caches are archived. GitHub's step timeout is a final backstop.
+        timeout-minutes: 9
+        run: exec timeout --signal=TERM --kill-after=10s 8m python3 scripts/mock_contract_runner.py ci-lint
+
+      - name: Report build disk usage
+        if: ${{ always() }}
+        run: |
+          df -h .
+          if [ -d target/debug ]; then
+            du -sh target/debug
+          fi
+
+      - name: Upload fresh CI reports and logs
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: linting-${{ github.run_id }}-${{ github.run_attempt }}
+          path: target/mock-contracts/
+          retention-days: 7
+          if-no-files-found: warn
+
+      - name: Save Cargo cache after a successful cache miss
+        if: ${{ success() && steps.cargo-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/debug
+          key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
+
+      - name: Preserve partial compilation after a failed cache miss
+        # A bounded cold build may need another run. Cargo rechecks these outputs;
+        # the failed run stays failed and test reports are never cached.
+        if: >-
+          ${{ failure() && !cancelled() && steps.validation.outcome == 'failure' &&
+              steps.cargo-cache.outputs.cache-primary-key != '' &&
+              steps.cargo-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/debug
+          key: ${{ steps.cargo-cache.outputs.cache-primary-key }}-partial-${{ github.run_id }}-${{ github.run_attempt }}
+
+  security:
+    name: Security audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned prebuilt security scanner
+        working-directory: ${{ runner.temp }}
+        run: |
+          curl --fail --location --retry 2 --connect-timeout 15 --max-time 120 \
+            https://github.com/rustsec/rustsec/releases/download/cargo-audit/v0.22.2/cargo-audit-x86_64-unknown-linux-musl-v0.22.2.tgz \
+            --output cargo-audit.tgz
+          printf '%s  %s\n' \
+            7fb9497f8594b389e5fce5ef9b92db08432996895b2e0c5a0167a69ed445c428 \
+            cargo-audit.tgz | sha256sum --check --strict
+          tar -xzf cargo-audit.tgz --strip-components=1
+
+      - name: Audit the committed lockfile against current RustSec advisories
+        shell: bash
+        working-directory: ${{ runner.temp }}
+        run: |
+          ./cargo-audit audit \
+            --file "$GITHUB_WORKSPACE/Cargo.lock" \
+            --db "$RUNNER_TEMP/advisory-db" \
+            --no-yanked --deny unsound --color never 2>&1 | tee security-audit.log
+
+      - name: Upload security audit diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: security-audit-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/security-audit.log
+          retention-days: 7
+          if-no-files-found: warn

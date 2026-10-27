@@ -164,10 +164,13 @@ control-plane state, not a `Database` backend and not a model-visible tool path.
 - [Redb releases](https://github.com/cberner/redb/releases)
 
 The integrated Qdrant sources deliberately differ by deployment: remote server
-1.19.2 uses the retained REST contract; embedded `qdrant-edge` remains 0.6.1 to
-keep downstream Cargo consumers patch-free. Research Edge against its exact
-Cargo registry source, not the newer remote-server archive. Do not reintroduce
-the withdrawn Geo patch or silently align Edge to 0.8.0. Bind the approved
-macOS/Qdrant browser constraint and actual target feature graph when researching
-this composition; [Storage's feature guidance](../../../storage-sdk/README.md#features)
-records its shared-resolution impact and downstream limitations.
+1.19.2 uses the retained REST contract; embedded `qdrant-edge` uses exact 0.9.0.
+Research Edge against its exact Cargo registry source, not the remote-server
+archive. The approved security remediation includes seven verified source
+patches, including Geo 0.32's overlay range, and the macOS/Qdrant browser
+constraint 1.2.5. Do not infer further dependency upgrades or additional patch
+exceptions. Bind the actual target feature graph when researching this
+composition; [Storage's feature guidance](../../../storage-sdk/README.md#features)
+and [the dependency security policy](../../../docs/security-dependencies.md)
+record the exact approved scope, shared-resolution impact and required downstream
+root patches. Published consumers do not inherit workspace Cargo patches.

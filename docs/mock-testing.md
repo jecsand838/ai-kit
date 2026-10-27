@@ -15,19 +15,72 @@ python3 scripts/qualify_mock_runtime.py
 
 The scoped command accepts only the five workspace crate names. It is scoped
 evidence, not a full-suite receipt. Arbitrary filters and unknown arguments are
-errors. Both entrypoints use serial Cargo commands and `--locked`. Storage uses
-`--no-default-features`; the other four crates use their default features.
-Each behavioral target gets its own inventory and execution, so one target's
-failure does not prevent independent targets from running.
+errors. Both entrypoints use serial Cargo commands and `--locked`. The mock-only
+entrypoint retains isolated crate builds: Storage uses `--no-default-features`
+and the other four crates use their default features. Primary CI selects all
+five packages together with `--no-default-features`, sharing one dependency
+feature graph. All five currently have empty or absent default features;
+optional backends stay disabled. CI proves that shared composition, while the
+scoped mock commands retain isolated feature evidence. Each behavioral target
+gets its own inventory and execution, so one target's failure does not prevent
+independent targets from running.
 
-Primary CI runs formatting, no-path/no-alias guards, Python runner contracts,
-positive compilation of all new targets, library/target Clippy, App's existing
-`compile_contract` in compile-only mode, and all behavioral targets. A complete
-behavioral inventory must be nonempty, execute every listed name, and contain
+Primary CI runs formatting, no-path/no-alias guards, and Python runner contracts
+before expensive compilation; a failure in these cheap gates stops CI. It then
+prepares all seven mock targets and App's existing `compile_contract` in one
+Cargo build using `--profile test --keep-going`, and runs library/target Clippy
+once for the same five packages. It discovers each executable from the current
+build's Cargo JSON by exact crate manifest, test source, target kind/name and
+test profile, with no fallback to old binaries on disk. Each of the seven mock
+binaries runs directly in its owning crate directory; App's `compile_contract`
+remains compile-only. Partial build failures remain failures while independently
+built mock targets can still run. Missing or ambiguous artifacts cannot pass.
+A complete behavioral inventory must be nonempty, execute every listed name, and contain
 zero ignored, measured, or filtered tests. Compile-only stages are reported
 separately and may contain no runtime tests. Compilation errors, missing
 targets, missing summaries, process interruption, or failed log capture cannot
 produce PASS evidence. There are no automatic retries or reused pass receipts.
+
+## GitHub Actions
+
+[The CI workflow](../.github/workflows/ci.yml) runs this same entrypoint in one
+`ubuntu-24.04` job on pull requests targeting `main`, pushes to `main`, and manual
+dispatch. It uses the repository's pinned Rust toolchain with Clippy and rustfmt,
+read-only repository permissions, and no provider credentials or service
+containers. Select **Deterministic CI** as the required status check in the
+repository's branch protection or ruleset after its first GitHub run.
+
+The workflow requires all seven mock targets, including on cache hits.
+It does not run strict-live, native backend integration, capacity,
+dependency test suites, optional-backend matrices, or the macOS-only restricted
+runtime qualifier. App's existing `compile_contract` is compiled but not run.
+These exclusions do not change the separate release gates.
+
+Cargo dependencies still compile, including unconditional LanceDB/Lance/Arrow
+dependencies. The workflow installs their native build prerequisites and uses
+two build workers, no incremental compilation, and no development/test debug
+information. Cargo downloads and `target/debug` are cached by Ubuntu version,
+architecture, toolchain, explicit build-settings version, lockfile, and workspace
+manifests. Timeout/trigger changes do not invalidate compiled dependencies.
+Dependency changes can restore an older cache for the same toolchain/settings;
+Cargo decides which outputs need rebuilding. Successful runs save missing cache
+entries, including PR-local caches for dependency-changing PRs. Exact cache hits
+do not upload another copy. `main` runs maintain the shared cache; GitHub isolates
+PR-created caches to that PR. Test receipts are never cached. Formatting is also
+checked before native package installation and cache transfer to reject cheap
+failures early. Local runners default to one compiler worker unless callers set
+`CARGO_BUILD_JOBS`; Cargo commands themselves remain serial.
+
+Superseded runs for the same PR or branch are cancelled. The job has a provisional
+15-minute ceiling, with a 12-minute CI step limit to leave time for diagnostics.
+Timeouts fail validation; they do not waive tests. Fresh reports and logs from
+`target/mock-contracts/` are uploaded after success or failure when available and
+retained for seven days. GitHub step timings, report durations, and the final
+disk-usage step provide the initial cold/cached build measurements. A local pass
+does not establish hosted Linux resource usage; measure the first GitHub runs
+to confirm the budget fits. The timeout is a spending ceiling, not a claim that
+an uncached Linux build is already measured to finish within it. Dependencies
+still compile, so a cache miss can be slower than ordinary cached runs.
 
 ## Test ownership and boundaries
 
@@ -155,7 +208,8 @@ pass or a standing release-gate waiver.
 The existing crate gates, Storage feature lanes, docs/doctests, all strict-live
 verifiers, five-crate wrapper, and separate locked clean-checkout proof remain
 required for workspace release completion. The new primary lane does not replace
-them. Pipeline-provider configuration and deployment are outside this change.
+them. The GitHub workflow provides deterministic CI only; publishing and
+deployment remain separate.
 
 Confirmed production defects belong in
 [the production bug ledger](mock-testing-production-bugs.md), with enabled

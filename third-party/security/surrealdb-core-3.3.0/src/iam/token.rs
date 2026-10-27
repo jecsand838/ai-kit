@@ -1,0 +1,473 @@
+use std::collections::HashMap;
+use std::sync::LazyLock;
+
+use anyhow::{Result, bail};
+use jsonwebtoken::{Algorithm, Header};
+use serde::{Deserialize, Serialize};
+use surrealdb_types::SurrealValue;
+
+use crate::dbs::Session;
+use crate::expr::Error;
+use crate::kvs::Datastore;
+use crate::val::convert_public::convert_public_value_to_internal;
+use crate::val::{Object, Value, convert_object_to_public_map};
+use crate::{iam, syn};
+pub static HEADER: LazyLock<Header> = LazyLock::new(|| Header::new(Algorithm::HS512));
+
+/// Decodes JWT claims from an access token without cryptographic verification.
+///
+/// SAFETY: This is used exclusively during token refresh and revocation to extract
+/// routing information (namespace, database, access method) from an expired access
+/// token. The refresh token itself provides the real authentication and is fully
+/// validated during the subsequent signin process.
+fn decode_access_token_claims(token: &str) -> Result<jsonwebtoken::TokenData<Claims>> {
+	Ok(jsonwebtoken::dangerous::insecure_decode::<Claims>(token)?)
+}
+
+use surrealdb_rpc::Token;
+
+/// Refreshes an access token using a refresh token.
+///
+/// This method exchanges an expired (or soon-to-expire) access token for a new one
+/// using the provided refresh token. The refresh process follows OAuth2/JWT best practices
+/// by maintaining the original authentication scope from the access token claims.
+///
+/// # Authentication Scope vs Working Context
+///
+/// It's important to understand the distinction between authentication scope and working
+/// context:
+///
+/// - **Authentication Scope** (from token claims): The namespace, database, and access method that
+///   were used during the original signin. This represents *what you're authenticated as*.
+///
+/// - **Working Context** (from session fields): The current namespace and database set by the `USE`
+///   command. This represents *where you're currently working*.
+///
+/// During refresh, the authentication scope from the expired access token is used to create
+/// the new token, and the session is restored to match this original scope. This means:
+///
+/// 1. If you signin to `ns1/db1`, then call `USE ns2 db2`, then refresh:
+///    - The session will be restored to `ns1/db1` (original authentication scope)
+///    - You can call `USE ns2 db2` again after refresh if needed
+///
+/// 2. The refresh token is validated against the namespace/database from the original signin, not
+///    the current session working context.
+///
+/// This behavior is intentional and follows security best practices:
+/// - Prevents scope confusion or escalation
+/// - Maintains predictable authentication boundaries
+/// - Aligns with OAuth2/OIDC refresh token standards
+///
+/// # Arguments
+///
+/// * `kvs` - The datastore to validate the refresh token against
+/// * `session` - The session to update with the new authentication state
+///
+/// # Returns
+///
+/// Returns a new `Token` with fresh access and refresh tokens on success.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The token is an `Access` variant without a refresh token
+/// - The refresh token is invalid, expired, or revoked
+/// - The access token cannot be decoded
+/// - The signin process fails
+///
+/// # Example
+///
+/// ```ignore
+/// // Signin and get tokens
+/// let token = iam::signin::signin(kvs, session, credentials).await?;
+///
+/// // Later, when the access token expires...
+/// let new_token = iam::token::refresh(token, kvs, session).await?;
+/// ```
+pub async fn refresh(token: Token, kvs: &Datastore, session: &mut Session) -> Result<Token> {
+	match token {
+		Token::Access(_) => bail!(Error::InvalidFunctionArguments {
+			name: "refresh".into(),
+			message: "Token is an access token, cannot refresh".into(),
+		}),
+		Token::WithRefresh {
+			access,
+			refresh,
+		} => {
+			// Decode the expired access token to extract its claims.
+			// We don't verify the signature or expiration here because we're only
+			// extracting the authentication scope (NS, DB, AC, ID, etc.) to pass
+			// to the signin function. The refresh token itself will be validated
+			// during the signin process.
+			let token_data = decode_access_token_claims(&access)?;
+			let claims = token_data.claims.into_claims_object();
+			// Convert token claims to signin variables. These claims contain the
+			// original authentication scope (namespace, database, access method)
+			// that will be used to create the new tokens.
+			let mut vars = convert_object_to_public_map(claims)?;
+			// Add the refresh token to the variables. The signin function will
+			// use this to perform bearer authentication and validate the refresh token.
+			vars.insert("refresh".to_string(), refresh.into_value());
+			// Perform signin using the refresh token. This will:
+			// 1. Validate the refresh token against the stored grant
+			// 2. Revoke the old refresh token (single-use)
+			// 3. Create a new access token and refresh token
+			// 4. Update the session with the original authentication scope
+			iam::signin::signin(kvs, session, vars.into()).await
+		}
+	}
+}
+
+/// Revokes the refresh token carried by `token`, removing its grant record so
+/// it can never be exchanged for new access tokens.
+pub async fn revoke_refresh_token(token: Token, kvs: &Datastore) -> Result<()> {
+	match token {
+		Token::Access(_) => bail!(Error::InvalidFunctionArguments {
+			name: "refresh".into(),
+			message: "Token is an access token, cannot revoke refresh token".into(),
+		}),
+		Token::WithRefresh {
+			access,
+			refresh,
+		} => {
+			let grant_id = iam::signin::validate_grant_bearer(&refresh)?;
+			let token_data = decode_access_token_claims(&access)?;
+			let ns = token_data.claims.ns.ok_or_else(|| Error::InvalidFunctionArguments {
+				name: "ns".into(),
+				message: "Token does not contain a namespace".into(),
+			})?;
+			let db = token_data.claims.db.ok_or_else(|| Error::InvalidFunctionArguments {
+				name: "db".into(),
+				message: "Token does not contain a database".into(),
+			})?;
+			let ac = token_data.claims.ac.ok_or_else(|| Error::InvalidFunctionArguments {
+				name: "ac".into(),
+				message: "Token does not contain an access name".into(),
+			})?;
+			// The presented refresh key is passed through so the grant it names
+			// can require proof of possession. The access token's claims are
+			// decoded without verification and only locate the grant; they are
+			// not what authorises the revocation.
+			iam::access::verify_and_revoke_refresh_token_record(
+				kvs, grant_id, ac, refresh, &ns, &db,
+			)
+			.await?;
+			Ok(())
+		}
+	}
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(untagged)]
+pub enum Audience {
+	Single(String),
+	Multiple(Vec<String>),
+}
+
+impl Audience {
+	/// Builds the `aud` claim value for a configured audience list: a single
+	/// entry is issued as a JSON string, several as a JSON array.
+	pub(crate) fn from_configured(list: &[String]) -> Self {
+		match list {
+			[single] => Audience::Single(single.clone()),
+			many => Audience::Multiple(many.to_vec()),
+		}
+	}
+}
+
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
+pub struct Claims {
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub iat: Option<i64>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub nbf: Option<i64>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub exp: Option<i64>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub iss: Option<String>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub sub: Option<String>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub aud: Option<Audience>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub jti: Option<String>,
+	#[serde(alias = "ns")]
+	#[serde(alias = "NS")]
+	#[serde(rename = "NS")]
+	#[serde(alias = "https://surrealdb.com/ns")]
+	#[serde(alias = "https://surrealdb.com/namespace")]
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub ns: Option<String>,
+	#[serde(alias = "db")]
+	#[serde(alias = "DB")]
+	#[serde(rename = "DB")]
+	#[serde(alias = "https://surrealdb.com/db")]
+	#[serde(alias = "https://surrealdb.com/database")]
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub db: Option<String>,
+	#[serde(alias = "ac")]
+	#[serde(alias = "AC")]
+	#[serde(rename = "AC")]
+	#[serde(alias = "https://surrealdb.com/ac")]
+	#[serde(alias = "https://surrealdb.com/access")]
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub ac: Option<String>,
+	#[serde(alias = "id")]
+	#[serde(alias = "ID")]
+	#[serde(rename = "ID")]
+	#[serde(alias = "https://surrealdb.com/id")]
+	#[serde(alias = "https://surrealdb.com/record")]
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub id: Option<String>,
+	#[serde(alias = "rl")]
+	#[serde(alias = "RL")]
+	#[serde(rename = "RL")]
+	#[serde(alias = "https://surrealdb.com/rl")]
+	#[serde(alias = "https://surrealdb.com/roles")]
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub roles: Option<Vec<String>>,
+
+	#[serde(flatten)]
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub custom_claims: Option<HashMap<String, serde_json::Value>>,
+}
+
+impl Claims {
+	pub(crate) fn into_claims_object(self) -> Object {
+		// Set default value
+		let mut out = Object::default();
+		// Add iss field if set
+		if let Some(iss) = self.iss {
+			out.insert("iss", iss.into());
+		}
+		// Add sub field if set
+		if let Some(sub) = self.sub {
+			out.insert("sub", sub.into());
+		}
+		// Add aud field if set
+		if let Some(aud) = self.aud {
+			match aud {
+				Audience::Single(v) => out.insert("aud", Value::String(v.into())),
+				Audience::Multiple(v) => {
+					out.insert("aud", v.into_iter().map(Value::from).collect::<Vec<_>>().into())
+				}
+			};
+		}
+		// Add iat field if set
+		if let Some(iat) = self.iat {
+			out.insert("iat", iat.into());
+		}
+		// Add nbf field if set
+		if let Some(nbf) = self.nbf {
+			out.insert("nbf", nbf.into());
+		}
+		// Add exp field if set
+		if let Some(exp) = self.exp {
+			out.insert("exp", exp.into());
+		}
+		// Add jti field if set
+		if let Some(jti) = self.jti {
+			out.insert("jti", jti.into());
+		}
+		// Add NS field if set
+		if let Some(ns) = self.ns {
+			out.insert("NS", ns.into());
+		}
+		// Add DB field if set
+		if let Some(db) = self.db {
+			out.insert("DB", db.into());
+		}
+		// Add AC field if set
+		if let Some(ac) = self.ac {
+			out.insert("AC", ac.into());
+		}
+		// Add ID field if set
+		if let Some(id) = self.id {
+			out.insert("ID", id.into());
+		}
+		// Add RL field if set
+		if let Some(role) = self.roles {
+			out.insert("RL", role.into_iter().map(Value::from).collect::<Vec<_>>().into());
+		}
+		// Add custom claims if set
+		if let Some(custom_claims) = self.custom_claims {
+			for (claim, value) in custom_claims {
+				// Serialize the raw JSON string representing the claim value
+				let claim_json = match serde_json::to_string(&value) {
+					Ok(claim_json) => claim_json,
+					Err(err) => {
+						debug!("Failed to serialize token claim '{}': {}", claim, err);
+						continue;
+					}
+				};
+				// Parse that JSON string into the corresponding SurrealQL value
+				let claim_value = match syn::json(&claim_json) {
+					Ok(claim_value) => claim_value,
+					Err(err) => {
+						debug!("Failed to parse token claim '{}': {}", claim, err);
+						continue;
+					}
+				};
+				let claim_value = convert_public_value_to_internal(claim_value);
+				out.insert(claim.clone(), claim_value);
+			}
+		}
+		// Return value
+		out
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use std::sync::Arc;
+
+	use super::*;
+	use crate::dbs::Session;
+	use crate::iam::signin::db_access;
+	use crate::kvs::Datastore;
+	use crate::types::PublicVariables;
+
+	/// Sets up a record access method with `WITH REFRESH`, signs a user in, and
+	/// returns the datastore alongside that user's real access and refresh
+	/// tokens.
+	async fn refresh_token_fixture() -> (Arc<Datastore>, String, String) {
+		let ds = Datastore::new("memory").await.unwrap();
+		let sess = Session::owner().with_ns("test").with_db("test");
+		ds.execute(
+			r#"
+			DEFINE ACCESS user ON DATABASE TYPE RECORD
+				SIGNIN (
+					SELECT * FROM user WHERE name = $user AND crypto::argon2::compare(pass, $pass)
+				)
+				WITH REFRESH
+				DURATION FOR GRANT 1w, FOR SESSION 2h
+			;
+
+			CREATE user:test CONTENT {
+				name: 'user',
+				pass: crypto::argon2::generate('pass')
+			}
+			"#,
+			&sess,
+			None,
+		)
+		.await
+		.unwrap();
+
+		let mut sess = Session {
+			ns: Some("test".to_string()),
+			db: Some("test".to_string()),
+			..Default::default()
+		};
+		let mut vars = PublicVariables::new();
+		vars.insert("user", "user");
+		vars.insert("pass", "pass");
+		let token = db_access(
+			&ds,
+			&mut sess,
+			"test".to_string(),
+			"test".to_string(),
+			"user".to_string(),
+			vars,
+		)
+		.await
+		.expect("signin with credentials should succeed");
+
+		match token {
+			Token::WithRefresh {
+				access,
+				refresh,
+			} => (ds, access, refresh),
+			Token::Access(_) => panic!("a WITH REFRESH access method must return a refresh token"),
+		}
+	}
+
+	/// Swaps the key half of a bearer token, keeping its key identifier. This
+	/// is what a caller who has learned a grant id — `ACCESS <ac> SHOW ALL`
+	/// discloses ids while redacting keys — but not the key itself can present.
+	fn with_wrong_key(refresh: &str) -> String {
+		let parts: Vec<&str> = refresh.split('-').collect();
+		assert_eq!(parts.len(), 4, "a bearer token has four dash-separated parts");
+		format!("{}-{}-{}-{}", parts[0], parts[1], parts[2], "A".repeat(parts[3].len()))
+	}
+
+	// Revoking a refresh token must require proof that the caller holds its
+	// key. The grant id alone is not a secret: it is disclosed by `ACCESS <ac>
+	// SHOW ALL`, which needs only `Action::View`, and it is embedded in every
+	// issued refresh token. Without a possession check, knowing an id would be
+	// enough to permanently invalidate that token.
+	#[tokio::test]
+	async fn revoke_refresh_token_requires_the_grant_key() {
+		let (ds, access, refresh) = refresh_token_fixture().await;
+
+		// A correctly-shaped refresh token carrying the victim's grant id but
+		// the wrong key must be refused.
+		let forged = with_wrong_key(&refresh);
+		assert_ne!(forged, refresh, "the forged token must differ from the real one");
+		let res = revoke_refresh_token(
+			Token::WithRefresh {
+				access: access.clone(),
+				refresh: forged,
+			},
+			&ds,
+		)
+		.await;
+		assert!(res.is_err(), "revoking with a wrong key must fail");
+
+		// The victim's token still works, so the rejected request had no effect.
+		let mut sess = Session {
+			ns: Some("test".to_string()),
+			db: Some("test".to_string()),
+			..Default::default()
+		};
+		let mut vars = PublicVariables::new();
+		vars.insert("refresh", refresh.clone());
+		let res = db_access(
+			&ds,
+			&mut sess,
+			"test".to_string(),
+			"test".to_string(),
+			"user".to_string(),
+			vars,
+		)
+		.await;
+		assert!(res.is_ok(), "the victim's refresh token must still be usable: {res:?}");
+	}
+
+	// The holder of a refresh token can still revoke it: the possession check
+	// authorises the operation rather than disabling it. Guards against a fix
+	// that simply refuses every revocation.
+	#[tokio::test]
+	async fn revoke_refresh_token_succeeds_for_the_key_holder() {
+		let (ds, access, refresh) = refresh_token_fixture().await;
+
+		revoke_refresh_token(
+			Token::WithRefresh {
+				access,
+				refresh: refresh.clone(),
+			},
+			&ds,
+		)
+		.await
+		.expect("the key holder must be able to revoke their own refresh token");
+
+		// And the revocation took effect.
+		let mut sess = Session {
+			ns: Some("test".to_string()),
+			db: Some("test".to_string()),
+			..Default::default()
+		};
+		let mut vars = PublicVariables::new();
+		vars.insert("refresh", refresh);
+		let res = db_access(
+			&ds,
+			&mut sess,
+			"test".to_string(),
+			"test".to_string(),
+			"user".to_string(),
+			vars,
+		)
+		.await;
+		assert!(res.is_err(), "a revoked refresh token must no longer be usable");
+	}
+}

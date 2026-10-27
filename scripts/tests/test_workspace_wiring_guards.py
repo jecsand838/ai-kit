@@ -4,6 +4,8 @@ import subprocess
 import tempfile
 import unittest
 
+from scripts.tests.test_security_dependencies import PatchFixture
+
 
 class WorkspaceWiringGuardTests(unittest.TestCase):
     def setUp(self):
@@ -12,7 +14,7 @@ class WorkspaceWiringGuardTests(unittest.TestCase):
         self.root = pathlib.Path(self.temp.name)
         source = pathlib.Path(__file__).resolve().parents[1]
         (self.root / "scripts").mkdir()
-        for name in ("check_no_path_wiring.sh", "check_no_type_aliases.sh"):
+        for name in ("check_no_path_wiring.sh", "check_no_type_aliases.sh", "security_dependencies.py"):
             shutil.copyfile(source / name, self.root / "scripts" / name)
         subprocess.run(
             ["git", "init", "--quiet", str(self.root)],
@@ -80,7 +82,49 @@ class WorkspaceWiringGuardTests(unittest.TestCase):
             '[patch.crates-io]\ngeo = { path = "third-party/geo-0.32.0" }\n'
             '[dependencies]\ngeo = { path = "third-party/geo-0.32.0" }\n',
         )
-        self.guard("check_no_path_wiring.sh", False, "Cargo.toml:4:")
+        self.guard("check_no_path_wiring.sh", False, "Cargo.toml:")
+
+    def test_verified_upstream_conventions_are_allowed_only_in_approved_roots(self):
+        fixture = PatchFixture(self.root)
+        path = fixture.roots[0] + "/src/lib.rs"
+        self.write(path, '#[path = "native.rs"]\nmod native;\npub type Upstream = usize;\n')
+        fixture.refresh()
+        self.guard("check_no_path_wiring.sh", True)
+        self.guard("check_no_type_aliases.sh", True)
+        for path in ("provider-sdk/src/lib.rs", fixture.roots[0] + "-other/src/lib.rs"):
+            with self.subTest(path=path):
+                self.write(path, '#[path = "native.rs"]\nmod native;\npub type Upstream = usize;\n')
+                self.guard("check_no_path_wiring.sh", False, path)
+                self.guard("check_no_type_aliases.sh", False, path)
+                (self.root / path).unlink()
+
+    def test_upstream_provenance_failure_blocks_both_guards(self):
+        fixture = PatchFixture(self.root)
+        path = fixture.roots[0] + "/src/lib.rs"
+        self.write(path, "pub type Tampered = usize;\n")
+        for guard in ("check_no_path_wiring.sh", "check_no_type_aliases.sh"):
+            with self.subTest(guard=guard):
+                self.guard(guard, False, "inventory")
+
+    def test_approved_patch_path_cannot_be_reused_as_a_direct_dependency(self):
+        fixture = PatchFixture(self.root)
+        for path in ("Cargo.toml", "provider-sdk/Cargo.toml"):
+            with self.subTest(path=path):
+                manifest = self.root / path
+                original = manifest.read_text() if manifest.exists() else ""
+                self.write(path, original + '\n[dependencies]\narrow-ipc = { path = "' + fixture.roots[0] + '" }\n')
+                self.guard("check_no_path_wiring.sh", False, path + ":")
+                self.write(path, original)
+
+    def test_missing_provenance_blocks_even_empty_patch_tables(self):
+        self.write("Cargo.toml", "[patch]\n")
+        for guard in ("check_no_path_wiring.sh", "check_no_type_aliases.sh"):
+            with self.subTest(guard=guard):
+                self.guard(guard, False, "Cargo.toml:")
+
+    def test_escaped_path_keys_cannot_bypass_structural_checks(self):
+        self.write("Cargo.toml", '[dependencies.example]\n"pa\\u0074h" = "../outside"\n')
+        self.guard("check_no_path_wiring.sh", False, "Cargo.toml:")
 
     def test_nested_manifest_path_patch_is_rejected(self):
         path = "storage-sdk/Cargo.toml"

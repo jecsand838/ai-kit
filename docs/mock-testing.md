@@ -15,19 +15,110 @@ python3 scripts/qualify_mock_runtime.py
 
 The scoped command accepts only the five workspace crate names. It is scoped
 evidence, not a full-suite receipt. Arbitrary filters and unknown arguments are
-errors. Both entrypoints use serial Cargo commands and `--locked`. Storage uses
-`--no-default-features`; the other four crates use their default features.
-Each behavioral target gets its own inventory and execution, so one target's
-failure does not prevent independent targets from running.
+errors. Both entrypoints use serial Cargo commands and `--locked`. The mock-only
+entrypoint retains isolated crate builds: Storage uses `--no-default-features`
+and the other four crates use their default features. Primary CI selects all
+five packages together with `--no-default-features`, sharing one dependency
+feature graph. All five currently have empty or absent default features;
+optional backends stay disabled. CI proves that shared composition, while the
+scoped mock commands retain isolated feature evidence. Each behavioral target
+gets its own inventory and execution, so one target's failure does not prevent
+independent targets from running.
 
-Primary CI runs formatting, no-path/no-alias guards, Python runner contracts,
-positive compilation of all new targets, library/target Clippy, App's existing
-`compile_contract` in compile-only mode, and all behavioral targets. A complete
-behavioral inventory must be nonempty, execute every listed name, and contain
+Primary CI runs formatting, no-path/no-alias guards, and Python runner contracts
+before expensive compilation; a failure in these cheap gates stops CI. It then
+prepares all seven mock targets and App's existing `compile_contract` in one
+Cargo build using `--profile test --keep-going`, and runs library/target Clippy
+once for the same five packages. It discovers each executable from the current
+build's Cargo JSON by exact crate manifest, test source, target kind/name and
+test profile, with no fallback to old binaries on disk. Each of the seven mock
+binaries runs directly in its owning crate directory; App's `compile_contract`
+remains compile-only. Partial build failures remain failures while independently
+built mock targets can still run. Missing or ambiguous artifacts cannot pass.
+A complete behavioral inventory must be nonempty, execute every listed name, and contain
 zero ignored, measured, or filtered tests. Compile-only stages are reported
 separately and may contain no runtime tests. Compilation errors, missing
 targets, missing summaries, process interruption, or failed log capture cannot
 produce PASS evidence. There are no automatic retries or reused pass receipts.
+
+## GitHub Actions
+
+[The CI workflow](../.github/workflows/ci.yml) runs four `ubuntu-24.04` jobs on
+pull requests targeting `main`, pushes to `main`, and manual dispatch. It uses
+read-only repository permissions and no provider credentials or service
+containers. Configure **Formatting**, **Tests**, **Linting**, and **Security audit**
+as required status checks; replace any former **Deterministic CI** requirement.
+
+| Check | Work | Job ceiling |
+| --- | --- | --- |
+| Formatting | Pinned Rust toolchain, `cargo fmt --all --check` | 5 minutes |
+| Tests | `python3 scripts/mock_contract_runner.py ci-tests`: guards, runner contracts, unified compile proofs, all seven public-trait mock targets | 20 minutes |
+| Linting | `python3 scripts/mock_contract_runner.py ci-lint`: one Clippy invocation over the five libraries and selected mock targets, with warnings denied | 10 minutes |
+| Security audit | Provenance verification, pinned `cargo-audit`, committed lockfile and seven patched-parent identities, current RustSec advisories | 5 minutes |
+
+Formatting gates Tests, and Tests gates Linting so Clippy can reuse compiled
+outputs instead of starting a second cold build concurrently. Failed or cancelled
+prerequisite jobs prevent their dependent jobs from running. Security audit runs
+independently. Separate jobs add runner setup and cache transfer overhead in
+exchange for distinct checks. The existing local `bash scripts/check_ci.sh`
+entrypoint still runs formatting, guards, runner contracts, build, Clippy, and
+all mocks together; it does not perform the security audit. The split runner
+modes preserve the same feature selection and complete-inventory requirements.
+
+Tests requires all seven mock targets on every run, including cache hits.
+Strict-live, native backend integration, capacity, dependency test suites,
+optional-backend matrices, and the macOS-only restricted runtime qualifier stay
+outside this workflow. App's existing `compile_contract` is compiled but not run.
+These exclusions do not change the separate release gates.
+
+Cargo dependencies still compile, including unconditional LanceDB/Lance/Arrow
+dependencies. Tests and Linting install their native build prerequisites and use
+two build workers, no incremental compilation, and no development/test debug
+information. Both cache Cargo downloads and `target/debug` by Ubuntu version,
+architecture, toolchain, explicit build-settings version, lockfile, and workspace
+manifests, and every `third-party/security/**` input. Provenance verification precedes cache restoration. Separate `-tests` and `-linting` primary keys let each job preserve its
+own outputs. A cache miss can restore the other job's current dependency cache,
+the previous combined CI cache, or an older dependency cache under the same
+toolchain/settings prefix. Cargo decides what needs rebuilding. Exact hits do
+not upload another copy. Formatting and Security audit do not transfer build
+caches or install native build prerequisites.
+
+`main` maintains the shared cache. GitHub isolates PR-created caches to their PR,
+so the first `main` run creates its own cache. Test receipts are never cached.
+After a failed cache-miss validation, Tests or Linting preserves partial compiled
+outputs under a unique key extending its primary key. Cancelled runs do not save
+partial caches. A rerun can restore the partial cache, let Cargo validate it, and
+execute its required checks again. Partial caches never satisfy a check or turn
+the original failure into a pass; only a successful run saves its normal key.
+
+Superseded runs for the same PR or branch are cancelled. Tests sends TERM to the
+runner after 18 minutes with a 19-minute hard step backstop; Linting uses 8 and
+9 minutes respectively. GNU `timeout` permits the runner to terminate and join
+its Cargo process group before archiving, with a ten-second forced-kill backstop.
+Timeouts fail validation and do not waive tests. Job ceilings bound spending;
+checks finish as soon as work completes. An unusually slow cold build can reuse
+its partial cache on a failed-job rerun, but incomplete runs cannot authorize
+merging. Local timings and cached recovery do not establish cold hosted timing.
+Fresh reports and logs are uploaded under separate job-specific artifact names
+and retained for seven days. Local runners default to one compiler worker unless
+callers set `CARGO_BUILD_JOBS`; Cargo commands themselves remain serial.
+
+### Security audit policy
+
+The security job downloads the official cargo-audit 0.22.2 Linux binary and checks
+its pinned SHA-256 before executing it. It fetches current RustSec advisories and
+scans the entire committed lockfile, including optional and target-specific
+packages. It neither compiles nor tests dependencies, updates the lockfile, nor
+runs provider requests. Scanner download, checksum, database, and audit failures
+fail the job. The audit runs outside the checkout with an explicit lockfile path;
+repository-local scanner configuration cannot silently weaken the check. A second temporary lockfile scans all seven verified path parents under their original registry identities against the same database. Either scan failing blocks the check; see [the dependency security policy](security-dependencies.md).
+
+Known vulnerabilities and unsoundness advisories are blocking. Unmaintained
+package warnings remain visible but are not denied. `--no-yanked` omits registry
+yank checks, not security advisories. There are no ignored advisory IDs, baseline
+exceptions, or `continue-on-error`. The audit wrapper propagates either scanner failure and uploads both logs, the supplemental lockfile and aggregate report. Provenance, guard and source-fingerprint regression tests run in the inexpensive Python bootstrap; dependency runtime tests remain outside CI.
+Existing dependency findings require remediation or a separately reviewed policy
+decision; adding the job does not approve dependency changes or suppressions.
 
 ## Test ownership and boundaries
 
@@ -155,7 +246,8 @@ pass or a standing release-gate waiver.
 The existing crate gates, Storage feature lanes, docs/doctests, all strict-live
 verifiers, five-crate wrapper, and separate locked clean-checkout proof remain
 required for workspace release completion. The new primary lane does not replace
-them. Pipeline-provider configuration and deployment are outside this change.
+them. The GitHub workflow provides deterministic CI only; publishing and
+deployment remain separate.
 
 Confirmed production defects belong in
 [the production bug ledger](mock-testing-production-bugs.md), with enabled

@@ -171,7 +171,11 @@ impl EdgeTarget<'_> {
         let records = self
             .handle
             .shard()
-            .retrieve(&point_ids, with_payload, with_vector)
+            .retrieve(qdrant_edge::RetrieveRequest {
+                point_ids,
+                with_payload,
+                with_vector,
+            })
             .map_err(|err| self.db.map_err("edge_retrieve", err))?;
         mapper::decode_edge_records_page(self.db, &records, vector_selection, None)
     }
@@ -517,25 +521,26 @@ fn edge_vector_selection_plan(
     shard: &qdrant_edge::EdgeShard,
     projection: &Projection,
 ) -> Result<mapper::VectorSelectionPlan, StorageError> {
-    let config = shard.config();
-    let sparse_names = config
-        .sparse_vectors
-        .keys()
-        .cloned()
-        .collect::<BTreeSet<_>>();
-    if mapper::edge_uses_unnamed_default_dense(shard)
-        && edge_projection_requests_vectors(db, projection, &sparse_names)
-    {
+    let (sparse_names, mut names, uses_unnamed_dense) = {
+        let config = shard.config();
+        (
+            config
+                .sparse_vectors
+                .keys()
+                .cloned()
+                .collect::<BTreeSet<_>>(),
+            config.vectors.keys().cloned().collect::<BTreeSet<_>>(),
+            config
+                .vectors
+                .contains_key(qdrant_edge::DEFAULT_VECTOR_NAME),
+        )
+    };
+    if uses_unnamed_dense && edge_projection_requests_vectors(db, projection, &sparse_names) {
         return Err(mapper::edge_unnamed_default_vector_unsupported(
             "vector projection",
         ));
     }
-    let names = config
-        .vectors
-        .keys()
-        .cloned()
-        .chain(sparse_names)
-        .collect::<BTreeSet<_>>();
+    names.extend(sparse_names);
     Ok(mapper::VectorSelectionPlan::for_edge(projection, &names))
 }
 

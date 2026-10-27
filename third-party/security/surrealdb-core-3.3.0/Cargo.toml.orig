@@ -1,0 +1,317 @@
+[package]
+name = "surrealdb-core"
+publish = true
+readme = "README.md"
+documentation = "https://docs.rs/surrealdb-core/"
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+description.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+license-file.workspace = true
+
+[features]
+# Public features
+default = ["kv-mem", "graphql", "gql"]
+kv-mem = [
+    "surrealdb-kvs-any/kv-mem",
+    "tokio/time",
+    "dep:tempfile",
+    "dep:ext-sort",
+]
+kv-indxdb = ["surrealdb-kvs-any/kv-indxdb"]
+kv-rocksdb = [
+    "surrealdb-kvs-any/kv-rocksdb",
+    "tokio/time",
+    "dep:tempfile",
+    "dep:ext-sort",
+]
+kv-tikv = [
+    "surrealdb-kvs-any/kv-tikv",
+    "tokio/time",
+    "dep:tempfile",
+    "dep:ext-sort",
+]
+kv-surrealkv = [
+    "surrealdb-kvs-any/kv-surrealkv",
+    "tokio/time",
+    "dep:tempfile",
+    "dep:ext-sort",
+]
+scripting = ["dep:js", "surrealdb-expr/scripting"]
+# Bake the CJK segmentation dictionaries into the binary, so
+# `TOKENIZERS SEGMENT(...)` works with no files on disk. Adds roughly 150 MB
+# and makes the dictionary crates download their data at build time, so it is
+# off unless a shipment opts in.
+cjk = ["surrealdb-idx/cjk-embed-all"]
+http = ["dep:reqwest"]
+ml = ["dep:surrealml-core"]
+jwks = ["dep:reqwest", "surrealdb-datastore/jwks"]
+surrealism = ["dep:surrealism-runtime", "dep:async-trait"]
+allocator = ["dep:jemallocator", "dep:jemalloc-sys", "dep:mimalloc", "dep:mimalloc-sys"]
+arbitrary = [
+    "surrealdb-expr/arbitrary",
+    "surrealdb-catalog/arbitrary",
+    "chrono/arbitrary",
+    "rust_decimal/rust-fuzz",
+    "geo-types/arbitrary",
+    "uuid/arbitrary",
+    "surrealdb-types/arbitrary",
+    "common/arbitrary",
+    "surrealdb-sql/arbitrary",
+    "surrealdb-strand/arbitrary",
+    "surrealdb-iam/arbitrary",
+    "surrealdb-rpc/arbitrary",
+]
+allocation-tracking = []
+
+# GraphQL support
+graphql = ["dep:async-graphql", "surrealdb-catalog/graphql"]
+
+# GQL support
+gql = ["dep:surrealdb-gql"]
+
+[package.metadata.docs.rs]
+rustdoc-args = ["--cfg", "docsrs"]
+features = ["kv-mem", "kv-rocksdb", "http", "scripting", "graphql", "gql"]
+targets = []
+
+[dependencies]
+surrealdb-catalog = { workspace = true }
+surrealdb-datastore = { workspace = true }
+surrealdb-expr = { workspace = true }
+surrealdb-gql = { workspace = true, optional = true }
+surrealdb-sql = { workspace = true }
+surrealdb-strand = { workspace = true }
+surrealdb-syn = { workspace = true }
+surrealdb-cnf = { workspace = true }
+surrealdb-rpc = { workspace = true }
+surrealdb-runtime = { workspace = true }
+surrealdb-iam = { workspace = true }
+surrealdb-idx = { workspace = true }
+surrealdb-observe = { workspace = true }
+surrealdb-kvs = { workspace = true }
+common = { workspace = true }
+
+# External surreal crates
+surrealdb-kvs-any = { workspace = true }
+surrealml-core = { workspace = true, optional = true }
+
+arc-swap = "1"
+async-trait = { workspace = true, optional = true }
+js = { workspace = true, features = [
+    "array-buffer",
+    "bindgen",
+    "classes",
+    "futures",
+    "loader",
+    "macro",
+    "parallel",
+    "properties",
+    "rust-alloc",
+], optional = true }
+reblessive = { workspace = true, features = ["tree"] }
+revision = { workspace = true }
+storekey.workspace = true
+surrealdb-types = { workspace = true }
+surrealdb-collections = { workspace = true }
+
+# Other crates
+ahash.workspace = true
+anyhow.workspace = true
+argon2.workspace = true
+async-channel.workspace = true
+async-graphql = { workspace = true, default-features = false, features = [
+    "dynamic-schema",
+], optional = true }
+base64.workspace = true
+bcrypt.workspace = true
+bytes.workspace = true
+chrono = { workspace = true, features = ["serde"] }
+ciborium.workspace = true
+dashmap.workspace = true
+futures.workspace = true
+geo = { workspace = true, features = ["use-serde"] }
+geo-types = { workspace = true }
+http.workspace = true
+hex.workspace = true
+ipnet.workspace = true
+md-5.workspace = true
+memchr.workspace = true
+num_cpus.workspace = true
+object_store.workspace = true
+parking_lot.workspace = true
+path-clean.workspace = true
+pbkdf2 = { workspace = true, features = ["simple"] }
+pin-project-lite.workspace = true
+quick_cache.workspace = true
+rand.workspace = true
+rand_core.workspace = true
+rayon.workspace = true
+regex.workspace = true
+roaring = { workspace = true, features = ["serde"] }
+rust_decimal = { workspace = true, features = ["maths", "serde-str"] }
+scrypt.workspace = true
+semver = { workspace = true, features = ["serde"] }
+serde = { workspace = true, features = ["derive", "rc"] }
+serde_json.workspace = true
+sha1.workspace = true
+sha2.workspace = true
+subtle.workspace = true
+sysinfo.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+web-time.workspace = true
+url.workspace = true
+
+# Other optional crates
+ext-sort = { workspace = true, optional = true }
+reqwest = { workspace = true, default-features = false, features = [
+    "http2",
+    "json",
+    "stream",
+    "multipart",
+], optional = true }
+tempfile = { workspace = true, optional = true }
+headers = "0.4.1"
+mime = "0.3.17"
+
+# WASM DEPENDENCY CONFIGURATION
+[target.'cfg(target_family = "wasm")'.dependencies]
+getrandom = { workspace = true, features = ["wasm_js"] }
+jsonwebtoken = { workspace = true, features = ["rust_crypto"] }
+ring = { workspace = true, features = ["wasm32_unknown_unknown_js"] }
+tokio = { workspace = true, default-features = false, features = [
+    "rt",
+    "sync",
+] }
+tokio-util.workspace = true
+uuid = { workspace = true, features = ["serde", "js", "v4", "v7"] }
+wasm-bindgen-futures.workspace = true
+wasmtimer = { workspace = true, default-features = false, features = ["tokio"] }
+
+# NON-WASM DEPENDENCY CONFIGURATION
+# Note: surrealism-runtime is only available on non-WASM targets
+# The surrealism feature will be enabled by default for non-WASM in the parent workspace
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+jsonwebtoken = { workspace = true, features = ["aws_lc_rs"] }
+# Cloud object-storage bucket backends (S3, GCS, Azure). Enabled only off-wasm,
+# since these pull an HTTP/TLS stack. `tls-webpki-roots` gives object_store's
+# HTTP client a rustls backend regardless of what else configures reqwest.
+object_store = { workspace = true, features = ["aws", "gcp", "azure", "tls-webpki-roots"] }
+tokio = { workspace = true, default-features = false, features = [
+    "macros",
+    "io-util",
+    "io-std",
+    "fs",
+    "rt-multi-thread",
+    "time",
+    "sync",
+] }
+tokio-tungstenite = { workspace = true, optional = true }
+tokio-util.workspace = true
+uuid = { workspace = true, features = ["serde", "v4", "v7"] }
+surrealism-runtime = { workspace = true, optional = true }
+
+# OS-SPECIFIC ALLOCATOR DEPENDENCIES
+[target.'cfg(all(any(target_arch = "x86_64", target_arch = "x86"), any(target_os = "linux", target_os = "macos"), not(target_env = "msvc")))'.dependencies]
+jemallocator = { workspace = true, optional = true }
+jemalloc-sys = { workspace = true, optional = true }
+
+[target.'cfg(all(any(unix, windows), not(all(any(target_arch = "x86_64", target_arch = "x86"), any(target_os = "linux", target_os = "macos"), not(target_env = "msvc")))))'.dependencies]
+mimalloc = { workspace = true, optional = true }
+mimalloc-sys = { workspace = true, optional = true }
+
+# DEVELOPMENT DEPENDENCIES
+[dev-dependencies]
+surrealdb-datastore = { workspace = true, features = ["test-hooks"] }
+fst.workspace = true
+surrealdb-kvs = { workspace = true, features = ["test-inc-timestamp"] }
+ast = { workspace = true }
+parser = { workspace = true }
+criterion = { workspace = true, features = ["async_tokio"] }
+env_logger.workspace = true
+flate2.workspace = true
+paste.workspace = true
+rstest.workspace = true
+serial_test.workspace = true
+temp-dir.workspace = true
+test-log = { workspace = true, features = ["trace"] }
+time = { workspace = true, features = ["serde"] }
+# `test-util` gives the maintenance-scheduler tests a paused clock, so they
+# assert dispatch order rather than sleeping through real intervals.
+tokio = { workspace = true, features = ["macros", "sync", "rt-multi-thread", "test-util"] }
+tokio-util.workspace = true
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+wiremock.workspace = true
+zstd = { workspace = true, features = ["default"] }
+
+[package.metadata.cargo-machete]
+# md-5 crate is imported as md5::
+ignored = ["md-5"]
+
+[lints]
+workspace = true
+
+[lib]
+name = "surrealdb_core"
+
+[[bench]]
+name = "allocator"
+harness = false
+
+[[bench]]
+name = "executor"
+harness = false
+
+[[bench]]
+name = "statements"
+harness = false
+
+[[bench]]
+name = "functions"
+harness = false
+
+[[bench]]
+name = "rocksdb_cursor"
+harness = false
+required-features = ["kv-rocksdb"]
+
+[[bench]]
+name = "parser"
+harness = false
+
+[[bench]]
+name = "processor"
+harness = false
+
+[[bench]]
+name = "live_query_scaling"
+harness = false
+
+[[bench]]
+name = "hash_btree"
+harness = false
+
+[[bench]]
+name = "index_ann"
+harness = false
+
+[[bench]]
+name = "hashset_vs_vector"
+harness = false
+
+[[bench]]
+name = "import_load"
+harness = false
+
+[[bench]]
+name = "import_ablation"
+harness = false
+
+[[bench]]
+name = "fan_out"
+harness = false

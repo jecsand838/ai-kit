@@ -4622,10 +4622,12 @@ impl DatabaseCase {
     async fn qdrant_exact_offsets(&self) {
         self.seed(4).await;
         let before = self.rows().await;
-        for (filter, offset, expected) in [
-            (None, 1, vec![2, 3, 4]),
-            (None, 0, vec![1, 2, 3]),
-            (None, 5, vec![]),
+        for (filter, offset, limit, expected) in [
+            (None, 1, 3, vec![2, 3, 4]),
+            (None, 2, 1, vec![3]),
+            (None, 2, 2, vec![3, 4]),
+            (None, 0, 3, vec![1, 2, 3]),
+            (None, 5, 3, vec![]),
             (
                 Some(FilterExpr::Compare {
                     field: "number".into(),
@@ -4633,11 +4635,13 @@ impl DatabaseCase {
                     value: json!(1),
                 }),
                 1,
+                3,
                 vec![3, 4],
             ),
         ] {
             let mut query = self
-                .vector_query(3)
+                .vector_query(limit)
+                .projection(Projection::Columns(vec!["marker".into(), "number".into()]))
                 .map_options(|options| options.params.offset = Some(offset));
             query.scope.filter = filter;
             let response = self
@@ -4648,13 +4652,31 @@ impl DatabaseCase {
                 }))
                 .await
                 .expect("exact offset query");
+            assert_eq!(response.hits.len(), expected.len());
             assert_eq!(
                 response
                     .hits
                     .into_iter()
-                    .map(|hit| hit.record.id.unwrap())
+                    .map(|hit| {
+                        assert_eq!(hit.record.fields.len(), 2);
+                        assert!(hit.record.vectors.is_empty());
+                        (
+                            hit.record.id.unwrap(),
+                            hit.record.fields["marker"].clone(),
+                            hit.record.fields["number"].clone(),
+                        )
+                    })
                     .collect::<Vec<_>>(),
-                expected.into_iter().map(RecordId::U64).collect::<Vec<_>>()
+                expected
+                    .into_iter()
+                    .map(|id| {
+                        (
+                            RecordId::U64(id),
+                            json!(format!("row-{:04}", id - 1)),
+                            json!(id - 1),
+                        )
+                    })
+                    .collect::<Vec<_>>()
             );
         }
         // A selective filter still has enough candidates to fill offset + limit.

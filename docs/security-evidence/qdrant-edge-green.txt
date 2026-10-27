@@ -1,0 +1,43 @@
+   Compiling storage-sdk v0.1.0 (/Users/connorsanders/l-language/ai-kit/storage-sdk)
+warning: linker stderr: ld: __eh_frame section too large (max 16MB) to encode dwarf unwind offsets in compact unwind table, performance of exception handling might be affected
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `storage-sdk` (test "strict_live") generated 1 warning
+    Finished `test` profile [unoptimized] target(s) in 8.34s
+warning: the following packages contain code that will be rejected by a future version of Rust: proc-macro-error2 v2.0.1
+note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`
+     Running tests/strict_live.rs (target/debug/deps/strict_live-29eeb6a5c25eb81b)
+
+running 5 tests
+test database_cases::qdrant_edge_catalog_data_schema ... QdrantEdge Catalog: passed
+QdrantEdge Data: passed
+QdrantEdge UnfilteredUpdate: passed
+QdrantEdge Lookup: passed
+QdrantEdge Merge: passed
+QdrantEdge Partition: passed
+QdrantEdge PartitionCollision: passed
+QdrantEdge PartitionNullCollision: passed
+QdrantEdge Schema: passed
+ok
+test database_cases::qdrant_edge_empty_writes_preserve_existing_collection ... QdrantEdge EmptyWriteIdentity: passed
+ok
+test database_cases::qdrant_edge_mutations_persist_after_reopen ... ok
+test database_cases::qdrant_edge_query_index ... QdrantEdge Nearest: passed
+QdrantEdge NearestOffset: passed
+QdrantEdge SearchById: passed
+QdrantEdge Scroll: passed
+QdrantEdge Sample: passed
+QdrantEdge ScalarIndex: passed
+QdrantEdge FullTextIndex: passed
+QdrantEdge VectorIndex: passed
+QdrantEdge InvalidIndex: passed
+QdrantEdge Overwrite: passed
+QdrantEdge EmptyOverwrite: passed
+ok
+test database_cases::qdrant_edge_unsupported_overwrite_preserves_collection ... QdrantEdge RejectedOverwrite { unsupported_id: false }: passed
+QdrantEdge RejectedOverwrite { unsupported_id: true }: passed
+QdrantEdge RejectedDimensionsOverwrite: passed
+ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 50 filtered out; finished in 14.31s

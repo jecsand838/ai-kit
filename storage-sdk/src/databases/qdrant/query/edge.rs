@@ -70,6 +70,7 @@ impl EdgeNearestSpec<'_> {
             quantization: None,
             indexed_only: self.indexed_only,
             acorn: None,
+            idf: None,
         })
     }
 }
@@ -88,10 +89,9 @@ pub(super) fn edge_query(
     let results = shard
         .query(request)
         .map_err(|err| db.map_err("edge_query", err))?;
-    // Edge returns the limit + offset candidates; its caller owns pagination.
+    // Edge applies the requested offset before returning the hits.
     let hits = results
         .iter()
-        .skip(offset)
         .take(limit)
         .map(|point| mapper::decode_edge_scored_record(db, point, vector_selection))
         .collect::<Result<Vec<_>, StorageError>>()?;

@@ -1,0 +1,14 @@
+{
+  "status": "PASS",
+  "parent_count": 7,
+  "expected_returncodes": [
+    0,
+    1
+  ],
+  "observed_returncodes": [
+    0,
+    1
+  ],
+  "scanner_sha256": "33fbe81adca1b794f4ffe98574d59b0ebe6fcfdb310976fafed98a094c795111",
+  "offline_synthetic_database": true
+}

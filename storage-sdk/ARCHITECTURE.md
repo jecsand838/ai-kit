@@ -439,7 +439,12 @@ configuration remains local-only and no cloud object-store features are enabled.
 The StateStore keeps
 its established schema and exact file format 2.0; this dependency transition
 requires cold-reopen and cleanup proof, not a new public or persisted API.
-Remote Qdrant is pinned to server 1.19.2; Edge remains crate 0.6.1. These are
+Remote Qdrant is pinned to server 1.19.2; Edge uses crate 0.9.0. These are
 distinct native implementations of the retained portable operations. The
 approved macOS/Qdrant browser version constraint adds no runtime route; its
 resolver and downstream limits are documented in [feature guidance](README.md#features).
+Edge applies nearest-query offsets internally; the adapter does not skip rows
+a second time. Its configuration builders retain cached payload memory and
+existing defaults, and configuration guards are released before helpers may
+reacquire them. The seven workspace source patches and their nontransitive
+downstream requirements are owned by the [dependency security policy](../docs/security-dependencies.md).

@@ -14,6 +14,11 @@ import sys
 import time
 import uuid
 
+if __package__:
+    from .security_dependencies import SecurityPatches
+else:
+    from security_dependencies import SecurityPatches
+
 
 TARGETS = {
     "provider-sdk": ("mock_contracts",),
@@ -22,6 +27,7 @@ TARGETS = {
     "agent-sdk": ("mock_contracts", "custom_mock_composition"),
     "app-sdk": ("mock_contracts", "workflow_mock_composition"),
 }
+CI_MODES = ("ci", "ci-tests", "ci-lint")
 SUMMARY = re.compile(
     r"^test result: (ok|FAILED)\. (\d+) passed; (\d+) failed; (\d+) ignored; "
     r"(\d+) measured; (\d+) filtered out;", re.M
@@ -34,7 +40,8 @@ class Runner:
         self.selected = selected
         self.mode = mode
         self.execute = execute or self.owned_process
-        self.environment = dict(os.environ, CARGO_INCREMENTAL="0", CARGO_BUILD_JOBS="1")
+        self.environment = dict(os.environ, CARGO_INCREMENTAL="0",
+                                CARGO_BUILD_JOBS=os.environ.get("CARGO_BUILD_JOBS", "1"))
         stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         self.directory = self.root / "target/mock-contracts" / (stamp + "-" + uuid.uuid4().hex[:8])
         self.directory.mkdir(parents=True)
@@ -90,6 +97,11 @@ class Runner:
     def cargo(cls, operation, crate, *args):
         return ["cargo", operation, "--locked", "-p", crate, *cls.features(crate), *args]
 
+    @staticmethod
+    def ci_cargo(operation, *args):
+        packages = [argument for crate in TARGETS for argument in ("-p", crate)]
+        return ["cargo", operation, "--locked", "--no-default-features", *packages, *args]
+
     def save(self):
         destination = self.directory / "report.json"
         temporary = self.directory / "report.json.tmp"
@@ -98,6 +110,7 @@ class Runner:
 
     def fingerprint(self):
         files = set()
+        files.update(self.root / relative for relative in SecurityPatches(self.root).inputs())
         for folder in (*TARGETS, "scripts", "docs", ".cargo"):
             directory = self.root / folder
             if directory.is_dir():
@@ -109,10 +122,13 @@ class Runner:
         for path in sorted(files):
             digest.update(str(path.relative_to(self.root)).encode() + b"\0")
             digest.update(hashlib.sha256(path.read_bytes()).digest())
+            digest.update(str(path.stat().st_mode & 0o111).encode() + b"\0")
         return {"sha256": digest.hexdigest(), "files": len(files)}
 
-    def command(self, name, command, kind="gate"):
-        stage = {"name": name, "kind": kind, "command": command, "status": "INCOMPLETE"}
+    def command(self, name, command, kind="gate", cwd=None):
+        directory = self.root if cwd is None else cwd
+        stage = {"name": name, "kind": kind, "command": command,
+                 "cwd": str(directory), "status": "INCOMPLETE"}
         self.report["stages"].append(stage)
         self.save()
         log = self.directory / (str(len(self.report["stages"])) + "-" + name + ".log")
@@ -123,7 +139,7 @@ class Runner:
         try:
             # Open capture before execution; a missing log must never count as a pass.
             with log.open("w") as capture:
-                result = self.execute(command, cwd=self.root, env=self.environment,
+                result = self.execute(command, cwd=directory, env=self.environment,
                                       stdout=capture, stderr=subprocess.STDOUT,
                                       timeout=7200, check=False)
             stage["returncode"] = result.returncode
@@ -145,7 +161,11 @@ class Runner:
         ):
             stage, output = self.command(name, command, "provenance")
             self.report[name] = output.strip() if stage["status"] == "PASS" else None
-        self.report["features"] = {crate: self.features(crate) or ["default"] for crate in self.selected}
+        self.report["features"] = {
+            crate: ["--no-default-features"] if self.mode in CI_MODES else self.features(crate) or ["default"]
+            for crate in self.selected
+        }
+        self.report["dependency_features"] = "unified across five packages" if self.mode in CI_MODES else "per selected package"
         self.report["build_environment"] = {key: self.environment[key] for key in ("CARGO_INCREMENTAL", "CARGO_BUILD_JOBS")}
         self.save()
 
@@ -175,14 +195,15 @@ class Runner:
         else:
             stage["status"] = "PASS"
 
-    def behavioral(self, crate, target):
+    def behavioral(self, crate, target, executable=None):
         label = crate + "-" + target
         if not (self.root / crate / "tests" / (target + ".rs")).is_file():
             self.report["stages"].append({"name": label, "kind": "behavioral", "status": "INCOMPLETE", "error": "required target source is missing"})
             self.save()
             return
-        base = self.cargo("test", crate, "--test", target)
-        listing, output = self.command(label + "-inventory", base + ["--", "--list", "--format", "terse"], "inventory")
+        base = [executable] if executable is not None else self.cargo("test", crate, "--test", target) + ["--"]
+        cwd = self.root / crate if executable is not None else self.root
+        listing, output = self.command(label + "-inventory", base + ["--list", "--format", "terse"], "inventory", cwd)
         inventory = self.inventory(output)
         listing["inventory"] = inventory
         if listing["status"] != "PASS":
@@ -192,7 +213,7 @@ class Runner:
             listing.update(status="FAIL", error="empty or duplicate behavioral inventory")
             self.save()
             return
-        stage, output = self.command(label, base + ["--", "--test-threads=1"], "behavioral")
+        stage, output = self.command(label, base + ["--test-threads=1"], "behavioral", cwd)
         self.validate_execution(stage, output, inventory)
         self.save()
 
@@ -201,21 +222,85 @@ class Runner:
             for target in TARGETS[crate]:
                 self.behavioral(crate, target)
 
+    def compiled_executables(self, output, build):
+        artifacts = []
+        for line in output.splitlines():
+            try:
+                artifact = json.loads(line)
+            except ValueError:
+                # Cargo diagnostics may share the capture with JSON messages.
+                continue
+            if isinstance(artifact, dict) and artifact.get("reason") == "compiler-artifact":
+                artifacts.append(artifact)
+        executables = {}
+        required = [(crate, target) for crate, targets in TARGETS.items() for target in targets]
+        for crate, target in [*required, ("app-sdk", "compile_contract")]:
+            source = self.root / crate / "tests" / (target + ".rs")
+            manifest = self.root / crate / "Cargo.toml"
+            proof = {"name": crate + "-" + target + "-compile", "kind": "compile-only",
+                     "build_stage": build["name"], "manifest": str(manifest),
+                     "source": str(source), "status": "INCOMPLETE"}
+            self.report["stages"].append(proof)
+            candidates = []
+            for artifact in artifacts:
+                description = artifact.get("target")
+                profile = artifact.get("profile")
+                if (not isinstance(description, dict) or not isinstance(profile, dict)
+                        or artifact.get("manifest_path") != str(manifest)
+                        or description.get("src_path") != str(source)
+                        or description.get("name") != target or description.get("kind") != ["test"]
+                        or profile.get("test") is not True):
+                    continue
+                candidates.append(artifact.get("executable"))
+            if not source.is_file():
+                proof["error"] = "required target source is missing"
+            elif len(candidates) != 1 or not isinstance(candidates[0], str):
+                proof["error"] = "required test executable was not uniquely identified in this build"
+            else:
+                executable = Path(candidates[0])
+                if not executable.is_absolute() or not executable.is_file() or not os.access(executable, os.X_OK):
+                    proof["error"] = "reported test executable is unavailable"
+                else:
+                    proof.update(status="PASS", executable=str(executable))
+                    if (crate, target) in required:
+                        executables[crate, target] = str(executable)
+        self.save()
+        return executables
+
     def ci(self):
-        self.command("format", ["cargo", "fmt", "--all", "--check"])
-        self.command("no-path-wiring", ["bash", "scripts/check_no_path_wiring.sh"])
-        self.command("no-type-aliases", ["bash", "scripts/check_no_type_aliases.sh"])
-        self.command("runner-contracts", [sys.executable, "-m", "unittest", "discover", "-s", "scripts/tests", "-p", "test_mock_contract_runner.py", "-v"])
-        for crate, targets in TARGETS.items():
-            arguments = [argument for target in targets for argument in ("--test", target)]
-            self.command(crate + "-positive-compile", self.cargo("test", crate, *arguments, "--no-run"), "compile-only")
-            self.command(crate + "-clippy", self.cargo("clippy", crate, "--lib", *arguments, "--", "-D", "warnings"))
-        self.command("app-existing-compile-contract", self.cargo("test", "app-sdk", "--test", "compile_contract", "--no-run"), "compile-only")
-        self.mocks()
+        if self.mode != "ci-lint":
+            gates = [
+                ("security-provenance", [sys.executable, "scripts/security_dependencies.py", "verify", "--root", str(self.root)]),
+                ("no-path-wiring", ["bash", "scripts/check_no_path_wiring.sh"]),
+                ("no-type-aliases", ["bash", "scripts/check_no_type_aliases.sh"]),
+                ("runner-contracts", [sys.executable, "-m", "unittest", "discover", "-s", "scripts/tests", "-p", "test_mock_contract_runner.py", "-v"]),
+                ("security-contracts", [sys.executable, "-m", "unittest", "discover", "-s", "scripts/tests", "-p", "test_security_dependencies.py", "-v"]),
+                ("wiring-contracts", [sys.executable, "-m", "unittest", "discover", "-s", "scripts/tests", "-p", "test_workspace_wiring_guards.py", "-v"]),
+                ("release-source-contracts", [sys.executable, "-m", "unittest", "discover", "-s", "scripts/tests", "-p", "test_release_evidence.py", "-v"]),
+            ]
+            if self.mode == "ci":
+                gates.insert(0, ("format", ["cargo", "fmt", "--all", "--check"]))
+            for name, command in gates:
+                stage, _ = self.command(name, command)
+                if stage["status"] != "PASS":
+                    return
+        targets = list(dict.fromkeys(target for targets in TARGETS.values() for target in targets))
+        arguments = [argument for target in targets for argument in ("--test", target)]
+        executables = {}
+        if self.mode != "ci-lint":
+            build, output = self.command("workspace-mock-build", self.ci_cargo(
+                "build", "--profile", "test", "--keep-going", *arguments,
+                "--test", "compile_contract", "--message-format=json"), "dependency-preparation")
+            executables = self.compiled_executables(output, build)
+        if self.mode != "ci-tests":
+            self.command("workspace-mock-clippy", self.ci_cargo(
+                "clippy", "--lib", "--keep-going", *arguments, "--", "--no-deps", "-D", "warnings"))
+        for (crate, target), executable in executables.items():
+            self.behavioral(crate, target, executable)
 
     def run(self):
         self.metadata()
-        self.ci() if self.mode == "ci" else self.mocks()
+        self.ci() if self.mode in CI_MODES else self.mocks()
         self.report["source_after"] = self.fingerprint()
         if self.report["source_after"] != self.report["source_before"]:
             self.report["stages"].append({"name": "source-stability", "status": "INCOMPLETE", "error": "source changed during validation; results are not one coherent source snapshot"})
@@ -231,12 +316,13 @@ class Runner:
         subparsers = parser.add_subparsers(dest="mode", required=True)
         mocks = subparsers.add_parser("mocks", allow_abbrev=False)
         mocks.add_argument("--crate", choices=tuple(TARGETS))
-        subparsers.add_parser("ci", allow_abbrev=False)
+        for mode in CI_MODES:
+            subparsers.add_parser(mode, allow_abbrev=False)
         args = parser.parse_args(arguments)
         selected = (args.crate,) if args.mode == "mocks" and args.crate else tuple(TARGETS)
         try:
             return cls(Path(__file__).resolve().parent.parent, selected, args.mode).run()
-        except (OSError, KeyboardInterrupt) as error:
+        except (OSError, ValueError, KeyboardInterrupt) as error:
             print(f"INCOMPLETE: evidence capture or execution interrupted: {error}", file=sys.stderr)
             return 1
 

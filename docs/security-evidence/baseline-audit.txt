@@ -1,0 +1,496 @@
+Crate:     ammonia
+Version:   4.2.1
+Title:     XSS in ammonia via SVG `animateMotion`, `animateTransform`, and/or `animateColor` tags
+Date:      2021-10-10
+ID:        RUSTSEC-2021-0158
+URL:       https://rustsec.org/advisories/RUSTSEC-2021-0158
+Solution:  Upgrade to >=4.2.3 OR >=4.1.7, <4.2.0
+
+Crate:     ammonia
+Version:   4.2.1
+Title:     Missing case-insensitive matching for CSS url function
+Date:      2026-10-16
+ID:        RUSTSEC-2026-0373
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0373
+Solution:  Upgrade to >=4.2.4 OR >=4.1.8, <4.2.0
+
+Crate:     ammonia
+Version:   4.2.1
+Title:     Incorrect escaping for `url("")` functions in CSS style attributes
+Date:      2021-10-10
+ID:        RUSTSEC-2021-0157
+URL:       https://rustsec.org/advisories/RUSTSEC-2021-0157
+Solution:  Upgrade to >=4.2.3 OR >=4.1.7, <4.2.0
+
+Crate:     crossbeam-epoch
+Version:   0.9.18
+Title:     Invalid pointer dereference in `fmt::Pointer` impl for `Atomic` and `Shared` when the underlying pointer is invalid
+Date:      2026-07-06
+ID:        RUSTSEC-2026-0204
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0204
+Solution:  Upgrade to >=0.9.20
+
+Crate:     crypto-bigint
+Version:   0.5.5
+Title:     Multiple timing variability issues in operations intended to be constant-time
+Date:      2026-10-23
+ID:        RUSTSEC-2026-0387
+URL:       https://github.com/RustCrypto/crypto-bigint/pull/1365
+Solution:  Upgrade to >=0.7.6
+
+Crate:     ctutils
+Version:   0.4.2
+Title:     Non-constant-time mask generation and `u128` comparisons
+Date:      2026-10-23
+ID:        RUSTSEC-2026-0385
+URL:       https://github.com/RustCrypto/utils/pull/1569
+Solution:  Upgrade to >=0.4.4
+
+Crate:     h2
+Version:   0.3.27
+Title:     h2 unbounded empty DATA frames
+Date:      2026-08-17
+ID:        RUSTSEC-2026-0258
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0258
+Solution:  Upgrade to >=0.4.16
+
+Crate:     h2
+Version:   0.4.13
+Title:     h2 unbounded empty DATA frames
+Date:      2026-08-17
+ID:        RUSTSEC-2026-0258
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0258
+Solution:  Upgrade to >=0.4.16
+
+Crate:     quick-xml
+Version:   0.39.4
+Title:     Unbounded namespace-declaration allocation in `NsReader` enables memory-exhaustion denial of service
+Date:      2026-06-29
+ID:        RUSTSEC-2026-0195
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0195
+Severity:  7.5 (high)
+Solution:  Upgrade to >=0.41.0
+
+Crate:     quick-xml
+Version:   0.39.4
+Title:     Quadratic run time when checking a start tag for duplicate attribute names
+Date:      2026-06-29
+ID:        RUSTSEC-2026-0194
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0194
+Severity:  7.5 (high)
+Solution:  Upgrade to >=0.41.0
+
+Crate:     quinn-proto
+Version:   0.11.14
+Title:     Zero-length DATAGRAM frames bypass the receive buffer limit in quinn-proto
+Date:      2026-08-17
+ID:        RUSTSEC-2026-0342
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0342
+Solution:  Upgrade to >=0.11.17
+
+Crate:     quinn-proto
+Version:   0.11.14
+Title:     Unbounded growth of pending connection ID retirements in quinn-proto
+Date:      2026-08-17
+ID:        RUSTSEC-2026-0339
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0339
+Solution:  Upgrade to >=0.11.17
+
+Crate:     quinn-proto
+Version:   0.11.14
+Title:     Remote peer can panic quinn-proto with zero-length STREAM frames during unordered reads
+Date:      2026-09-14
+ID:        RUSTSEC-2026-0338
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0338
+Solution:  Upgrade to >=0.11.18
+
+Crate:     quinn-proto
+Version:   0.11.14
+Title:     Peer minimum ACK delay can panic quinn-proto when ACK_FREQUENCY transmission is enabled
+Date:      2026-09-14
+ID:        RUSTSEC-2026-0340
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0340
+Severity:  7.5 (high)
+Solution:  Upgrade to >=0.11.18
+
+Crate:     quinn-proto
+Version:   0.11.14
+Title:      Remote memory exhaustion in quinn-proto from unbounded out-of-order stream reassembly
+Date:      2026-06-22
+ID:        RUSTSEC-2026-0185
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0185
+Severity:  7.5 (high)
+Solution:  Upgrade to >=0.11.15
+
+Crate:     rsa
+Version:   0.9.10
+Title:     Marvin Attack: potential key recovery through timing sidechannels
+Date:      2023-11-22
+ID:        RUSTSEC-2023-0071
+URL:       https://rustsec.org/advisories/RUSTSEC-2023-0071
+Severity:  5.9 (medium)
+Solution:  No fixed upgrade is available!
+
+Crate:     rustls
+Version:   0.22.4
+Title:     `Debug` impls for client session values expose TLS secrets
+Date:      2026-10-14
+ID:        RUSTSEC-2026-0346
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0346
+Severity:  4 (medium)
+Solution:  Upgrade to >=0.23.46
+
+Crate:     rustls
+Version:   0.22.4
+Title:     Unauthenticated ServerHello can downgrade later connections to classical key exchange
+Date:      2026-10-14
+ID:        RUSTSEC-2026-0349
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0349
+Severity:  3.7 (low)
+Solution:  Upgrade to >=0.23.46
+
+Crate:     rustls
+Version:   0.23.45
+Title:     `Debug` impls for client session values expose TLS secrets
+Date:      2026-10-14
+ID:        RUSTSEC-2026-0346
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0346
+Severity:  4 (medium)
+Solution:  Upgrade to >=0.23.46
+
+Crate:     rustls
+Version:   0.23.45
+Title:     Buffered application data sent to outer server after ECH rejection
+Date:      2026-10-14
+ID:        RUSTSEC-2026-0347
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0347
+Severity:  2.3 (low)
+Solution:  Upgrade to >=0.23.46
+
+Crate:     rustls
+Version:   0.23.45
+Title:     Brotli certificate decompression can allocate up to 1 GiB before authentication
+Date:      2026-10-14
+ID:        RUSTSEC-2026-0348
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0348
+Severity:  3.7 (low)
+Solution:  Upgrade to >=0.23.46
+
+Crate:     rustls
+Version:   0.23.45
+Title:     Unauthenticated ServerHello can downgrade later connections to classical key exchange
+Date:      2026-10-14
+ID:        RUSTSEC-2026-0349
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0349
+Severity:  3.7 (low)
+Solution:  Upgrade to >=0.23.46
+
+Crate:     rustls-webpki
+Version:   0.102.8
+Title:     Reachable panic in certificate revocation list parsing
+Date:      2026-04-22
+ID:        RUSTSEC-2026-0104
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0104
+Solution:  Upgrade to >=0.103.13, <0.104.0-alpha.1 OR >=0.104.0-alpha.7
+
+Crate:     rustls-webpki
+Version:   0.102.8
+Title:     Name constraints for URI names were incorrectly accepted
+Date:      2026-04-14
+ID:        RUSTSEC-2026-0098
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0098
+Solution:  Upgrade to >=0.103.12, <0.104.0-alpha.1 OR >=0.104.0-alpha.6
+
+Crate:     rustls-webpki
+Version:   0.102.8
+Title:     Name constraints were accepted for certificates asserting a wildcard name
+Date:      2026-04-14
+ID:        RUSTSEC-2026-0099
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0099
+Solution:  Upgrade to >=0.103.12, <0.104.0-alpha.1 OR >=0.104.0-alpha.6
+
+Crate:     rustls-webpki
+Version:   0.102.8
+Title:     CRLs not considered authoritative by Distribution Point due to faulty matching logic
+Date:      2026-03-20
+ID:        RUSTSEC-2026-0049
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0049
+Solution:  Upgrade to >=0.103.10
+
+Crate:     rustls-webpki
+Version:   0.102.8
+Title:     Certificate verification may accept distrusted intermediates
+Date:      2026-10-20
+ID:        RUSTSEC-2026-0382
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0382
+Solution:  Upgrade to >=0.103.16, <0.104.0-alpha.1 OR >=0.104.0-alpha.8
+
+Crate:     rustls-webpki
+Version:   0.103.15
+Title:     Certificate verification may accept distrusted intermediates
+Date:      2026-10-20
+ID:        RUSTSEC-2026-0382
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0382
+Solution:  Upgrade to >=0.103.16, <0.104.0-alpha.1 OR >=0.104.0-alpha.8
+
+Crate:     webbrowser
+Version:   1.2.1
+Title:     Unix `BROWSER` handling allows browser argument injection
+Date:      2026-07-29
+ID:        RUSTSEC-2026-0257
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0257
+Solution:  Upgrade to >=1.2.2
+
+Crate:     webpki-root-certs
+Version:   1.0.6
+Title:     Bundled root certificates allow trust in distrusted emSign intermediates
+Date:      2026-10-19
+ID:        RUSTSEC-2026-0383
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0383
+Solution:  Upgrade to >=1.0.10
+
+Crate:     webpki-roots
+Version:   1.0.6
+Title:     Bundled root certificates allow trust in distrusted emSign intermediates
+Date:      2026-10-19
+ID:        RUSTSEC-2026-0381
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0381
+Solution:  Upgrade to >=1.0.10
+
+Crate:     zstd
+Version:   0.13.3
+Title:     Data from an abandoned stream leaks into the next stream on a reused context
+Date:      2026-10-16
+ID:        RUSTSEC-2026-0391
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0391
+Solution:  Upgrade to >=0.14.3
+
+Crate:     zstd-safe
+Version:   7.2.4
+Title:     Uninitialized memory exposed when streaming decompression of a legacy frame fails
+Date:      2026-10-16
+ID:        RUSTSEC-2026-0403
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0403
+Solution:  Upgrade to >=8.2.0
+
+Crate:     zstd-safe
+Version:   7.2.4
+Title:     `Seekable::decompress` sets a `Vec` length beyond its capacity for offsets past the end
+Date:      2026-10-16
+ID:        RUSTSEC-2026-0398
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0398
+Solution:  Upgrade to >=8.2.0
+
+Crate:     zstd-sys
+Version:   2.0.16+zstd.1.5.7
+Title:     WebAssembly allocator shim corrupts memory on allocation failure
+Date:      2026-10-16
+ID:        RUSTSEC-2026-0410
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0410
+Solution:  Upgrade to >=2.1.2
+
+Crate:     atomic-polyfill
+Version:   1.0.3
+Warning:   unmaintained
+Title:     atomic-polyfill is unmaintained
+Date:      2023-07-11
+ID:        RUSTSEC-2023-0089
+URL:       https://rustsec.org/advisories/RUSTSEC-2023-0089
+
+Crate:     bincode
+Version:   1.3.3
+Warning:   unmaintained
+Title:     Bincode is unmaintained
+Date:      2025-12-16
+ID:        RUSTSEC-2025-0141
+URL:       https://rustsec.org/advisories/RUSTSEC-2025-0141
+
+Crate:     bincode
+Version:   2.0.1
+Warning:   unmaintained
+Title:     Bincode is unmaintained
+Date:      2025-12-16
+ID:        RUSTSEC-2025-0141
+URL:       https://rustsec.org/advisories/RUSTSEC-2025-0141
+
+Crate:     core2
+Version:   0.4.0
+Warning:   unmaintained
+Title:     core2 is unmaintained, all versions yanked
+Date:      2026-04-14
+ID:        RUSTSEC-2026-0105
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0105
+
+Crate:     paste
+Version:   1.0.15
+Warning:   unmaintained
+Title:     paste - no longer maintained
+Date:      2024-10-07
+ID:        RUSTSEC-2024-0436
+URL:       https://rustsec.org/advisories/RUSTSEC-2024-0436
+
+Crate:     proc-macro-error2
+Version:   2.0.1
+Warning:   unmaintained
+Title:     proc-macro-error2 is unmaintained
+Date:      2026-06-07
+ID:        RUSTSEC-2026-0173
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0173
+
+Crate:     rustls-pemfile
+Version:   2.2.0
+Warning:   unmaintained
+Title:     rustls-pemfile is unmaintained
+Date:      2025-11-28
+ID:        RUSTSEC-2025-0134
+URL:       https://rustsec.org/advisories/RUSTSEC-2025-0134
+
+Crate:     serde_cbor
+Version:   0.11.2
+Warning:   unmaintained
+Title:     serde_cbor is unmaintained
+Date:      2021-08-15
+ID:        RUSTSEC-2021-0127
+URL:       https://rustsec.org/advisories/RUSTSEC-2021-0127
+
+Crate:     unsafe-libyaml
+Version:   0.2.11
+Warning:   unmaintained
+Title:     unsafe-libyaml is unmaintained
+Date:      2024-03-25
+ID:        RUSTSEC-2024-0449
+URL:       https://rustsec.org/advisories/RUSTSEC-2024-0449
+
+Crate:     zbus_names
+Version:   4.3.1
+Warning:   unmaintained
+Title:     `zbus_names` is unmaintained
+Date:      2026-10-16
+ID:        RUSTSEC-2026-0371
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0371
+
+Crate:     zvariant
+Version:   5.10.0
+Warning:   unmaintained
+Title:     `zvariant` is unmaintained
+Date:      2026-10-16
+ID:        RUSTSEC-2026-0370
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0370
+
+Crate:     zvariant_derive
+Version:   5.10.0
+Warning:   unmaintained
+Title:     `zvariant_derive` is unmaintained
+Date:      2026-10-16
+ID:        RUSTSEC-2026-0372
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0372
+
+Crate:     event-listener
+Version:   5.4.1
+Warning:   unsound
+Title:     `event-listener` allows `!Send` tags to cross thread boundaries via `StackSlot`
+Date:      2026-07-13
+ID:        RUSTSEC-2026-0221
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0221
+
+Crate:     rand
+Version:   0.7.3
+Warning:   unsound
+Title:     Rand is unsound with a custom logger using `rand::rng()`
+Date:      2026-04-09
+ID:        RUSTSEC-2026-0097
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0097
+
+Crate:     tokio
+Version:   1.53.2
+Warning:   unsound
+Title:     `AsyncFd::new` and related constructors violate I/O safety
+Date:      2026-10-13
+ID:        RUSTSEC-2026-0386
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0386
+
+Crate:     zstd-safe
+Version:   7.2.4
+Warning:   unsound
+Title:     Use-after-free with `CParameter::StableInBuffer`
+Date:      2026-10-16
+ID:        RUSTSEC-2026-0395
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0395
+
+Crate:     zstd-safe
+Version:   7.2.4
+Warning:   unsound
+Title:     Heap buffer overflow in `CCtx::try_clone` on a multithreaded context
+Date:      2026-10-16
+ID:        RUSTSEC-2026-0402
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0402
+
+Crate:     zstd-safe
+Version:   7.2.4
+Warning:   unsound
+Title:     Use-after-free when changing a multithreaded context with an unfinished frame
+Date:      2026-10-16
+ID:        RUSTSEC-2026-0406
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0406
+
+Crate:     zstd-safe
+Version:   7.2.4
+Warning:   unsound
+Title:     Double free in `DCtx::try_clone`
+Date:      2026-10-16
+ID:        RUSTSEC-2026-0404
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0404
+
+Crate:     zstd-safe
+Version:   7.2.4
+Warning:   unsound
+Title:     Use-after-free of a dictionary after a one-shot call on a context with an open stream
+Date:      2026-10-16
+ID:        RUSTSEC-2026-0400
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0400
+
+Crate:     zstd-safe
+Version:   7.2.4
+Warning:   unsound
+Title:     Use-after-free through `init_using_cdict` and `init_using_ddict`
+Date:      2026-10-16
+ID:        RUSTSEC-2026-0399
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0399
+
+Crate:     zstd-safe
+Version:   7.2.4
+Warning:   unsound
+Title:     Out-of-bounds read in `train_from_buffer` when sample sizes overflow
+Date:      2026-10-16
+ID:        RUSTSEC-2026-0401
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0401
+
+Crate:     zstd-safe
+Version:   7.2.4
+Warning:   unsound
+Title:     Out-of-bounds read with an out-of-range `InBuffer::pos`
+Date:      2026-10-16
+ID:        RUSTSEC-2026-0405
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0405
+
+Crate:     zstd-safe
+Version:   7.2.4
+Warning:   unsound
+Title:     `OutBuffer::around_pos` exposes uninitialized memory
+Date:      2026-10-16
+ID:        RUSTSEC-2026-0397
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0397
+
+Crate:     zstd-safe
+Version:   7.2.4
+Warning:   unsound
+Title:     `Seekable` reads a NULL or out-of-bounds seek table
+Date:      2026-10-16
+ID:        RUSTSEC-2026-0396
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0396
+
+      Loaded 1378 security advisories (from /private/tmp/ai-kit-cargo-audit-0.22.2/advisory-db)
+    Scanning /Users/connorsanders/l-language/ai-kit/Cargo.lock for vulnerabilities (1073 crate dependencies)
+error: 35 vulnerabilities found!
+error: 13 denied warnings found!
+warning: 12 allowed warnings found

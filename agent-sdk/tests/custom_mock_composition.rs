@@ -1,5 +1,8 @@
 //! Real Custom Agent composition with process-local direct public-trait implementations.
 //! No lower SDK product, extension ingress, process, socket, or credential is used.
+// Nested direct-trait async composition exceeds the default compiler depth on Linux.
+#![recursion_limit = "256"]
+
 mod mock_database;
 mod mock_memory;
 mod mock_runtime;

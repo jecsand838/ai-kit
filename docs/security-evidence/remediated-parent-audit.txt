@@ -1,0 +1,2 @@
+      Loaded 1378 security advisories (from /private/tmp/ai-kit-cargo-audit-0.22.2/advisory-db)
+    Scanning /private/tmp/ai-kit-security-audit-coherent-arrow/patched-parents.lock for vulnerabilities (7 crate dependencies)

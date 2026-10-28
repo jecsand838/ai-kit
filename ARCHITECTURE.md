@@ -1,21 +1,21 @@
 # ai-kit Architecture
 
 `ai-kit` is a five-crate Rust workspace of independently usable provider,
-storage, tool, agent, and application SDKs. The workspace root owns shared
+storage, tool, agent, and application Kits. The workspace root owns shared
 policy and validation, not runtime orchestration. Historical artifacts under
 `tmp/**` are immutable records, not current architecture.
 
 ## Workspace Model
 
 ```text
-provider-sdk: Provider -> Model -> Session
+providers-kit: Provider -> Model -> Session
 
-storage-sdk:  Database
+storage-kit:  Database
               StateStore -> StateTransaction
 
-tool-sdk:     Toolset -> ToolHandler
+tools-kit:     Toolset -> ToolHandler
 
-agent-sdk:    Agent -> Workspace -> Conversation
+agents-kit:    Agent -> Workspace -> Conversation
                     |
                     +-- private Custom composition:
                         Provider -> Model
@@ -23,7 +23,7 @@ agent-sdk:    Agent -> Workspace -> Conversation
                         Database-backed managed knowledge
                         StateStore-backed durable control state
 
-app-sdk:      App -> Workspace -> Workflow -> WorkflowRun
+app-kit:      App -> Workspace -> Workflow -> WorkflowRun
               preserves caller-built Agent and storage parameters statically
 ```
 
@@ -92,24 +92,24 @@ Primary handles, backend traits, and errors remain easy to find at crate roots.
 Supporting data is grouped by functional domain:
 
 ```text
-provider_sdk::{
+providers_kit::{
     config, generation, embedding, hosted, files, batch, models, session,
     runtime, error
 }
 
-storage_sdk::{
+storage_kit::{
     database::{config, catalog, data, query, index},
     state::{config, record, transaction}
 }
 
-tool_sdk::{declaration, execution, interaction, local, mcp, schema}
+tools_kit::{declaration, execution, interaction, local, mcp, schema}
 
-agent_sdk::{
+agents_kit::{
     config, identity, workspace, conversation, prompt, notification, model,
     tool, knowledge, error
 }
 
-app_sdk::{workflow}
+app_kit::{workflow}
 ```
 
 These are caller modules, not public implementation trees. Provider clients,
@@ -122,7 +122,7 @@ fields and receiver-owned behavior.
 
 ## Provider Ownership
 
-`provider-sdk` owns:
+`providers-kit` owns:
 
 - OpenAI, Anthropic, Gemini, and Ollama configuration and credentials;
 - provider resource discovery, files, batch lifecycle, and runtime health;
@@ -141,7 +141,7 @@ handles and drains admitted work. Model has no separate lifecycle.
 Model selection is explicit and exact. There are no configured modality slots,
 fallback aliases, provider-wide capability matrix, or request-local model
 field. Calling an unsupported operation returns
-`SdkError` classified as `ErrorKind::Unsupported`.
+`KitError` classified as `ErrorKind::Unsupported`.
 
 `FunctionCall` and `FunctionResult` are normalized values with validated
 correlation. `Message<C>` carries a Model-associated continuation; the supplied
@@ -156,7 +156,7 @@ or provider loop driver.
 
 ## Tool Ownership
 
-`tool-sdk` owns executable Local and MCP-client behavior. One `ToolInfo`
+`tools-kit` owns executable Local and MCP-client behavior. One `ToolInfo`
 describes a tool's schema, annotations, icons, and interaction capabilities.
 `ToolRegistration` binds that information to a private Local handler.
 
@@ -182,16 +182,16 @@ and has consuming shutdown. Server lifecycle never shuts down the Toolset.
 
 ## Storage Ownership
 
-`storage-sdk` contains two independent products:
+`storage-kit` contains two independent products:
 
 - `Database`: portable data, collection, query, and index behavior;
 - `StateStore`: transactional revisioned control-plane state.
 
-Database always supports LanceDB, with opt-in SurrealDB and Qdrant. A portable
+Database always supports LanceDB, with opt-in SurrealDB. A portable
 operation remains only when at least two implementation families provide the
 same semantics. The retained families are collection create/open/list/drop
-and schema alteration; insert/lookup/scan/update/delete/merge/atomic partition
-replacement/count; nearest/search-by-id/text/scroll/random sample; and index
+and schema alteration; insert/scan/update/delete/atomic partition
+replacement/count; nearest/text/scroll; and index
 create/list/drop/wait. One compact `CapabilitySet` reports genuine optional
 behavior, while operation calls remain authoritative.
 
@@ -200,11 +200,12 @@ import/export, optimizer controls, prewarm, sparse-only operations, and other
 single-family controls are not portable Database APIs.
 
 StateStore always supports embedded Lance. Redb, PostgreSQL, and SQLite/Turso
-are opt-in implementations. The default feature set is empty. SQLite/Turso and
-Qdrant cannot be enabled together because their pinned dependency features
-conflict. Default Storage strict-live covers both Lance products; direct backend
-and shared-abstraction changes add the relevant alternative gates. All real
-downstream persistence and managed-knowledge test fixtures use Lance.
+are opt-in implementations. The default feature set is empty. Qdrant support is
+temporarily removed. Validation selects explicit supported feature lanes and
+never uses Storage `--all-features`. Default Storage strict-live covers both
+Lance products; direct backend and shared-abstraction changes add the relevant
+alternative gates. All real downstream persistence and managed-knowledge test
+fixtures use Lance.
 
 State transactions preserve native ownership:
 
@@ -222,7 +223,7 @@ No common actor/lifecycle framework obscures differing native semantics.
 
 ## Agent Ownership
 
-`agent-sdk` owns Codex, OpenCode, and Custom implementations of the same
+`agents-kit` owns Codex, OpenCode, and Custom implementations of the same
 `Agent -> Workspace -> Conversation` contract.
 
 Agent construction requires `AgentConfig` and `AgentStorage<S>` at creation or
@@ -234,12 +235,12 @@ ToolsetBackend implementation
 DatabaseBackend implementation (optional managed knowledge)
 ```
 
-Agent-sdk statically retains its caller-provided `S: StateStoreBackend`,
+agents-kit statically retains its caller-provided `S: StateStoreBackend`,
 optional `D: DatabaseBackend`, `P: ProviderBackend`, and `T: ToolsetBackend`.
 The associated `T::Handler` remains concrete; neither tool value needs Clone.
 Supplied Agent handles are closed over Codex, OpenCode, and
 Custom; caller hierarchies remain concrete or caller-owned exhaustive enums.
-Agent-sdk does not erase Agent, provider, or storage implementations or persist
+agents-kit does not erase Agent, provider, or storage implementations or persist
 lower-crate credentials/factory declarations. Reopen requires callers to
 resupply the same runtime categories. Native Codex/OpenCode construction may
 select a caller `P` solely as static upper-composition context; those runtimes
@@ -263,7 +264,7 @@ typed inside that active loop and is not persisted in Agent durable history.
 Custom abort observes cancellation and durable terminalization of its captured
 generation independently of unread unary replies. Reply acknowledgement and
 full close/shutdown quiescence remain separate obligations under the owning
-[Custom conversation contract](agent-sdk/specs/custom/CONVERSATION.md).
+[Custom conversation contract](agents-kit/specs/custom/CONVERSATION.md).
 
 Codex/OpenCode protocol ownership remains backend-private. Known events decode
 to typed backend enums and receive one exhaustive portable, private-state,
@@ -279,30 +280,30 @@ reopenability remain unchanged in principle.
 The intended dependency direction is:
 
 ```text
-provider-sdk -----> agent-sdk -----> app-sdk
-storage-sdk  --+--> agent-sdk
-               +-------------------> app-sdk
-tool-sdk ---------> agent-sdk
+providers-kit -----> agents-kit -----> app-kit
+storage-kit  --+--> agents-kit
+               +-------------------> app-kit
+tools-kit ---------> agents-kit
 ```
 
-`provider-sdk` does not depend on `tool-sdk`. Provider models describe
-function calls and results; `agent-sdk` owns the tool execution loop.
+`providers-kit` does not depend on `tools-kit`. Provider models describe
+function calls and results; `agents-kit` owns the tool execution loop.
 
-`storage-sdk` does not depend on `tool-sdk`. Model-visible storage tools are
+`storage-kit` does not depend on `tools-kit`. Model-visible storage tools are
 caller-authored Toolsets.
 
-`tool-sdk` remains provider-neutral and storage-neutral. Callers supply MCP
+`tools-kit` remains provider-neutral and storage-neutral. Callers supply MCP
 authentication through connection configuration, including HTTP headers or
 explicit stdio environment entries. Provider credentials remain owned by
-`provider-sdk`.
+`providers-kit`.
 
-`agent-sdk` consumes direct ProviderBackend and ToolsetBackend implementations,
+`agents-kit` consumes direct ProviderBackend and ToolsetBackend implementations,
 and static StateStoreBackend and DatabaseBackend
 implementations. It never inspects lower
 private enums, native ids, protocol envelopes, source identity, storage keys,
 or credentials.
 
-`app-sdk` statically preserves a direct `A: AgentBackend` and its own
+`app-kit` statically preserves a direct `A: AgentBackend` and its own
 `CS: StateStoreBackend`. It uses `A::Workspace` and that Workspace's associated
 Conversation without independent child parameters, persists app-owned keys
 and caller revisions, and never invokes lower provider behavior or
@@ -369,21 +370,22 @@ dispatchers and require exact absence of deleted public symbols.
   refreshes.
 
 The integrated graph uses LanceDB 0.40.0 and Lance 13.0.0 for the local Database
-and StateStore products, Qdrant Edge 0.9.0, and SurrealDB 3.3.0. Remote Qdrant
-uses 1.19.2. Seven verified upstream source patches remediate the workspace
-dependency graph and reconcile Geo's overlay version requirement. The path and
-alias guards exempt only the verified source roots. Published consumers do not
-inherit root Cargo patches: their own workspace must provide the configuration
-in [the dependency security policy](docs/security-dependencies.md).
+and StateStore products, and SurrealDB 3.3.0. External Rust dependencies come
+from crates.io; Cargo patches, replacements and external path overrides are
+forbidden. The path and alias guards have no upstream source exemptions.
+Explicit temporary advisory exceptions retain raw findings and permit only the
+reviewed IDs; other vulnerabilities and unsoundness remain blocking. These
+exceptions accept unresolved risk and require removal when compatible upstream
+fixes become available. The exact policy belongs to
+[the dependency security policy](docs/security-dependencies.md).
 
 LanceDB 0.40.0 enables its single approved `remote` feature because published
 job decoding references error variants guarded by that feature. The adapter
 contract remains local filesystem/memory storage. This build exception brings
 the native HTTP/Flight/OAuth dependencies into the registry graph; it does not
 expose LanceDB Cloud or enable cloud object-store features. Direct dependency
-default features remain disabled. The separate approved macOS/Qdrant registry
-constraint and its shared-resolution limits belong to
-[Storage's feature guidance](storage-sdk/README.md#features).
+default features remain disabled. Supported optional backends and their
+validation lanes belong to [Storage's feature guidance](storage-kit/README.md#features).
 
 Root docs explain workspace ownership once. Crate READMEs teach downstream
 workflows, crate architecture files describe private ownership, crate AGENTS

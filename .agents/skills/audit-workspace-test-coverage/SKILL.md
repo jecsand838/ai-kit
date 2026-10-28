@@ -1,6 +1,6 @@
 ---
 name: audit-workspace-test-coverage
-description: "Audit the ai-kit workspace for missing or weak unit-level, primary public-trait mock, integration, strict-live, docs, and completion-gate coverage, then return a detailed prioritized findings list without editing code. Use when the user asks for a workspace test coverage audit, missing-test analysis, strict-live coverage review, or validation-coverage recommendations across agent-sdk, provider-sdk, storage-sdk, tool-sdk, and app-sdk."
+description: "Audit the ai-kit workspace for missing or weak unit-level, primary public-trait mock, integration, strict-live, docs, and completion-gate coverage, then return a detailed prioritized findings list without editing code. Use when the user asks for a workspace test coverage audit, missing-test analysis, strict-live coverage review, or validation-coverage recommendations across agents-kit, providers-kit, storage-kit, tools-kit, and app-kit."
 ---
 
 # Audit Workspace Test Coverage
@@ -13,7 +13,7 @@ implementation.
 ## Trigger Boundary
 
 Use this skill when the user wants a findings list, coverage audit, or test-gap
-analysis across `agent-sdk`, `provider-sdk`, `storage-sdk`, `tool-sdk`, and `app-sdk`. Do
+analysis across `agents-kit`, `providers-kit`, `storage-kit`, `tools-kit`, and `app-kit`. Do
 not use it when the user already wants the implementation plan or code changes.
 
 ## Prerequisites
@@ -24,8 +24,8 @@ not use it when the user already wants the implementation plan or code changes.
 - Read every in-scope crate's `AGENTS.md` and owning public/behavior specs.
   Load its change-contract skill where one exists; App uses its AGENTS/specs
   plus `ai-kit-public-surface-contract`.
-- Load `agent-sdk-research`, `provider-sdk-research`, `storage-sdk-research`,
-  `tool-sdk-research`, and `app-sdk-research` for the owning scope when coverage
+- Load `agents-kit-research`, `providers-kit-research`, `storage-kit-research`,
+  `tools-kit-research`, and `app-kit-research` for the owning scope when coverage
   conclusions depend on upstream, workflow, or runtime facts.
 - Load `ai-kit-validation-matrix` and `strict-live-audit` when strict-live,
   env-contract, or completion-gate coverage is in scope.
@@ -55,10 +55,10 @@ not use it when the user already wants the implementation plan or code changes.
 ## References
 
 - `use-rust-best-practices-testing`
-- `agent-sdk-research`
-- `provider-sdk-research`
-- `storage-sdk-research`
-- `tool-sdk-research`
-- `app-sdk-research`
+- `agents-kit-research`
+- `providers-kit-research`
+- `storage-kit-research`
+- `tools-kit-research`
+- `app-kit-research`
 - `ai-kit-validation-matrix`
 - `strict-live-audit`

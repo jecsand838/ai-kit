@@ -78,9 +78,10 @@ reason, retain the failed evidence, and create a new explicit continuation bundl
 when execution is necessary. No automatic retry turns a failure into a pass.
 
 An explicit `storage.owner.local_matrix` binding may reuse the complete local
-Storage owner. Its reviewed imported certificate must prove all eight supported
-lanes, every nested gate, all 24 legal feature combinations, and all eight
-incompatible combinations with their retained compiler diagnostics. The driver
+Storage owner. Its reviewed imported certificate must prove all six supported
+lanes, every nested gate and all 16 legal feature combinations. No incompatible
+feature combinations remain; the certificate's negative-combination list must
+be empty, and stale negative receipts cannot satisfy the current owner. The driver
 checks every nested receipt against current inputs and records the owner as
 `REUSED` with its original evidence references. An absent binding executes the
 owner normally; an invalid or incomplete binding remains incomplete while the

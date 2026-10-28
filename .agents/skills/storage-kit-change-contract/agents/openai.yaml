@@ -1,0 +1,6 @@
+interface:
+  display_name: "storage-kit Change Contract"
+  short_description: "storage-kit rules, validation, and backend-portability checks."
+  default_prompt: "Use $storage-kit-change-contract to enforce storage-kit crate rules, validation, and backend-portability contract changes."
+policy:
+  allow_implicit_invocation: true

@@ -1,0 +1,20 @@
+{
+  "schema": "app-kit.workflow/v2",
+  "id": "joins",
+  "revision": "r1",
+  "state": {"values": []},
+  "required": ["values"],
+  "reducers": {"values": "collect"},
+  "entry": "fork",
+  "nodes": [
+    {"id": "fork", "step": {"kind": "state", "mutations": []}},
+    {"id": "right", "step": {"kind": "state", "mutations": [{"kind": "assign", "target": "values", "value": {"kind": "literal", "value": "right"}}]}},
+    {"id": "left", "step": {"kind": "state", "mutations": [{"kind": "assign", "target": "values", "value": {"kind": "literal", "value": "left"}}]}},
+    {"id": "join", "step": {"kind": "join_all"}}
+  ],
+  "routes": {
+    "fork": {"mode": "broadcast", "branches": [{"target": {"kind": "node", "id": "right"}}, {"target": {"kind": "node", "id": "left"}}]},
+    "left": {"mode": "first", "branches": [{"target": {"kind": "node", "id": "join"}}]},
+    "right": {"mode": "first", "branches": [{"target": {"kind": "node", "id": "join"}}]}
+  }
+}

@@ -29,7 +29,7 @@ def load_vendor_update_module():
     return module
 
 
-class AgentSdkProtocolAuthorityTests(unittest.TestCase):
+class AgentKitProtocolAuthorityTests(unittest.TestCase):
     maxDiff = None
 
     @classmethod
@@ -37,13 +37,13 @@ class AgentSdkProtocolAuthorityTests(unittest.TestCase):
         cls.workspace = SCRIPT_PATH.parents[1]
         cls.module = load_vendor_update_module()
         cls.updater = cls.module.VendorUpdater(cls.workspace)
-        with (cls.workspace / "agent-sdk/vendor/vendor-lock.toml").open("rb") as handle:
+        with (cls.workspace / "agents-kit/vendor/vendor-lock.toml").open("rb") as handle:
             cls.vendor_lock = tomllib.load(handle)["vendors"]
 
     def test_selected_archives_match_lock_and_every_protocol_coordinate(self) -> None:
         protocols = {
-            "codex": self.workspace / "agent-sdk/specs/codex/PROTOCOL.md",
-            "opencode": self.workspace / "agent-sdk/specs/opencode/PROTOCOL.md",
+            "codex": self.workspace / "agents-kit/specs/codex/PROTOCOL.md",
+            "opencode": self.workspace / "agents-kit/specs/opencode/PROTOCOL.md",
         }
         failures: list[str] = []
 
@@ -66,7 +66,7 @@ class AgentSdkProtocolAuthorityTests(unittest.TestCase):
         self.assertEqual(failures, [], "\n".join(failures))
 
     def test_agent_vendor_cargo_resolution_gates_are_locked(self) -> None:
-        state = self.updater._load_crate_state("agent-sdk")
+        state = self.updater._load_crate_state("agents-kit")
         for vendor, config in state.configs.items():
             for gate in config.completion_gates:
                 if gate[:2] == ("cargo", "clippy"):
@@ -122,10 +122,10 @@ class AgentSdkProtocolAuthorityTests(unittest.TestCase):
                 "native deletion response precedes lifecycle broadcast",
             )
 
-        protocol = (self.workspace / "agent-sdk/specs/codex/PROTOCOL.md").read_text("utf-8")
+        protocol = (self.workspace / "agents-kit/specs/codex/PROTOCOL.md").read_text("utf-8")
         for contract in [
             "Typed wire decode and routing end at the protocol boundary.",
-            "SDK-spawned stdio connections carry one JSON value per line.",
+            "Kit-spawned stdio connections carry one JSON value per line.",
             "TCP and Unix-socket connections carry JSON-RPC values in WebSocket text",
             "Wire request identifiers, tool-call payloads, and response DTOs remain private.",
         ]:
@@ -148,8 +148,8 @@ class AgentSdkProtocolAuthorityTests(unittest.TestCase):
                 for fact in facts:
                     self.assertIn(fact, source, f"selected authority lost {path}: {fact}")
 
-        protocol = (self.workspace / "agent-sdk/specs/opencode/PROTOCOL.md").read_text("utf-8")
-        backend = (self.workspace / "agent-sdk/specs/opencode/BACKEND.md").read_text("utf-8")
+        protocol = (self.workspace / "agents-kit/specs/opencode/PROTOCOL.md").read_text("utf-8")
+        backend = (self.workspace / "agents-kit/specs/opencode/BACKEND.md").read_text("utf-8")
         for contract in [
             "`GET /global/event` is the sole live event subscription.",
             "The selected foreground message HTTP response is prompt-terminal authority.",
@@ -243,7 +243,7 @@ class AgentSdkProtocolAuthorityTests(unittest.TestCase):
     def test_archive_checksum_mismatch_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             workspace = Path(temporary)
-            archive_path = workspace / "agent-sdk/vendor/invalid.zip"
+            archive_path = workspace / "agents-kit/vendor/invalid.zip"
             archive_path.parent.mkdir(parents=True)
             with zipfile.ZipFile(archive_path, "w") as archive:
                 archive.writestr("source/wire.rs", "source")
@@ -257,7 +257,7 @@ class AgentSdkProtocolAuthorityTests(unittest.TestCase):
 
     def _verified_archive(self, vendor: str) -> zipfile.ZipFile:
         locked = self.vendor_lock[vendor]
-        archive_path = self.workspace / "agent-sdk/vendor" / locked["archive"]
+        archive_path = self.workspace / "agents-kit/vendor" / locked["archive"]
         self.assertTrue(archive_path.is_file(), f"missing {archive_path}")
         self.assertEqual(
             self.updater._sha256(archive_path),
@@ -337,7 +337,7 @@ class VendorUpdateCliTests(unittest.TestCase):
 
     def test_storage_manifest_gates_use_locked_supported_workspace_lane(self) -> None:
         manifest = tomllib.loads(
-            (SCRIPT_PATH.parents[1] / "storage-sdk/vendor/vendors.toml").read_text()
+            (SCRIPT_PATH.parents[1] / "storage-kit/vendor/vendors.toml").read_text()
         )
         for name, config in manifest["vendors"].items():
             with self.subTest(vendor=name):
@@ -347,14 +347,14 @@ class VendorUpdateCliTests(unittest.TestCase):
                 self.assertIn("--locked", clippy)
                 exclusions = [clippy[index + 1] for index, arg in enumerate(clippy)
                               if arg == "--exclude"]
-                self.assertEqual(exclusions, ["storage-sdk", "app-sdk"])
+                self.assertEqual(exclusions, ["storage-kit", "app-kit"])
 
     def test_storage_manifest_allows_scoped_cargo_lock_but_rejects_unrelated_edits(self) -> None:
         manifest = tomllib.loads(
-            (SCRIPT_PATH.parents[1] / "storage-sdk/vendor/vendors.toml").read_text()
+            (SCRIPT_PATH.parents[1] / "storage-kit/vendor/vendors.toml").read_text()
         )
         external = tuple(path for path in manifest["vendors"]["lancedb"]["local_focus_paths"]
-                         if not path.startswith("storage-sdk/"))
+                         if not path.startswith("storage-kit/"))
         result = self._run_no_regression_update(
             completion_policy="strict", gate_sequence=[{"exit_code": 7}, {"exit_code": 0}],
             external_focus_paths=external,
@@ -1612,7 +1612,7 @@ class VendorUpdateCliTests(unittest.TestCase):
         for key, value, message in [
             ("branch_output", "different-branch", "branch"),
             ("head_output", "b" * 40, "HEAD"),
-            ("status_nul", " M storage-sdk/src/lib.rs\0", "outside"),
+            ("status_nul", " M storage-kit/src/lib.rs\0", "outside"),
         ]:
             with self.subTest(key=key):
                 config = json.loads(json.dumps(base_config))
@@ -1686,21 +1686,21 @@ class VendorUpdateCliTests(unittest.TestCase):
         result, destination = self._prerequisite_import_fixture()
         base = json.loads(self.config_path.read_text())
         for changes, paths, message in [
-            ({"head_output": "c" * 40}, ["app-sdk/src/lib.rs"], "HEAD"),
-            ({"branch_output": "another-branch"}, ["app-sdk/src/lib.rs"], "branch"),
-            ({"prerequisite_parents": "c" * 40}, ["app-sdk/src/lib.rs"], "parent"),
+            ({"head_output": "c" * 40}, ["app-kit/src/lib.rs"], "HEAD"),
+            ({"branch_output": "another-branch"}, ["app-kit/src/lib.rs"], "branch"),
+            ({"prerequisite_parents": "c" * 40}, ["app-kit/src/lib.rs"], "parent"),
             ({"prerequisite_parents": "a" * 40 + " " + "c" * 40},
-             ["app-sdk/src/lib.rs"], "parent"),
+             ["app-kit/src/lib.rs"], "parent"),
             ({"prerequisite_paths": "demo-sdk/src/lib.rs\0"}, ["demo-sdk/src/lib.rs"], "scope"),
             ({"prerequisite_paths": "Cargo.lock\0"}, ["Cargo.lock"], "scope"),
-            ({"prerequisite_paths": "agent-sdk/vendor/vendor-lock.toml\0"},
-             ["agent-sdk/vendor/vendor-lock.toml"], "vendor"),
+            ({"prerequisite_paths": "agents-kit/vendor/vendor-lock.toml\0"},
+             ["agents-kit/vendor/vendor-lock.toml"], "vendor"),
             ({"prerequisite_paths": "tmp/history.md\0"}, ["tmp/history.md"], "path"),
-            ({"prerequisite_paths": "app-sdk/src/lib.rs\0unrelated.txt\0"},
-             ["app-sdk/src/lib.rs"], "exact"),
-            ({"prerequisite_paths": ""}, ["app-sdk/src/lib.rs"], "exact"),
-            ({"prerequisite_new_mode": "120000"}, ["app-sdk/src/lib.rs"], "regular"),
-            ({"prerequisite_old_mode": "160000"}, ["app-sdk/src/lib.rs"], "regular"),
+            ({"prerequisite_paths": "app-kit/src/lib.rs\0unrelated.txt\0"},
+             ["app-kit/src/lib.rs"], "exact"),
+            ({"prerequisite_paths": ""}, ["app-kit/src/lib.rs"], "exact"),
+            ({"prerequisite_new_mode": "120000"}, ["app-kit/src/lib.rs"], "regular"),
+            ({"prerequisite_old_mode": "160000"}, ["app-kit/src/lib.rs"], "regular"),
         ]:
             with self.subTest(changes=changes):
                 config = json.loads(json.dumps(base))
@@ -1713,8 +1713,8 @@ class VendorUpdateCliTests(unittest.TestCase):
 
     def test_prerequisite_import_rejects_broad_or_ambiguous_path_allowlists(self) -> None:
         result, destination = self._prerequisite_import_fixture()
-        for paths in [[], ["app-sdk"], ["app-sdk/src/../src/lib.rs"], ["/app-sdk/src/lib.rs"],
-                      ["app-sdk/src/lib.rs", "app-sdk/src/lib.rs"]]:
+        for paths in [[], ["app-kit"], ["app-kit/src/../src/lib.rs"], ["/app-kit/src/lib.rs"],
+                      ["app-kit/src/lib.rs", "app-kit/src/lib.rs"]]:
             with self.subTest(paths=paths):
                 code, error = self._import_prerequisite(result["dossier"], destination, paths=paths)
                 self.assertNotEqual(code, 0, error)
@@ -1734,7 +1734,7 @@ class VendorUpdateCliTests(unittest.TestCase):
         result, destination = self._prerequisite_import_fixture()
         source = result["dossier"]
         config = json.loads(self.config_path.read_text())
-        config["git"]["status_nul"] = " M app-sdk/src/lib.rs\0"
+        config["git"]["status_nul"] = " M app-kit/src/lib.rs\0"
         self._write_tool_config(config)
         code, error = self._import_prerequisite(source, destination)
         self.assertEqual(code, 1)
@@ -1812,7 +1812,7 @@ class VendorUpdateCliTests(unittest.TestCase):
                     self.assertTrue(all(call["tool"] == "git" for call in self._read_logs()[before:]))
                     path.write_bytes(original)
         config = json.loads(self.config_path.read_text())
-        config["git"]["prerequisite_paths"] = "app-sdk/src/lib.rs\0Cargo.lock\0"
+        config["git"]["prerequisite_paths"] = "app-kit/src/lib.rs\0Cargo.lock\0"
         self._write_tool_config(config)
         code, error = self._resume(destination)
         self.assertEqual(code, 1)
@@ -1930,19 +1930,19 @@ class VendorUpdateCliTests(unittest.TestCase):
         evidence = result["dossier"] / "execution-evidence/failure.log"
         evidence.parent.mkdir()
         evidence.write_text("retained failed gate evidence\n")
-        prerequisite = self.workspace / "app-sdk/src/lib.rs"
+        prerequisite = self.workspace / "app-kit/src/lib.rs"
         prerequisite.parent.mkdir(parents=True)
         prerequisite.write_text("//! Corrected rustdoc link.\n")
         config = json.loads(self.config_path.read_text())
         config["git"].update(head_output="b" * 40, prerequisite_parents="a" * 40,
-                              prerequisite_paths="app-sdk/src/lib.rs\0")
+                              prerequisite_paths="app-kit/src/lib.rs\0")
         self._write_tool_config(config)
         return result, result["dossier"].with_name("v2.0.0-prerequisite")
 
     def _import_prerequisite(self, source, destination, *, paths=None):
         args = ["import-prerequisite", "--dossier", str(source), "--destination", str(destination),
                 "--commit", "b" * 40]
-        for path in ["app-sdk/src/lib.rs"] if paths is None else paths:
+        for path in ["app-kit/src/lib.rs"] if paths is None else paths:
             args.extend(["--path", path])
         stderr = io.StringIO()
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(stderr):
@@ -2014,7 +2014,7 @@ class VendorUpdateCliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as outside_dir:
             outside = Path(outside_dir) / "outside.rs"
             outside.write_text("// preserve outside file\n")
-            other_crate = self.workspace / "storage-sdk"
+            other_crate = self.workspace / "storage-kit"
             other_crate.mkdir()
             other_file = other_crate / "lib.rs"
             other_file.write_text("// preserve outside file\n")

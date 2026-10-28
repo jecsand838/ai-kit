@@ -1,0 +1,6 @@
+interface:
+  display_name: "agents-kit Research"
+  short_description: "Codex/OpenCode docs, runtime facts, and strict-live assumptions."
+  default_prompt: "Use $agents-kit-research to ground agents-kit changes in Codex App Server and OpenCode behavior."
+policy:
+  allow_implicit_invocation: true

@@ -24,20 +24,20 @@ and before writing the plan.
 
 ## Add Crate Skills When
 
-- `provider-sdk/**` or provider capability, routing, live, auth, or provider
+- `providers-kit/**` or provider capability, routing, live, auth, or provider
   public types are in scope:
-  `provider-sdk-change-contract`
-- `storage-sdk/**` or backend behavior, grouping, scoring, readiness,
+  `providers-kit-change-contract`
+- `storage-kit/**` or backend behavior, grouping, scoring, readiness,
   embedded-vs-remote behavior, or storage public types are in scope:
-  `storage-sdk-change-contract`
-- `agent-sdk/**` or Codex/OpenCode transport, capability mapping, or public
+  `storage-kit-change-contract`
+- `agents-kit/**` or Codex/OpenCode transport, capability mapping, or public
   agent surfaces are in scope:
-  `agent-sdk-change-contract`
-- `tool-sdk/**` or Local/MCP executable runtime behavior, hosted/composite
+  `agents-kit-change-contract`
+- `tools-kit/**` or Local/MCP executable runtime behavior, hosted/composite
   deletion boundaries, validation, event deletion, or public tool surfaces are
   in scope:
-  `tool-sdk-change-contract`
-- `app-sdk/**`: read `app-sdk/AGENTS.md` and the owning App specifications;
+  `tools-kit-change-contract`
+- `app-kit/**`: read `app-kit/AGENTS.md` and the owning App specifications;
   load `ai-kit-public-surface-contract`. App has no separate change-contract
   skill; preserve its five static workflow seams and exact exceptions.
 
@@ -46,17 +46,17 @@ Load every contract skill that matches the requested scope.
 ## Add Research Skills Only When
 
 - App graph/workflow semantics, checkpoint/recovery behavior, rurr evidence,
-  or lower-crate composition facts matter: `app-sdk-research`
+  or lower-crate composition facts matter: `app-kit-research`
 - the plan depends on provider docs or runtime behavior:
-  `provider-sdk-research`
+  `providers-kit-research`
 - the plan depends on backend docs, capability behavior, embedded-vs-remote
   semantics, or strict-live assumptions:
-  `storage-sdk-research`
+  `storage-kit-research`
 - the plan depends on Codex/OpenCode protocol, runtime, or strict-live facts:
-  `agent-sdk-research`
+  `agents-kit-research`
 - the plan depends on MCP protocol, provider-hosted tool behavior, local
   runtime semantics, composite routing, or strict-live tool facts:
-  `tool-sdk-research`
+  `tools-kit-research`
 
 Do not load research for purely internal cleanup such as helper collapse, local
 validation tightening, deterministic ordering fixes already encoded in ai-kit

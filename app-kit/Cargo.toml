@@ -1,0 +1,29 @@
+[package]
+name = "app-kit"
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.99"
+license = "Apache-2.0"
+description = "Application and durable workflow composition for ai-kit"
+readme = "README.md"
+keywords = ["agent", "application", "sdk", "workflow"]
+categories = ["api-bindings", "asynchronous"]
+repository = "https://github.com/jecsand838/ai-kit"
+documentation = "https://docs.rs/app-kit"
+include = ["src/**", "examples/**", "tests/**", "Cargo.toml", "README.md", "LICENSE"]
+
+[dependencies]
+agents-kit = { workspace = true }
+futures-util = { workspace = true }
+jsonschema = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true, features = ["preserve_order"] }
+sha2 = { workspace = true }
+storage-kit = { workspace = true, default-features = false }
+tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
+tracing = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
+
+[package.metadata.docs.rs]
+default-target = "x86_64-unknown-linux-gnu"
+targets = ["x86_64-unknown-linux-gnu"]

@@ -1,6 +1,0 @@
-interface:
-  display_name: "provider-sdk Change Contract"
-  short_description: "Provider/Model/Session portability and validation."
-  default_prompt: "Use $provider-sdk-change-contract to enforce Provider-to-Model-to-Session ownership, continuation fidelity, private dispatch, and provider portability."
-policy:
-  allow_implicit_invocation: true

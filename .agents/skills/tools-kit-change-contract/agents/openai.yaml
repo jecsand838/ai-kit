@@ -1,0 +1,6 @@
+interface:
+  display_name: "tools-kit Change Contract"
+  short_description: "Toolset/Handler and independent MCP server rules."
+  default_prompt: "Use $tools-kit-change-contract to enforce the reduced Toolset-to-Handler contract, direct Local/MCP construction, independent MCP server lifecycle, and validation rules."
+policy:
+  allow_implicit_invocation: true

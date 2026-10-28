@@ -24,21 +24,21 @@ plan.
 
 ## Add Crate Skills When
 
-- `provider-sdk/**` or findings about provider capabilities, routing, live
+- `providers-kit/**` or findings about provider capabilities, routing, live
   behavior, auth, or provider public types are in scope:
-  `provider-sdk-change-contract`
-- `storage-sdk/**` or findings about backend behavior, grouping, scoring,
+  `providers-kit-change-contract`
+- `storage-kit/**` or findings about backend behavior, grouping, scoring,
   readiness, embedded-vs-remote behavior, or storage public types are in
   scope:
-  `storage-sdk-change-contract`
-- `agent-sdk/**` or findings about Codex/OpenCode transport, capability
+  `storage-kit-change-contract`
+- `agents-kit/**` or findings about Codex/OpenCode transport, capability
   mapping, or public agent surfaces are in scope:
-  `agent-sdk-change-contract`
-- `tool-sdk/**` or findings about Local/MCP executable runtime behavior,
+  `agents-kit-change-contract`
+- `tools-kit/**` or findings about Local/MCP executable runtime behavior,
   hosted/composite deletion boundaries, validation, event deletion, or public
   tool surfaces are in scope:
-  `tool-sdk-change-contract`
-- `app-sdk/**`: read `app-sdk/AGENTS.md` and the owning App specifications;
+  `tools-kit-change-contract`
+- `app-kit/**`: read `app-kit/AGENTS.md` and the owning App specifications;
   load `ai-kit-public-surface-contract`. App has no separate change-contract
   skill; preserve its five static workflow seams and exact exceptions.
 
@@ -47,18 +47,18 @@ Load every contract skill that matches the accepted findings.
 ## Add Research Skills Only When
 
 - App graph/workflow semantics, checkpoint/recovery behavior, rurr evidence,
-  or lower-crate composition facts matter: `app-sdk-research`
-- a `provider-sdk` finding depends on provider docs or runtime behavior:
-  `provider-sdk-research`
-- a `storage-sdk` finding depends on backend docs, capability behavior,
+  or lower-crate composition facts matter: `app-kit-research`
+- a `providers-kit` finding depends on provider docs or runtime behavior:
+  `providers-kit-research`
+- a `storage-kit` finding depends on backend docs, capability behavior,
   embedded-vs-remote semantics, or strict-live assumptions:
-  `storage-sdk-research`
-- an `agent-sdk` finding depends on Codex/OpenCode protocol, runtime, or
+  `storage-kit-research`
+- an `agents-kit` finding depends on Codex/OpenCode protocol, runtime, or
   strict-live facts:
-  `agent-sdk-research`
-- a `tool-sdk` finding depends on MCP protocol, provider-hosted tool behavior,
+  `agents-kit-research`
+- a `tools-kit` finding depends on MCP protocol, provider-hosted tool behavior,
   local runtime semantics, composite routing, or strict-live tool facts:
-  `tool-sdk-research`
+  `tools-kit-research`
 
 Do not load research for purely internal issues whose semantics are already
 local and well-defined.

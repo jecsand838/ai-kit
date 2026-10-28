@@ -29,5 +29,5 @@ __pycache__/
 *.py[cod]
 **/strict-tests.env
 **/.env
-/agent-sdk/.codex/development/execution/
+/agents-kit/.codex/development/execution/
 **/vendor/*/

@@ -28,39 +28,39 @@ issue and stop or ask the orchestrator to expand scope.
 
 ## Crate Profiles
 
-### `agent-sdk`
+### `agents-kit`
 
-- Root: `agent-sdk/`
-- Required instructions: root `AGENTS.md`, `agent-sdk/AGENTS.md`
-- Usually relevant skills: `agent-sdk-change-contract`,
-  `agent-sdk-research`
+- Root: `agents-kit/`
+- Required instructions: root `AGENTS.md`, `agents-kit/AGENTS.md`
+- Usually relevant skills: `agents-kit-change-contract`,
+  `agents-kit-research`
 
-### `provider-sdk`
+### `providers-kit`
 
-- Root: `provider-sdk/`
-- Required instructions: root `AGENTS.md`, `provider-sdk/AGENTS.md`
-- Usually relevant skills: `provider-sdk-change-contract`,
-  `provider-sdk-research`
+- Root: `providers-kit/`
+- Required instructions: root `AGENTS.md`, `providers-kit/AGENTS.md`
+- Usually relevant skills: `providers-kit-change-contract`,
+  `providers-kit-research`
 
-### `storage-sdk`
+### `storage-kit`
 
-- Root: `storage-sdk/`
-- Required instructions: root `AGENTS.md`, `storage-sdk/AGENTS.md`
-- Usually relevant skills: `storage-sdk-change-contract`,
-  `storage-sdk-research`
+- Root: `storage-kit/`
+- Required instructions: root `AGENTS.md`, `storage-kit/AGENTS.md`
+- Usually relevant skills: `storage-kit-change-contract`,
+  `storage-kit-research`
 
-### `tool-sdk`
+### `tools-kit`
 
-- Root: `tool-sdk/`
-- Required instructions: root `AGENTS.md`, `tool-sdk/AGENTS.md`
-- Usually relevant skills: `tool-sdk-change-contract`, `tool-sdk-research`
+- Root: `tools-kit/`
+- Required instructions: root `AGENTS.md`, `tools-kit/AGENTS.md`
+- Usually relevant skills: `tools-kit-change-contract`, `tools-kit-research`
 
-### `app-sdk`
+### `app-kit`
 
-- Root: `app-sdk/`
-- Required instructions: root `AGENTS.md`, `app-sdk/AGENTS.md`, and owning specs
+- Root: `app-kit/`
+- Required instructions: root `AGENTS.md`, `app-kit/AGENTS.md`, and owning specs
 - Usually relevant skills: `ai-kit-public-surface-contract`,
-  `app-sdk-research`, Rust best-practice skills as needed
+  `app-kit-research`, Rust best-practice skills as needed
 
 ## Rust Skill Routing
 

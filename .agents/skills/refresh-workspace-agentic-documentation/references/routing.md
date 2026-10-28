@@ -31,15 +31,15 @@ not describe the target as already implemented.
 
 ## Add Contract Skills When
 
-- root docs or `agent-sdk/**` docs or tests are in scope:
-  `agent-sdk-change-contract`
-- `provider-sdk/**` docs or tests are in scope:
-  `provider-sdk-change-contract`
-- `storage-sdk/**` docs or tests are in scope:
-  `storage-sdk-change-contract`
-- `tool-sdk/**` docs or tests are in scope:
-  `tool-sdk-change-contract`
-- `app-sdk/**`: read `app-sdk/AGENTS.md` and the owning App specifications;
+- root docs or `agents-kit/**` docs or tests are in scope:
+  `agents-kit-change-contract`
+- `providers-kit/**` docs or tests are in scope:
+  `providers-kit-change-contract`
+- `storage-kit/**` docs or tests are in scope:
+  `storage-kit-change-contract`
+- `tools-kit/**` docs or tests are in scope:
+  `tools-kit-change-contract`
+- `app-kit/**`: read `app-kit/AGENTS.md` and the owning App specifications;
   load `ai-kit-public-surface-contract`. App has no separate change-contract
   skill; preserve its five static workflow seams and exact exceptions.
 
@@ -55,18 +55,18 @@ Load every crate contract skill that matches the requested scope.
 ## Add Research Skills Only When
 
 - App graph/workflow semantics, checkpoint/recovery behavior, rurr evidence,
-  or lower-crate composition facts matter: `app-sdk-research`
+  or lower-crate composition facts matter: `app-kit-research`
 - provider docs, model behavior, or strict-live facts depend on upstream docs:
-  `provider-sdk-research`
+  `providers-kit-research`
 - backend docs, capability behavior, or strict-live facts depend on upstream
   docs:
-  `storage-sdk-research`
+  `storage-kit-research`
 - MCP protocol, provider-hosted tool behavior, local runtime semantics,
   composite routing, or strict-live tool facts depend on upstream docs:
-  `tool-sdk-research`
+  `tools-kit-research`
 - Codex App Server, OpenCode, or AGENTS-layering assumptions depend on upstream
   docs:
-  `agent-sdk-research`
+  `agents-kit-research`
 
 Do not load research skills for purely repo-local wording cleanup that is
 already settled by the selected authority and its recorded repository

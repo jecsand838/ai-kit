@@ -1,0 +1,163 @@
+name: Manual release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Cargo version already committed on main (without v)
+        required: true
+        default: '0.0.1'
+        type: string
+      initial_release_override:
+        description: '0.0.1 only: accept deferred strict-live, slow tests and full qualification'
+        required: true
+        default: false
+        type: boolean
+      qualification_revision:
+        description: Exact qualified main SHA (required unless using the initial override)
+        required: false
+        type: string
+      qualification_url:
+        description: HTTPS URL of reviewed qualification evidence for that SHA
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ai-kit-crates-release
+  cancel-in-progress: false
+
+env:
+  RELEASE_VERSION: ${{ inputs.version }}
+  INITIAL_RELEASE_OVERRIDE: ${{ inputs.initial_release_override }}
+  QUALIFICATION_REVISION: ${{ inputs.qualification_revision }}
+  QUALIFICATION_URL: ${{ inputs.qualification_url }}
+  RELEASE_MAINTAINERS: ${{ vars.RELEASE_MAINTAINERS }}
+  CARGO_INCREMENTAL: '0'
+  CARGO_BUILD_JOBS: '2'
+  CARGO_PROFILE_DEV_DEBUG: '0'
+  CARGO_PROFILE_TEST_DEBUG: '0'
+
+jobs:
+  validate:
+    name: Admit and validate main release
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'jecsand838/ai-kit'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Check out the selected immutable main revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Check owner or designated maintainers, version and qualification declaration
+        run: python3 scripts/release_publish.py preflight
+
+      - name: Install the pinned Rust toolchain
+        run: |
+          toolchain="$(python3 -c 'import tomllib; print(tomllib.load(open("rust-toolchain.toml", "rb"))["toolchain"]["channel"])')"
+          rustup toolchain install "$toolchain" --profile minimal --component rustfmt,clippy
+          cargo fmt --all --check
+
+      - name: Run fast deterministic and documentation contracts
+        run: |
+          python3 -m unittest discover -s scripts/tests
+          python3 -m unittest discover -s storage-kit/scripts/tests
+          python3 -m unittest discover -s app-kit/scripts/tests
+          bash scripts/check_no_path_wiring.sh
+          bash scripts/check_no_type_aliases.sh
+          python3 scripts/security_dependencies.py verify --root "$GITHUB_WORKSPACE"
+
+      - name: Install the pinned security scanner
+        working-directory: ${{ runner.temp }}
+        run: |
+          curl --fail --location --retry 2 --connect-timeout 15 --max-time 120 \
+            https://github.com/rustsec/rustsec/releases/download/cargo-audit/v0.22.2/cargo-audit-x86_64-unknown-linux-musl-v0.22.2.tgz \
+            --output cargo-audit.tgz
+          printf '%s  %s\n' 7fb9497f8594b389e5fce5ef9b92db08432996895b2e0c5a0167a69ed445c428 cargo-audit.tgz | sha256sum --check --strict
+          tar -xzf cargo-audit.tgz --strip-components=1
+
+      - name: Audit registry dependencies with visible exceptions
+        run: |
+          python3 scripts/security_dependencies.py audit --root "$GITHUB_WORKSPACE" \
+            --scanner "$RUNNER_TEMP/cargo-audit" --database "$RUNNER_TEMP/advisory-db" \
+            --output "$GITHUB_WORKSPACE/target/release-security"
+
+      - name: Install native build prerequisites for normal qualification checks
+        if: ${{ !inputs.initial_release_override }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            clang libclang-dev cmake protobuf-compiler libprotobuf-dev python3 pkg-config libssl-dev
+
+      - name: Run normal Rust deterministic and documentation gates
+        if: ${{ !inputs.initial_release_override }}
+        run: |
+          bash scripts/check_ci.sh
+          bash scripts/check_docs_site.sh
+
+      - name: Record the initial release exclusions
+        if: ${{ inputs.initial_release_override }}
+        run: |
+          echo '0.0.1 maintainer override: strict-live, slow integration/capacity, Rust mocks, rustdoc/doctests and package build verification deferred.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'This run does not establish full workspace release qualification.' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Retain validation evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-validation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            target/release-security/
+            target/mock-contracts/
+          retention-days: 30
+          if-no-files-found: warn
+
+  publish:
+    name: Publish five crates and GitHub release
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    permissions:
+      contents: write
+    steps:
+      - name: Check out the same immutable main revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Recheck release admission before exposing publishing credentials
+        run: python3 scripts/release_publish.py preflight
+
+      - name: Install the pinned Rust toolchain
+        run: |
+          toolchain="$(python3 -c 'import tomllib; print(tomllib.load(open("rust-toolchain.toml", "rb"))["toolchain"]["channel"])')"
+          rustup toolchain install "$toolchain" --profile minimal
+
+      - name: Install native package-verification prerequisites
+        if: ${{ !inputs.initial_release_override }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            clang libclang-dev cmake protobuf-compiler libprotobuf-dev python3 pkg-config libssl-dev
+
+      - name: Publish in dependency order and create the versioned GitHub release
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/release_publish.py publish
+
+      - name: Retain publication identities and receipts
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-publication-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            target/release/
+            target/release-build/package/*.crate
+          retention-days: 30
+          if-no-files-found: warn

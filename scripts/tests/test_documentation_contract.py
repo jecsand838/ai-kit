@@ -47,7 +47,7 @@ class DocumentationContractTests(unittest.TestCase):
         records = self.ledger.get("adopted_requirements", [])
         paths = [record["path"] for record in records]
         required = {
-            f"app-sdk/plans/2026-09-13/{name}.md"
+            f"app-kit/plans/2026-09-13/{name}.md"
             for name in ("COMPLETION_PLAN", "ACCEPTANCE_MATRIX", "HISTORY_AND_CONTROLS")
         }
         self.assertEqual(sorted(required - set(paths)), [], "adopted requirements missing from the ledger")
@@ -79,18 +79,18 @@ class DocumentationContractTests(unittest.TestCase):
             path for path in (self.workspace / "docs").glob("*.md")
             if not any(path.relative_to(self.workspace).match(pattern) for pattern in inactive_patterns)
         )
-        for crate in ("agent-sdk", "app-sdk", "provider-sdk", "storage-sdk", "tool-sdk"):
+        for crate in ("agents-kit", "app-kit", "providers-kit", "storage-kit", "tools-kit"):
             root = self.workspace / crate
             expected.update(root / name for name in ("README.md", "ARCHITECTURE.md", "AGENTS.md"))
             expected.update((root / "docs").rglob("*.md"))
             expected.update((root / "specs").rglob("*.md"))
-        expected.add(self.workspace / "provider-sdk/CONTRIBUTING.md")
+        expected.add(self.workspace / "providers-kit/CONTRIBUTING.md")
         expected.update((self.workspace / ".agents/skills").glob("*/SKILL.md"))
         expected.update((self.workspace / ".agents/skills").glob("*/references/*.md"))
         expected.update((self.workspace / ".agents/skills").glob("*/agents/openai.yaml"))
         expected.update((self.workspace / ".codex/agents").glob("*.toml"))
-        expected.add(self.workspace / "agent-sdk/.codex/development/PROCESS.md")
-        expected.update((self.workspace / "agent-sdk/.codex/development/dispatch").glob("*.md"))
+        expected.add(self.workspace / "agents-kit/.codex/development/PROCESS.md")
+        expected.update((self.workspace / "agents-kit/.codex/development/dispatch").glob("*.md"))
         return sorted(str(path.relative_to(self.workspace)) for path in expected - self.active_paths())
 
     def test_current_guides_specs_and_skills_are_inventoried(self) -> None:
@@ -178,8 +178,8 @@ class DocumentationContractTests(unittest.TestCase):
     def test_agent_guidance_cannot_disappear_from_inventory(self) -> None:
         for pattern in (
             ".codex/agents/*.toml",
-            "agent-sdk/.codex/development/PROCESS.md",
-            "agent-sdk/.codex/development/dispatch/*.md",
+            "agents-kit/.codex/development/PROCESS.md",
+            "agents-kit/.codex/development/dispatch/*.md",
         ):
             with self.subTest(pattern=pattern):
                 expected = str(sorted(self.workspace.glob(pattern))[0].relative_to(self.workspace))
@@ -316,7 +316,7 @@ class DocumentationContractTests(unittest.TestCase):
     def test_private_evidence_link_boundaries(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             workspace = Path(temporary) / "workspace"
-            report = workspace / "storage-sdk/docs/feature-split-qualification.md"
+            report = workspace / "storage-kit/docs/feature-split-qualification.md"
             guide = workspace / "guide.md"
             report.parent.mkdir(parents=True)
             guide.write_text("", encoding="utf-8")

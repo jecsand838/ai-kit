@@ -349,9 +349,9 @@ passed and received their source comparisons:
    The user-approved distribution scope proves unmodified extracted Provider,
    Tool and Storage packages independently, including Storage's SurrealDB/Qdrant
    composition, and uses Cargo's native multi-package verification for Agent/App.
-   No workspace patches, SDK manifest rewrites or publishing are authorized.
+   No workspace patches, Kit manifest rewrites or publishing are authorized.
    Agent/App standalone distribution remains unproved because their candidate
-   siblings are unpublished and the registry's `agent-sdk 0.1.0` is a different
+   siblings are unpublished and the registry's `agents-kit 0.1.0` is a different
    package. This limitation is not a successful standalone-consumer result;
    approval and reviewed preparation remain in
    `shared/package-proof-scope-approval-v1.json` and
@@ -368,7 +368,7 @@ for the later complete package closure or full admission identity. No package
 or extracted-consumer execution has occurred.
 
 Every terminal result must separate test assertions, remote resource cleanup,
-SDK shutdown, child reaping and process-group settlement. A mandatory failure or
+Kit shutdown, child reaping and process-group settlement. A mandatory failure or
 incomplete cleanup stops escalation; no unchanged live retry is authorized.
 
 ## October 24 matrix and Qdrant findings
@@ -418,7 +418,7 @@ for macOS builds with `qdrant`, with direct default features disabled. The
 package manifest now declares that constraint instead of relying on a
 workspace-only lock pin; preservation in normalized packages remains to be
 verified. Its scope and limitations are owned by
-[Storage's dependency policy](../storage-sdk/AGENTS.md#backend-and-secret-ownership).
+[Storage's dependency policy](../storage-kit/AGENTS.md#backend-and-secret-ownership).
 Native Cargo resolution succeeded and selected `webbrowser` 1.2.1 in the shared
 lock, replacing 1.2.4 and removing `dispatch2` 0.3.1 and `objc2-app-kit` 0.3.2.
 It also removed the implicated Objective-C dependency edges and rebound
@@ -568,7 +568,7 @@ receipt is **INCOMPLETE**, retaining the original command exit 1.
 All three provisioned native children were reaped and their groups settled;
 outer command and nested ownership settled, cleanup errors were empty, and
 source/input/credential-source hashes were unchanged. This is process cleanup,
-not a claim of SDK shutdown for scenarios that never ran. No live-owned batch
+not a claim of Kit shutdown for scenarios that never ran. No live-owned batch
 or file cleanup was needed. The independent terminal review is
 `shared/canonical-workspace-terminal-independent-review-v1.json`.
 
@@ -647,7 +647,7 @@ reported a missing, unexecuted live target while preserving the original 101.
 **No live case, batch, App preparation or crash case ran.** All three provisioned
 native children were reaped and their groups settled; outer and nested command
 ownership settled, cleanup errors were empty, and source/input/credential-source
-hashes remained unchanged. No live-scenario SDK shutdown or remote-resource
+hashes remained unchanged. No live-scenario Kit shutdown or remote-resource
 cleanup is inferred from prerequisite-process settlement. See
 `shared/canonical-workspace-terminal-independent-review-v2.json`.
 
@@ -657,7 +657,7 @@ six failed**), with settled processes and no temporary children left behind.
 The smallest repair adds an empty `[workspace]` table to each existing Agent,
 Provider and Tool generated consumer manifest. Original sources, required Rust
 diagnostics, dependencies, copied lockfiles, commands, supervision and temporary
-cleanup remain unchanged. This is a test-fixture correction, not an SDK runtime
+cleanup remain unchanged. This is a test-fixture correction, not a Kit runtime
 repair. Its actual diff is independently reviewed in
 `shared/compile-fixture-workspace-isolation-independent-review-v1.json`.
 
@@ -766,7 +766,7 @@ after the last store handle drops; and large JSON commit/reopen. Each reported
 candidate `71cfeba...cbc44`.
 
 Native feasibility establishes native extension-point behavior, not execution of
-the SDK's private combined staging-cleanup/final-barrier failure branches. Those
+the Kit's private combined staging-cleanup/final-barrier failure branches. Those
 branches retain a source-equivalence review; supplied public cases establish only
 their exercised behavior. This macOS evidence does not establish Linux durability.
 
@@ -912,10 +912,10 @@ OpenCode scenarios remain blocking:
 For the latter two cases, the bounded native-history snapshots show a matching
 original prompt, terminal `stop`, no text parts and no tool calls. These snapshots
 are complete for their stated readback boundary; they are not raw model-service
-captures and do not establish model/native authorship or an SDK adaptation
-cause. No SDK repair or assertion relaxation is justified by this attempt.
+captures and do not establish model/native authorship or a Kit adaptation
+cause. No Kit repair or assertion relaxation is justified by this attempt.
 
-The native-idle Question case emitted a valid successful SDK receipt with
+The native-idle Question case emitted a valid successful Kit receipt with
 **exact-copy grade true**. The failed Question-delivery case emitted no successful
 receipt, making its grade unavailable. The required two-receipt grader correctly
 failed; Cargo's original exit 101 remained primary. These are not three waived
@@ -925,7 +925,7 @@ native phase was not reached.
 Cleanup and qualification remain separate. Successful cases retain their own
 cleanup assertions. Failed parent paths ran their bounded cleanup without
 recorded phase errors; the recovery parent's scenario cleanup explicitly
-succeeded, but graceful SDK shutdown in its failed child is not established and
+succeeded, but graceful Kit shutdown in its failed child is not established and
 no reopened handles existed. Receiver-drain and other success-only assertions
 that were not reached are not reported as passing. All three owned prerequisite
 services were reaped and their process groups settled; no outer cleanup error
@@ -953,7 +953,7 @@ unverified**. No complete integration qualification or merge readiness is claime
 
 ## Question description grades and two native captures — October 24, 2026
 
-The user approved separating Question description copying from SDK checks and
+The user approved separating Question description copying from Kit checks and
 capturing the two previously failed empty-completion scenarios. This pass
 preserves the preceding **26 passed / 3 failed** result under its original
 criteria. It does not upgrade that receipt or reopen broader qualification.
@@ -967,9 +967,9 @@ description and the No option's description. Descriptions are compared without
 trimming, extraction or normalization. Their actual native pending values must
 still match the running and completed tool inputs exactly. Header, question,
 labels, order, cardinality, flags, original prompt/model, call correlation,
-answer submission, native/SDK output fidelity and cleanup remain blocking.
+answer submission, native/Kit output fidelity and cleanup remain blocking.
 Malformed or missing descriptions still fail. The bounded version-2 reporter
-requires both named successful SDK receipts and all six boolean grades; false
+requires both named successful Kit receipts and all six boolean grades; false
 quality grades remain visible and nonblocking. Historical version-1 receipts
 remain unchanged and cannot supply the new description grades. Neither Question
 case was rerun, so current version-2 live grades remain unavailable.
@@ -986,7 +986,7 @@ were preserved. Existing observer controls and added request/projection/runner
 failure controls passed, including real local TLS, byte forwarding, bounds,
 redaction and joined cleanup. Independent actual-diff reviews approved both the
 grade boundary and capture owner. A demonstrated diagnostic finalization issue
-was corrected before execution: export failures now preserve the SDK error,
+was corrected before execution: export failures now preserve the Kit error,
 mark evidence incomplete and cannot bypass observer settlement.
 
 The reviewed capture extended only the existing ignored `KnowledgeRequest` and
@@ -1021,19 +1021,19 @@ additional title or auxiliary request.
   `opencode_reopen_cancels_recovered_pending_interaction_before_publication`
   returned 319 bytes of fenced Question JSON as ordinary text, with `stop`,
   no tool-call fragments and complete `[DONE]` framing. The native assembled
-  text and unmodified SDK output both hash to
+  text and unmodified Kit output both hash to
   `30ff49ebbe695ef8b3b1d59057a642b51cd266a12d7ed1cb4489d00f7646780d`.
   The separately retained native-history snapshot shows the matching original
   user, one successful terminal assistant, 319 text bytes and no tools. The
   required interaction never occurred, so the intended recovery and follow-up
   assertions were not reached. This establishes missing tool execution at the
-  observed Ollama-compatible boundary for this attempt, not SDK text loss.
+  observed Ollama-compatible boundary for this attempt, not Kit text loss.
 - **Repaired abort passed unchanged.**
   `opencode_repaired_abort_releases_generation_and_later_abort_is_idle`
   received a genuine `question` call with valid captured arguments and
   `tool_calls` terminal framing. Its admission, repaired-abort release and
   later-idle assertions completed. This qualifies that exact recorded journey;
-  it is non-reproduction of its earlier empty completion, not an SDK fix.
+  it is non-reproduction of its earlier empty completion, not a Kit fix.
 
 Neither historical empty response recurred. The projected system/user content,
 tool schemas, model and selected settings agree across the two requests, but
@@ -1042,7 +1042,7 @@ projections do not locate that difference. This is not a controlled identical-
 request experiment. These captures do not determine whether the earlier
 emptiness originated in model generation or lower native processing, and do not
 establish statistical reliability. The recovery failure
-now has a complete native/SDK text comparison; no demonstrated ai-kit request
+now has a complete native/Kit text comparison; no demonstrated ai-kit request
 or normalization defect warrants a production correction. Tool choice remains
 caller/native policy as before; no prompt change, required-tool override,
 output repair, generation retry or additional execution was introduced.
@@ -1050,12 +1050,12 @@ output repair, generation retry or additional execution was introduced.
 The invocation settled **FAIL / exit 101**, retaining recovery's primary error.
 Both observers reported complete forwarding/projection, joined handlers/workers,
 clean exit, child reaping and settled groups. Recovery's parent explicitly
-reported successful scenario cleanup; its failed crash child's graceful SDK
+reported successful scenario cleanup; its failed crash child's graceful Kit
 shutdown remains **unestablished**. Repaired abort's cleanup owner returned
 without a cleanup-error diagnostic. An independent post-settlement process
 snapshot found no survivors in **11 owned groups**. These facts do not convert
 socket forwarding into proof of application delivery; the recovery text hash
-and SDK result supply their separate observed boundary comparison. No remote
+and Kit result supply their separate observed boundary comparison. No remote
 resource deletion or absence claim is added.
 
 Before this append, all **1,614 frozen source/diagnostic/history paths**, **47
@@ -1145,19 +1145,19 @@ The completed capture independently records:
   selected model, `tool_choice: "auto"`, 11 retained tool declarations/schemas,
   and the 4,096-token allowance. No title or unclassified traffic occurred.
 - A genuine `question` call with valid captured arguments, no text substitute,
-  native `tool_calls` finish and `[DONE]`. The SDK's required Question admission
+  native `tool_calls` finish and `[DONE]`. The Kit's required Question admission
   succeeded, allowing the abrupt child exit and reopen reconciliation to run.
 - The existing follow-up in the same native session returned **54 bytes**, with
   `stop`, no extra call and `[DONE]`. Its SHA-256 is
   `407c82831e816e9f4ec859d88df89626d2b7d8bfa4f7f805a50734e6d20cf556`.
   The wire text equals the requested token, and the independent bounded native
-  history snapshot confirms native = portable SDK = expected, without trimming
+  history snapshot confirms native = portable Kit = expected, without trimming
   or unescaping. All original blocking assertions passed.
 
 Both HTTP/SSE exchanges were forwarded unchanged with complete framing and
 projection. Model-stream termination is recorded separately from OpenCode turn
 cancellation; no disconnect or cancellation was substituted for `[DONE]`.
-Successful socket forwarding alone is not proof of SDK delivery; the SDK result
+Successful socket forwarding alone is not proof of Kit delivery; the Kit result
 and native-history comparison supply their separate evidence. New complete
 request hashes cannot reconstruct the 12-byte difference in the historical
 requests or establish their full semantic equality.
@@ -1166,7 +1166,7 @@ The invocation settled **PASS / exit 0**. The parent explicitly reported
 successful scenario cleanup. The observer joined its worker and handlers,
 exited cleanly, and was reaped. All command owners settled without timeout or
 cleanup error; a separate read-only process snapshot found no survivors in
-**11 owned groups**. Graceful SDK shutdown of the deliberately abrupt crash
+**11 owned groups**. Graceful Kit shutdown of the deliberately abrupt crash
 child remains **unestablished** and is not implied by parent cleanup or child
 reaping. No new remote-resource deletion claim is made.
 
@@ -1197,19 +1197,19 @@ The approved continuation `scoped-live-20261024-235540` ran against candidate
 unchanged lock and previously bound Agent/Provider/Tool/App artifacts. It did
 not repeat the passed Storage, local Agent, App prepare or canonical crash gates.
 The one fresh Agent Question-delivery case passed **1/0/0, 28 filtered**. Its
-SDK grade is true; answer-copy is false; both option-description grades are
+Kit grade is true; answer-copy is false; both option-description grades are
 true. Agent coverage is **one fresh plus 28 reviewed retained passes**, not a
 fresh 29-case pass. The earlier 26/3 result, repaired-abort pass, changed-sampling
 0.15 recovery pass and original v1 native-idle evidence retain their original
-identities and limitations. Graceful SDK shutdown of the abruptly exited
+identities and limitations. Graceful Kit shutdown of the abruptly exited
 recovery child remains unestablished.
 
 Provider recorded **15 explicit passes, one failure and one interrupted case**;
 there is no final 137-case summary. The mixed-row case failed before generation
 or batch submission: readiness FileInfo and cleanup DeleteFile both returned
-HTTP 503 with an upstream connection-refusal diagnostic. The SDK retained the
+HTTP 503 with an upstream connection-refusal diagnostic. The Kit retained the
 HTTP rejection as primary and malformed error-body JSON as supplementary. This
-establishes an HTTP-path failure, not the origin of the refusal or an SDK defect.
+establishes an HTTP-path failure, not the origin of the refusal or a Kit defect.
 These file operations intentionally remain fail-fast; the separate bounded
 batch-status retry policy is unchanged. This case's bounded Provider shutdown
 succeeded, while one acknowledged 89-byte upload remained unresolved.
@@ -1219,7 +1219,7 @@ input and later artifacts not yet discovered. The user explicitly authorized
 stopping the long wait and reconciling its exact resources. The existing outer
 supervisor received one SIGTERM; its final disposition is **INCOMPLETE / 143**,
 and the Provider command exited **-15**, without a timeout. Its interrupted
-SDK shutdown and test-owned remote cleanup are not established. The supervisor
+Kit shutdown and test-owned remote cleanup are not established. The supervisor
 settled all command/service children and groups; independent read-only OS
 inspection found none of the 12 recorded owner/group identities remaining.
 Cleanup error lists are empty. This process settlement does not establish
@@ -1259,11 +1259,11 @@ terminal state. No output/error file was reported in those nonterminal snapshots
 that does not establish a final artifact inventory or absence.
 
 The independent exact lookup of the previously acknowledged 89-byte upload then
-returned HTTP 503. Its 190-byte non-JSON body matched both original SDK FileInfo
-and DeleteFile error bodies byte-for-byte. A native HTTP request outside the SDK
+returned HTTP 503. Its 190-byte non-JSON body matched both original Kit FileInfo
+and DeleteFile error bodies byte-for-byte. A native HTTP request outside the Kit
 therefore reproduced the same service-path rejection without generation or model
 execution. The refusing upstream component and originating cause remain unknown;
-no SDK defect or production correction is established. HTTP 503 remained primary
+no Kit defect or production correction is established. HTTP 503 remained primary
 and JSON decoding supplementary. No DELETE followed this lookup, and the file's
 current existence and absence remain unverified.
 
@@ -1278,8 +1278,8 @@ additional reconciliation attempt or qualification escalation was performed.
 All 13 curl children were reaped. The operational command child and its process
 group settled with no recorded cleanup error; independent read-only OS inspection
 found no surviving process in its recorded group. This was operational native
-cleanup, not SDK execution. It cannot establish the interrupted result-limit
-case's SDK shutdown. The mixed-row case's previously established successful
+cleanup, not Kit execution. It cannot establish the interrupted result-limit
+case's Kit shutdown. The mixed-row case's previously established successful
 Provider shutdown retains its separate scope. Original local settlement, current
 operational settlement and remote-resource reconciliation are distinct outcomes.
 
@@ -1322,7 +1322,7 @@ wait, and admits batch-linked files only from fresh matching terminal metadata.
 The first 11 new decision/transport controls recorded meaningful red evidence;
 final validation passed **253/253 offline controls**, retaining the original
 183 baseline controls unchanged. Additional admission and evidence-rejection
-controls are passing diagnostic proof, not invented SDK-defect evidence.
+controls are passing diagnostic proof, not invented Kit-defect evidence.
 Independent actual-diff and admission review found no blocking issue. A stale
 checker binding was rejected before any claim or request while the checker was
 being finalized; its rejected payload remains preserved separately.
@@ -1334,7 +1334,7 @@ No cancellation wait was restarted. The batch GET returned HTTP 200 and
 **`cancelled`**, with the original input reference, an exact error-file reference
 and no output-file reference. Native counts were two total, zero completed and
 zero failed. This establishes operational terminality, not successful batch
-processing or the interrupted SDK result-limit assertion.
+processing or the interrupted Kit result-limit assertion.
 
 | Exact owned resource | Current operation | Established result and limit |
 | --- | --- | --- |
@@ -1344,7 +1344,7 @@ processing or the interrupted SDK result-limit assertion.
 
 All three 503 response bodies match the earlier 190-byte upstream connection
 refusal diagnostic byte-for-byte. These native requests again establish the
-service-path rejection outside SDK/model execution, not the refused component
+service-path rejection outside Kit/model execution, not the refused component
 or underlying infrastructure cause. HTTP errors remain primary; malformed JSON
 remains supplementary. The acknowledged input deletion is not relabeled as an
 absence observation. The failed error-file deletion was not repeated.
@@ -1355,9 +1355,9 @@ hashes and relationships were independently reviewed. All eight curl children
 were reaped; the command child and owned process group settled without recorded
 cleanup errors. An independent read-only process check found no surviving owned
 process. The same current candidate was recorded before and after execution.
-This operation did not execute the SDK. The original mixed-row case's successful
-Provider shutdown and interrupted result-limit case's unestablished SDK shutdown
-remain separate historical facts; the abrupt recovery child's graceful SDK
+This operation did not execute the Kit. The original mixed-row case's successful
+Provider shutdown and interrupted result-limit case's unestablished Kit shutdown
+remain separate historical facts; the abrupt recovery child's graceful Kit
 shutdown also remains unestablished.
 
 Qualification did **not** resume because remote cleanup remains incomplete.

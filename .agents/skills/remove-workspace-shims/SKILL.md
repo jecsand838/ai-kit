@@ -1,6 +1,6 @@
 ---
 name: remove-workspace-shims
-description: "Plan and remove accepted shim-audit findings for one target ai-kit crate with a delete-first, strict-live-first workflow. Use when the user explicitly wants the follow-up shim-removal pass for `agent-sdk`, `provider-sdk`, `storage-sdk`, `tool-sdk`, or `app-sdk` after an audit has already produced accepted findings or `DELETE(crate shim audit)` markers. Prefer Plan Mode; do not use for fresh audits or generic cleanup requests."
+description: "Plan and remove accepted shim-audit findings for one target ai-kit crate with a delete-first, strict-live-first workflow. Use when the user explicitly wants the follow-up shim-removal pass for `agents-kit`, `providers-kit`, `storage-kit`, `tools-kit`, or `app-kit` after an audit has already produced accepted findings or `DELETE(crate shim audit)` markers. Prefer Plan Mode; do not use for fresh audits or generic cleanup requests."
 ---
 
 # Remove Workspace Shims
@@ -12,8 +12,8 @@ strict-live-first repair pass.
 
 ## Trigger Boundary
 
-Use this skill only for explicit follow-up shim removal on `agent-sdk`,
-`provider-sdk`, `storage-sdk`, `tool-sdk`, or `app-sdk` after an audit already produced
+Use this skill only for explicit follow-up shim removal on `agents-kit`,
+`providers-kit`, `storage-kit`, `tools-kit`, or `app-kit` after an audit already produced
 accepted findings or `DELETE(<crate> shim audit)` markers.
 Do not use it for a fresh audit, generic cleanup request, or vague request to
 remove technical debt.

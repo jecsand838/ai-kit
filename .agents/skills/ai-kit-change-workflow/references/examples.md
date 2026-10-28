@@ -9,9 +9,9 @@ Use $ai-kit-change-workflow.
 
 Task type: `optimization`
 Scope mode: `crate`
-Target crate: `tool-sdk`
+Target crate: `tools-kit`
 Phase: `INLINE_PLANNING`
-TODO marker: `AI-KIT-CHANGE-TODO(tool-sdk)`
+TODO marker: `AI-KIT-CHANGE-TODO(tools-kit)`
 
 Identify the code changes needed for the selected finding. Add inline planning
 comments only. Do not change behavior.
@@ -25,8 +25,8 @@ Use $ai-kit-change-workflow.
 Task type: `refactor`
 Scope mode: `crates`
 Target crates:
-- `agent-sdk`
-- `provider-sdk`
+- `agents-kit`
+- `providers-kit`
 
 Phase: `RESEARCH_REFINEMENT`
 TODO marker: `AI-KIT-CHANGE-TODO(agent-provider-boundary)`
@@ -43,8 +43,8 @@ Use $ai-kit-change-workflow.
 Task type: `bug-fix`
 Scope mode: `paths`
 Allowed paths:
-- `storage-sdk/src/core/query/**`
-- `storage-sdk/tests/**`
+- `storage-kit/src/core/query/**`
+- `storage-kit/tests/**`
 
 Phase: `IMPLEMENTATION`
 TODO marker: `AI-KIT-CHANGE-TODO(storage-query)`
@@ -60,5 +60,5 @@ mkdir -p /tmp/codex-skill-forwardtest
 CODEX_HOME=/tmp/codex-skill-forwardtest codex exec --ephemeral --sandbox read-only \
   -C /Users/connorsanders/scratch/ai-kit \
   -o /tmp/ai-kit-change-workflow-routing.txt \
-  $'Use $ai-kit-change-workflow. Task type: docs. Scope mode: crate. Target crate: agent-sdk. Phase: INLINE_PLANNING. Describe the required routing and phase gates without editing files.'
+  $'Use $ai-kit-change-workflow. Task type: docs. Scope mode: crate. Target crate: agents-kit. Phase: INLINE_PLANNING. Describe the required routing and phase gates without editing files.'
 ```

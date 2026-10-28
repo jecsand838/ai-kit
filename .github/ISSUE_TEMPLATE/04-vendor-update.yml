@@ -14,7 +14,7 @@ body:
     attributes:
       label: Crate and vendor
       description: Name the owning crate and upstream project. For manifest-managed vendors, include the manifest vendor key.
-      placeholder: "agent-sdk / opencode"
+      placeholder: "agents-kit / opencode"
     validations:
       required: true
   - type: input

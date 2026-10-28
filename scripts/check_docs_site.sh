@@ -14,11 +14,11 @@ ASSET_SOURCE_DIR="${WORKSPACE_DIR}/docs/assets"
 ASSET_TARGET_DIR="${DOC_ROOT}/assets"
 # Expected generated pages:
 # - target/doc/index.html
-# - target/doc/agent_sdk/index.html
-# - target/doc/app_sdk/index.html
-# - target/doc/provider_sdk/index.html
-# - target/doc/storage_sdk/index.html
-# - target/doc/tool_sdk/index.html
+# - target/doc/agents_kit/index.html
+# - target/doc/app_kit/index.html
+# - target/doc/providers_kit/index.html
+# - target/doc/storage_kit/index.html
+# - target/doc/tools_kit/index.html
 
 cd "${WORKSPACE_DIR}"
 
@@ -27,30 +27,28 @@ printf 'Using workspace: %s\n' "${WORKSPACE_DIR}"
 printf '\n==> repository documentation inventory and links (Python 3.11+)\n'
 release_stage docs.contract python3 -m unittest scripts.tests.test_documentation_contract
 
-printf '\n==> cargo doc --locked -p provider-sdk --all-features --no-deps\n'
-release_stage_fresh docs.provider.rustdoc env CARGO_TARGET_DIR="${DOC_BUILD_TARGET_DIR}" RUSTDOCFLAGS="-D warnings -D missing-docs -D rustdoc::broken-intra-doc-links -D rustdoc::private-intra-doc-links -D rustdoc::invalid-codeblock-attributes -D rustdoc::invalid-rust-codeblocks -D rustdoc::invalid-html-tags -D rustdoc::bare-urls -D rustdoc::redundant-explicit-links -D rustdoc::missing-crate-level-docs -D rustdoc::unescaped-backticks" cargo doc --locked -p provider-sdk --all-features --no-deps
+printf '\n==> cargo doc --locked -p providers-kit --all-features --no-deps\n'
+release_stage_fresh docs.provider.rustdoc env CARGO_TARGET_DIR="${DOC_BUILD_TARGET_DIR}" RUSTDOCFLAGS="-D warnings -D missing-docs -D rustdoc::broken-intra-doc-links -D rustdoc::private-intra-doc-links -D rustdoc::invalid-codeblock-attributes -D rustdoc::invalid-rust-codeblocks -D rustdoc::invalid-html-tags -D rustdoc::bare-urls -D rustdoc::redundant-explicit-links -D rustdoc::missing-crate-level-docs -D rustdoc::unescaped-backticks" cargo doc --locked -p providers-kit --all-features --no-deps
 
-printf '\n==> cargo doc --locked -p tool-sdk --all-features --no-deps\n'
-release_stage_fresh docs.tool.rustdoc env CARGO_TARGET_DIR="${DOC_BUILD_TARGET_DIR}" RUSTDOCFLAGS="-D warnings -D missing-docs -D rustdoc::broken-intra-doc-links -D rustdoc::private-intra-doc-links -D rustdoc::invalid-codeblock-attributes -D rustdoc::invalid-rust-codeblocks -D rustdoc::invalid-html-tags -D rustdoc::bare-urls -D rustdoc::redundant-explicit-links -D rustdoc::missing-crate-level-docs -D rustdoc::unescaped-backticks" cargo doc --locked -p tool-sdk --all-features --no-deps
+printf '\n==> cargo doc --locked -p tools-kit --all-features --no-deps\n'
+release_stage_fresh docs.tool.rustdoc env CARGO_TARGET_DIR="${DOC_BUILD_TARGET_DIR}" RUSTDOCFLAGS="-D warnings -D missing-docs -D rustdoc::broken-intra-doc-links -D rustdoc::private-intra-doc-links -D rustdoc::invalid-codeblock-attributes -D rustdoc::invalid-rust-codeblocks -D rustdoc::invalid-html-tags -D rustdoc::bare-urls -D rustdoc::redundant-explicit-links -D rustdoc::missing-crate-level-docs -D rustdoc::unescaped-backticks" cargo doc --locked -p tools-kit --all-features --no-deps
 
-printf '\n==> cargo doc --locked -p storage-sdk --no-deps\n'
-release_stage_fresh docs.storage.rustdoc.lance env CARGO_TARGET_DIR="${DOC_BUILD_TARGET_DIR}" RUSTDOCFLAGS="-D warnings -D missing-docs -D rustdoc::broken-intra-doc-links -D rustdoc::private-intra-doc-links -D rustdoc::invalid-codeblock-attributes -D rustdoc::invalid-rust-codeblocks -D rustdoc::invalid-html-tags -D rustdoc::bare-urls -D rustdoc::redundant-explicit-links -D rustdoc::missing-crate-level-docs -D rustdoc::unescaped-backticks" cargo doc --locked -p storage-sdk --no-deps
+printf '\n==> cargo doc --locked -p storage-kit --no-deps\n'
+release_stage_fresh docs.storage.rustdoc.lance env CARGO_TARGET_DIR="${DOC_BUILD_TARGET_DIR}" RUSTDOCFLAGS="-D warnings -D missing-docs -D rustdoc::broken-intra-doc-links -D rustdoc::private-intra-doc-links -D rustdoc::invalid-codeblock-attributes -D rustdoc::invalid-rust-codeblocks -D rustdoc::invalid-html-tags -D rustdoc::bare-urls -D rustdoc::redundant-explicit-links -D rustdoc::missing-crate-level-docs -D rustdoc::unescaped-backticks" cargo doc --locked -p storage-kit --no-deps
 
-printf '\n==> cargo doc --locked -p storage-sdk --no-default-features --features redb,postgres,surrealdb,sqlite --no-deps\n'
-release_stage_fresh docs.storage.rustdoc.redb-postgres-surrealdb-sqlite env CARGO_TARGET_DIR="${DOC_BUILD_TARGET_DIR}" RUSTDOCFLAGS="-D warnings -D missing-docs -D rustdoc::broken-intra-doc-links -D rustdoc::private-intra-doc-links -D rustdoc::invalid-codeblock-attributes -D rustdoc::invalid-rust-codeblocks -D rustdoc::invalid-html-tags -D rustdoc::bare-urls -D rustdoc::redundant-explicit-links -D rustdoc::missing-crate-level-docs -D rustdoc::unescaped-backticks" cargo doc --locked -p storage-sdk --no-default-features --features redb,postgres,surrealdb,sqlite --no-deps
+printf '\n==> cargo doc --locked -p storage-kit --no-default-features --features redb,postgres,surrealdb,sqlite --no-deps\n'
+release_stage_fresh docs.storage.rustdoc.redb-postgres-surrealdb-sqlite env CARGO_TARGET_DIR="${DOC_BUILD_TARGET_DIR}" RUSTDOCFLAGS="-D warnings -D missing-docs -D rustdoc::broken-intra-doc-links -D rustdoc::private-intra-doc-links -D rustdoc::invalid-codeblock-attributes -D rustdoc::invalid-rust-codeblocks -D rustdoc::invalid-html-tags -D rustdoc::bare-urls -D rustdoc::redundant-explicit-links -D rustdoc::missing-crate-level-docs -D rustdoc::unescaped-backticks" cargo doc --locked -p storage-kit --no-default-features --features redb,postgres,surrealdb,sqlite --no-deps
 
-printf '\n==> cargo doc --locked -p storage-sdk --no-default-features --features redb,postgres,surrealdb,qdrant --no-deps\n'
-release_stage_fresh docs.storage.rustdoc.redb-postgres-surrealdb-qdrant env CARGO_TARGET_DIR="${DOC_BUILD_TARGET_DIR}" RUSTDOCFLAGS="-D warnings -D missing-docs -D rustdoc::broken-intra-doc-links -D rustdoc::private-intra-doc-links -D rustdoc::invalid-codeblock-attributes -D rustdoc::invalid-rust-codeblocks -D rustdoc::invalid-html-tags -D rustdoc::bare-urls -D rustdoc::redundant-explicit-links -D rustdoc::missing-crate-level-docs -D rustdoc::unescaped-backticks" cargo doc --locked -p storage-sdk --no-default-features --features redb,postgres,surrealdb,qdrant --no-deps
 
-printf '\n==> restore generated storage-sdk docs to default Lance-only lane\n'
-release_stage_fresh docs.storage.rustdoc.lance.restore env CARGO_TARGET_DIR="${DOC_BUILD_TARGET_DIR}" RUSTDOCFLAGS="-D warnings -D missing-docs -D rustdoc::broken-intra-doc-links -D rustdoc::private-intra-doc-links -D rustdoc::invalid-codeblock-attributes -D rustdoc::invalid-rust-codeblocks -D rustdoc::invalid-html-tags -D rustdoc::bare-urls -D rustdoc::redundant-explicit-links -D rustdoc::missing-crate-level-docs -D rustdoc::unescaped-backticks" cargo doc --locked -p storage-sdk --no-deps
+printf '\n==> restore generated storage-kit docs to default Lance-only lane\n'
+release_stage_fresh docs.storage.rustdoc.lance.restore env CARGO_TARGET_DIR="${DOC_BUILD_TARGET_DIR}" RUSTDOCFLAGS="-D warnings -D missing-docs -D rustdoc::broken-intra-doc-links -D rustdoc::private-intra-doc-links -D rustdoc::invalid-codeblock-attributes -D rustdoc::invalid-rust-codeblocks -D rustdoc::invalid-html-tags -D rustdoc::bare-urls -D rustdoc::redundant-explicit-links -D rustdoc::missing-crate-level-docs -D rustdoc::unescaped-backticks" cargo doc --locked -p storage-kit --no-deps
 
-printf '\n==> cargo doc --locked -p agent-sdk --all-features --no-deps\n'
-release_stage_fresh docs.agent.rustdoc env RUSTDOCFLAGS="-D warnings -D missing-docs -D rustdoc::broken-intra-doc-links -D rustdoc::private-intra-doc-links -D rustdoc::invalid-codeblock-attributes -D rustdoc::invalid-rust-codeblocks -D rustdoc::invalid-html-tags -D rustdoc::bare-urls -D rustdoc::redundant-explicit-links -D rustdoc::missing-crate-level-docs -D rustdoc::unescaped-backticks" cargo doc --locked -p agent-sdk --all-features --no-deps \
+printf '\n==> cargo doc --locked -p agents-kit --all-features --no-deps\n'
+release_stage_fresh docs.agent.rustdoc env RUSTDOCFLAGS="-D warnings -D missing-docs -D rustdoc::broken-intra-doc-links -D rustdoc::private-intra-doc-links -D rustdoc::invalid-codeblock-attributes -D rustdoc::invalid-rust-codeblocks -D rustdoc::invalid-html-tags -D rustdoc::bare-urls -D rustdoc::redundant-explicit-links -D rustdoc::missing-crate-level-docs -D rustdoc::unescaped-backticks" cargo doc --locked -p agents-kit --all-features --no-deps \
     --target-dir "${DOC_BUILD_TARGET_DIR}"
 
-printf '\n==> cargo doc --locked -p app-sdk --no-deps\n'
-release_stage_fresh docs.app.rustdoc env CARGO_TARGET_DIR="${DOC_BUILD_TARGET_DIR}" RUSTDOCFLAGS="-D warnings -D missing-docs -D rustdoc::broken-intra-doc-links -D rustdoc::private-intra-doc-links -D rustdoc::invalid-codeblock-attributes -D rustdoc::invalid-rust-codeblocks -D rustdoc::invalid-html-tags -D rustdoc::bare-urls -D rustdoc::redundant-explicit-links -D rustdoc::missing-crate-level-docs -D rustdoc::unescaped-backticks" cargo doc --locked -p app-sdk --no-deps
+printf '\n==> cargo doc --locked -p app-kit --no-deps\n'
+release_stage_fresh docs.app.rustdoc env CARGO_TARGET_DIR="${DOC_BUILD_TARGET_DIR}" RUSTDOCFLAGS="-D warnings -D missing-docs -D rustdoc::broken-intra-doc-links -D rustdoc::private-intra-doc-links -D rustdoc::invalid-codeblock-attributes -D rustdoc::invalid-rust-codeblocks -D rustdoc::invalid-html-tags -D rustdoc::bare-urls -D rustdoc::redundant-explicit-links -D rustdoc::missing-crate-level-docs -D rustdoc::unescaped-backticks" cargo doc --locked -p app-kit --no-deps
 
 printf '\n==> stage generated rustdoc for target/doc\n'
 rm -rf "${DOC_PUBLISH_ROOT}"
@@ -68,36 +66,34 @@ printf '\n==> replace target/doc with staged docs\n'
 rm -rf "${DOC_ROOT}"
 mv "${DOC_PUBLISH_ROOT}" "${DOC_ROOT}"
 
-printf '\n==> cargo test --locked -p agent-sdk --doc --all-features -- --nocapture\n'
-release_stage docs.agent.doctest cargo test --locked -p agent-sdk --doc --all-features \
+printf '\n==> cargo test --locked -p agents-kit --doc --all-features -- --nocapture\n'
+release_stage docs.agent.doctest cargo test --locked -p agents-kit --doc --all-features \
     --target-dir "${DOC_BUILD_TARGET_DIR}" -- --nocapture
 
-printf '\n==> cargo test --locked -p app-sdk --doc -- --nocapture\n'
-release_stage docs.app.doctest env CARGO_TARGET_DIR="${DOC_BUILD_TARGET_DIR}" cargo test --locked -p app-sdk --doc -- --nocapture
+printf '\n==> cargo test --locked -p app-kit --doc -- --nocapture\n'
+release_stage docs.app.doctest env CARGO_TARGET_DIR="${DOC_BUILD_TARGET_DIR}" cargo test --locked -p app-kit --doc -- --nocapture
 
-printf '\n==> cargo test --locked -p provider-sdk --doc --all-features -- --nocapture\n'
-release_stage docs.provider.doctest env CARGO_TARGET_DIR="${DOC_BUILD_TARGET_DIR}" cargo test --locked -p provider-sdk --doc --all-features -- --nocapture
+printf '\n==> cargo test --locked -p providers-kit --doc --all-features -- --nocapture\n'
+release_stage docs.provider.doctest env CARGO_TARGET_DIR="${DOC_BUILD_TARGET_DIR}" cargo test --locked -p providers-kit --doc --all-features -- --nocapture
 
-printf '\n==> cargo test --locked -p tool-sdk --doc --all-features -- --nocapture\n'
-release_stage docs.tool.doctest env CARGO_TARGET_DIR="${DOC_BUILD_TARGET_DIR}" cargo test --locked -p tool-sdk --doc --all-features -- --nocapture
+printf '\n==> cargo test --locked -p tools-kit --doc --all-features -- --nocapture\n'
+release_stage docs.tool.doctest env CARGO_TARGET_DIR="${DOC_BUILD_TARGET_DIR}" cargo test --locked -p tools-kit --doc --all-features -- --nocapture
 
-printf '\n==> cargo test --locked -p storage-sdk --doc -- --nocapture\n'
-release_stage docs.storage.doctest.lance env CARGO_TARGET_DIR="${DOC_BUILD_TARGET_DIR}" cargo test --locked -p storage-sdk --doc -- --nocapture
+printf '\n==> cargo test --locked -p storage-kit --doc -- --nocapture\n'
+release_stage docs.storage.doctest.lance env CARGO_TARGET_DIR="${DOC_BUILD_TARGET_DIR}" cargo test --locked -p storage-kit --doc -- --nocapture
 
-printf '\n==> cargo test --locked -p storage-sdk --doc --no-default-features --features redb,postgres,surrealdb,sqlite -- --nocapture\n'
-release_stage docs.storage.doctest.redb-postgres-surrealdb-sqlite env CARGO_TARGET_DIR="${DOC_BUILD_TARGET_DIR}" cargo test --locked -p storage-sdk --doc --no-default-features --features redb,postgres,surrealdb,sqlite -- --nocapture
+printf '\n==> cargo test --locked -p storage-kit --doc --no-default-features --features redb,postgres,surrealdb,sqlite -- --nocapture\n'
+release_stage docs.storage.doctest.redb-postgres-surrealdb-sqlite env CARGO_TARGET_DIR="${DOC_BUILD_TARGET_DIR}" cargo test --locked -p storage-kit --doc --no-default-features --features redb,postgres,surrealdb,sqlite -- --nocapture
 
-printf '\n==> cargo test --locked -p storage-sdk --doc --no-default-features --features redb,postgres,surrealdb,qdrant -- --nocapture\n'
-release_stage docs.storage.doctest.redb-postgres-surrealdb-qdrant env CARGO_TARGET_DIR="${DOC_BUILD_TARGET_DIR}" cargo test --locked -p storage-sdk --doc --no-default-features --features redb,postgres,surrealdb,qdrant -- --nocapture
 
 for page in \
     "${LANDING_PAGE}" \
     "${ASSET_TARGET_DIR}/ai-kit-logo.png" \
-    "${DOC_ROOT}/agent_sdk/index.html" \
-    "${DOC_ROOT}/app_sdk/index.html" \
-    "${DOC_ROOT}/provider_sdk/index.html" \
-    "${DOC_ROOT}/storage_sdk/index.html" \
-    "${DOC_ROOT}/tool_sdk/index.html"; do
+    "${DOC_ROOT}/agents_kit/index.html" \
+    "${DOC_ROOT}/app_kit/index.html" \
+    "${DOC_ROOT}/providers_kit/index.html" \
+    "${DOC_ROOT}/storage_kit/index.html" \
+    "${DOC_ROOT}/tools_kit/index.html"; do
     if [[ ! -f "${page}" ]]; then
         printf 'missing generated rustdoc page: %s\n' "${page}" >&2
         exit 1

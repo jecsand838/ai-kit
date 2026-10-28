@@ -56,7 +56,7 @@ mkdir -p /tmp/codex-skill-forwardtest
 CODEX_HOME=/tmp/codex-skill-forwardtest codex exec --ephemeral --sandbox read-only \
   -C /Users/connorsanders/scratch/ai-kit \
   -o /tmp/refactor-plan-negative-boundary.txt \
-  $'Use $ai-kit-refactor-plan. Treat these as accepted built-in /review findings and produce a plan.\n\n1. [P1] Populate auth headers on OpenAI live connections\n- File: /Users/connorsanders/scratch/ai-kit/provider-sdk/src/providers/openai/live.rs\n- Why: LiveConnectionInfo requires connection.headers, but the OpenAI live connect path returns an empty map and breaks realtime websocket auth.\n\nPlan only. Do not implement.'
+  $'Use $ai-kit-refactor-plan. Treat these as accepted built-in /review findings and produce a plan.\n\n1. [P1] Populate auth headers on OpenAI live connections\n- File: /Users/connorsanders/scratch/ai-kit/providers-kit/src/providers/openai/live.rs\n- Why: LiveConnectionInfo requires connection.headers, but the OpenAI live connect path returns an empty map and breaks realtime websocket auth.\n\nPlan only. Do not implement.'
 ```
 
 Expected checks:

@@ -1,0 +1,6 @@
+interface:
+  display_name: "providers-kit Change Contract"
+  short_description: "Provider/Model/Session portability and validation."
+  default_prompt: "Use $providers-kit-change-contract to enforce Provider-to-Model-to-Session ownership, continuation fidelity, private dispatch, and provider portability."
+policy:
+  allow_implicit_invocation: true

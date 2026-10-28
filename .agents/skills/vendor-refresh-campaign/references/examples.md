@@ -24,7 +24,7 @@ mkdir -p /tmp/codex-skill-forwardtest
 CODEX_HOME=/tmp/codex-skill-forwardtest codex exec --ephemeral --sandbox workspace-write \
   -C /Users/connorsanders/scratch/ai-kit \
   -o /tmp/vendor-refresh-campaign-happy.txt \
-  $'Use $vendor-refresh-campaign. First verify that `agent-sdk/strict-tests.env` and `storage-sdk/strict-tests.env` are ready, then refresh all outdated vendors in `agent-sdk` and `storage-sdk`, leave the final validated result on the current branch, rerun the full final gates, and do not push.'
+  $'Use $vendor-refresh-campaign. First verify that `agents-kit/strict-tests.env` and `storage-kit/strict-tests.env` are ready, then refresh all outdated vendors in `agents-kit` and `storage-kit`, leave the final validated result on the current branch, rerun the full final gates, and do not push.'
 ```
 
 Expected checks:

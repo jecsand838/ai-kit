@@ -1,4 +1,4 @@
-"""Release runner orchestration only; command doubles are not SDK evidence."""
+"""Release runner orchestration only; command doubles are not Kit evidence."""
 
 import json
 import os
@@ -15,6 +15,13 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class ReleaseStageHooksTests(unittest.TestCase):
+    CRATE_NAMES = {
+        "agent": "agents-kit",
+        "provider": "providers-kit",
+        "storage": "storage-kit",
+        "tool": "tools-kit",
+        "app": "app-kit",
+    }
     APP_TARGETS = (
         "public_surface mock_contracts workflow_mock_composition core_contract "
         "action_bindings action_contract projection_contract callable_definition_contract "
@@ -64,11 +71,6 @@ with open(os.environ['TRACE'], 'a') as stream:
     stream.write(json.dumps({'command': 'cargo', 'args': args}) + '\n')
 if os.environ.get('CARGO_FAILURE'):
     raise SystemExit(int(os.environ['CARGO_FAILURE']))
-if '--features' in args and {'sqlite', 'qdrant'} <= set(args[args.index('--features') + 1].split(',')):
-    mode = os.environ.get('NEGATIVE_FAILURE_MODE')
-    if mode == 'success': raise SystemExit(0)
-    print('unrelated compiler error' if mode == 'unrelated' else 'error: sqlite and qdrant cannot coexist')
-    raise SystemExit(101)
 if '--test' in args and args[args.index('--test') + 1] == 'prepare_contract':
     cases = json.loads(os.environ['PREPARE_CASES'])
     if '--list' in args:
@@ -90,8 +92,8 @@ elif args and args[0] == 'doc':
         self.executable("python3", f'''
 import json, os, sys
 args = sys.argv[1:]
-if (args[:2] == ['-m', 'unittest'] or args == ['app-sdk/scripts/check_app_workloads.py', 'routine']
-        or args in [['agent-sdk/tests/precheck_contract.py'], ['agent-sdk/tests/question_grade_contract.py']]):
+if (args[:2] == ['-m', 'unittest'] or args == ['app-kit/scripts/check_app_workloads.py', 'routine']
+        or args in [['agents-kit/tests/precheck_contract.py'], ['agents-kit/tests/question_grade_contract.py']]):
     with open(os.environ['TRACE'], 'a') as stream:
         stream.write(json.dumps({{'command': 'python3', 'args': args}}) + '\\n')
     if args[:2] == ['-m', 'unittest'] and os.environ.get('RUNNER_CONTRACT_EXIT'):
@@ -191,7 +193,7 @@ release_stage fixture.second cargo test
     def test_provider_and_tool_keep_complete_default_target_inventories(self):
         for crate, targets in [("provider", self.PROVIDER_TARGETS), ("tool", self.TOOL_TARGETS)]:
             with self.subTest(crate=crate):
-                script = f"{crate}-sdk/scripts/check.sh"
+                script = f"{self.CRATE_NAMES[crate]}/scripts/check.sh"
                 self.copy(script)
                 result = self.run_script(script, active=True)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -204,13 +206,13 @@ release_stage fixture.second cargo test
                 Path(self.env["TRACE"]).unlink()
 
     def prepare_app(self):
-        self.copy("app-sdk/scripts/check.sh")
+        self.copy("app-kit/scripts/check.sh")
         self.write("scripts/check_no_type_aliases.sh", "exit 0\n")
         self.write("scripts/check_no_path_wiring.sh", "exit 0\n")
 
     def test_app_targets_and_four_case_prepare_remain_required_and_fresh(self):
         self.prepare_app()
-        result = self.run_script("app-sdk/scripts/check.sh", active=True)
+        result = self.run_script("app-kit/scripts/check.sh", active=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         rows = self.observations()
         calls = [row["args"] for row in rows if row.get("command") == "cargo"]
@@ -224,7 +226,7 @@ release_stage fixture.second cargo test
         examples = [args[args.index("--example") + 1] for args in calls if "--example" in args]
         self.assertEqual(examples, "state graph pure_state actions_and_inputs controls_and_streaming history_and_recovery child_composition".split())
         workloads = [row for row in rows if row.get("command") == "python3"]
-        self.assertEqual(workloads, [{"command": "python3", "args": ["app-sdk/scripts/check_app_workloads.py", "routine"]}])
+        self.assertEqual(workloads, [{"command": "python3", "args": ["app-kit/scripts/check_app_workloads.py", "routine"]}])
 
     def test_app_missing_prepare_case_and_ignored_execution_fail(self):
         self.prepare_app()
@@ -235,7 +237,7 @@ release_stage fixture.second cargo test
             with self.subTest(key=key):
                 old = self.env.get(key)
                 self.env[key] = value
-                result = self.run_script("app-sdk/scripts/check.sh", active=True)
+                result = self.run_script("app-kit/scripts/check.sh", active=True)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn(message, result.stderr)
                 self.assertFalse(any(row.get("stage") == "app.workloads.routine" for row in self.observations()))
@@ -246,11 +248,11 @@ release_stage fixture.second cargo test
                     self.env[key] = old
 
     def test_storage_default_and_explicit_feature_lanes_preserve_flags(self):
-        self.copy("storage-sdk/scripts/check.sh")
-        self.copy("storage-sdk/scripts/feature_policy.py")
-        for arguments, expected_features in [((), None), (("--backend", "qdrant"), "qdrant")]:
+        self.copy("storage-kit/scripts/check.sh")
+        self.copy("storage-kit/scripts/feature_policy.py")
+        for arguments, expected_features in [((), None), (("--backend", "surrealdb"), "surrealdb")]:
             with self.subTest(arguments=arguments):
-                result = self.run_script("storage-sdk/scripts/check.sh", *arguments, active=True)
+                result = self.run_script("storage-kit/scripts/check.sh", *arguments, active=True)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 calls = [row["args"] for row in self.observations() if row.get("command") == "cargo"]
                 self.assertFalse(any("--all-features" in args for args in calls))
@@ -259,7 +261,7 @@ release_stage fixture.second cargo test
                                     "lancedb_native_feasibility lancedb_durability_feasibility lancedb_session_ownership "
                                     "lancedb_state_store strict_env_contract source_contract").split()
                 if expected_features:
-                    expected_targets = expected_targets + expected_targets + ["qdrant_rest_completion"]
+                    expected_targets = expected_targets + expected_targets + ["surreal_partition_deadline"]
                 self.assertEqual([args[args.index("--test") + 1] for args in tests], expected_targets)
                 for index, args in enumerate(tests):
                     self.assertIn("--no-default-features", args)
@@ -270,36 +272,16 @@ release_stage fixture.second cargo test
                         self.assertNotIn("--features", args)
                 Path(self.env["TRACE"]).unlink()
 
-    def test_storage_negative_matrix_retains_all_eight_matching_failures(self):
-        self.copy("storage-sdk/scripts/check.sh")
-        self.copy("storage-sdk/scripts/feature_policy.py")
-        self.env["REUSE_ALL_NONFRESH"] = "1"
-        result = self.run_script("storage-sdk/scripts/check.sh", "--all-backends", active=True)
+    def test_storage_matrix_checks_all_retained_feature_combinations(self):
+        self.copy("storage-kit/scripts/check.sh")
+        self.copy("storage-kit/scripts/feature_policy.py")
+        result = self.run_script("storage-kit/scripts/check.sh", "--all-backends", active=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        receipts = list((self.root / "receipt-run").glob("storage-negative-features.*/*.json"))
-        self.assertEqual(len(receipts), 8)
-        for path in receipts:
-            row = json.loads(path.read_text())
-            self.assertEqual(row["status"], "PASS")
-            self.assertEqual(row["returncode"], 101)
-            self.assertIn("cannot coexist", row["expected_diagnostic"])
-            self.assertTrue(Path(row["log"]["path"]).is_file())
-            self.assertEqual(row["command"][-2:], ["--features", row["features"]])
-        self.assertEqual(result.stdout.count("STORAGE_NEGATIVE_FEATURE_GRADE="), 8)
-
-    def test_storage_negative_matrix_rejects_success_and_unrelated_failure(self):
-        self.copy("storage-sdk/scripts/check.sh")
-        self.copy("storage-sdk/scripts/feature_policy.py")
-        self.env["REUSE_ALL_NONFRESH"] = "1"
-        for mode, message in [("success", "unexpectedly compiled"), ("unrelated", "unrelated reason")]:
-            with self.subTest(mode=mode):
-                self.env["NEGATIVE_FAILURE_MODE"] = mode
-                result = self.run_script("storage-sdk/scripts/check.sh", "--all-backends", active=True)
-                self.assertNotEqual(result.returncode, 0)
-                self.assertIn(message, result.stderr)
-                receipts = list((self.root / "receipt-run").glob("storage-negative-features.*/*.json"))
-                self.assertTrue(receipts)
-                self.assertTrue(all(json.loads(path.read_text())["status"] == "FAIL" for path in receipts))
+        calls = [row["args"] for row in self.observations() if row.get("command") == "cargo"]
+        checks = [args for args in calls if args[0] == "check"]
+        self.assertEqual(len(checks), 16)
+        self.assertTrue(all("--all-targets" in args for args in checks))
+        self.assertNotIn("qdrant", json.dumps(calls))
 
     def test_docs_keep_all_build_and_doctest_lanes(self):
         self.copy("scripts/check_docs_site.sh")
@@ -310,15 +292,15 @@ release_stage fixture.second cargo test
         calls = [row["args"] for row in self.observations() if row.get("command") == "cargo"]
         builds = [args for args in calls if args[0] == "doc"]
         doctests = [args for args in calls if "--doc" in args]
-        self.assertEqual(len(builds), 8)
-        self.assertEqual(len(doctests), 7)
+        self.assertEqual(len(builds), 7)
+        self.assertEqual(len(doctests), 6)
         build_stages = [row for row in self.observations() if ".rustdoc" in row.get("stage", "")]
         self.assertTrue(all(row["fresh"] == "1" for row in build_stages))
         self.assertEqual([args[args.index("-p") + 1] for args in builds],
-                         ["provider-sdk", "tool-sdk", "storage-sdk", "storage-sdk", "storage-sdk", "storage-sdk", "agent-sdk", "app-sdk"])
+                         ["providers-kit", "tools-kit", "storage-kit", "storage-kit", "storage-kit", "agents-kit", "app-kit"])
         storage_lanes = [args[args.index("--features") + 1] for args in builds if "--features" in args]
-        self.assertEqual(storage_lanes, ["redb,postgres,surrealdb,sqlite", "redb,postgres,surrealdb,qdrant"])
-        self.assertTrue((self.root / "target/doc/app_sdk/index.html").is_file())
+        self.assertEqual(storage_lanes, ["redb,postgres,surrealdb,sqlite"])
+        self.assertTrue((self.root / "target/doc/app_kit/index.html").is_file())
 
     def test_docs_artifact_builds_and_default_restore_execute_when_other_stages_reuse(self):
         self.copy("scripts/check_docs_site.sh")
@@ -328,12 +310,12 @@ release_stage fixture.second cargo test
         result = self.run_script("scripts/check_docs_site.sh", active=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         calls = [row["args"] for row in self.observations() if row.get("command") == "cargo"]
-        self.assertEqual(len(calls), 8)
+        self.assertEqual(len(calls), 7)
         self.assertTrue(all(args[0] == "doc" for args in calls))
-        storage = [args for args in calls if args[args.index("-p") + 1] == "storage-sdk"]
-        self.assertEqual(len(storage), 4)
+        storage = [args for args in calls if args[args.index("-p") + 1] == "storage-kit"]
+        self.assertEqual(len(storage), 3)
         self.assertNotIn("--features", storage[-1])
-        self.assertTrue((self.root / "target/doc/storage_sdk/index.html").is_file())
+        self.assertTrue((self.root / "target/doc/storage_kit/index.html").is_file())
 
     def test_wrapper_resume_is_explicit_and_malformed_arguments_never_dispatch(self):
         self.copy("scripts/verify_workspace_strict.sh")
@@ -353,13 +335,13 @@ release_stage fixture.second cargo test
 
     def test_qualified_nonlive_wrapper_dispatches_all_local_owners_without_env_loading(self):
         self.copy("scripts/verify_workspace_strict.sh")
-        self.copy("storage-sdk/scripts/feature_policy.py")
+        self.copy("storage-kit/scripts/feature_policy.py")
         for name in ("check_no_path_wiring.sh", "check_no_type_aliases.sh", "check_docs_site.sh"):
             self.write("scripts/" + name, "exit 0\n")
         for crate in ("agent", "provider", "storage", "tool", "app"):
-            self.write(f"{crate}-sdk/strict-tests.env", 'printf loaded >> "${FIXTURE_ROOT}/env-loaded"\nexit 93\n')
-            self.write(f"{crate}-sdk/scripts/check.sh", f'printf "{crate} check\\n" >> "${{FIXTURE_ROOT}}/owners"\n')
-            self.write(f"{crate}-sdk/scripts/verify_strict_live.sh",
+            self.write(f"{self.CRATE_NAMES[crate]}/strict-tests.env", 'printf loaded >> "${FIXTURE_ROOT}/env-loaded"\nexit 93\n')
+            self.write(f"{self.CRATE_NAMES[crate]}/scripts/check.sh", f'printf "{crate} check\\n" >> "${{FIXTURE_ROOT}}/owners"\n')
+            self.write(f"{self.CRATE_NAMES[crate]}/scripts/verify_strict_live.sh",
                        ('[[ "$#" == 1 && "$1" == --skip-strict-live ]] || exit 94\n'
                         'printf "agent verify --skip-strict-live\\n" >> "${FIXTURE_ROOT}/owners"\n'
                         if crate == "agent" else 'printf launched >> "${FIXTURE_ROOT}/live-launched"\nexit 94\n'))
@@ -373,20 +355,20 @@ release_stage fixture.second cargo test
                 self.assertFalse((self.root / "live-launched").exists())
                 self.assertIn("QUALIFIED coverage; all strict-live suites", result.stdout)
                 self.assertIn("release qualification remains unproven", result.stdout)
-                for suite in ("agent-sdk/strict_live", "provider-sdk/strict_live", "storage-sdk/strict_live",
-                              "tool-sdk/strict_live", "app-sdk/workflow_live"):
+                for suite in ("agents-kit/strict_live", "providers-kit/strict_live", "storage-kit/strict_live",
+                              "tools-kit/strict_live", "app-kit/workflow_live"):
                     self.assertIn(suite, result.stdout)
                 self.assertNotIn("FULL crate coverage", result.stdout)
                 (self.root / "owners").unlink()
 
     def test_agent_qualified_nonlive_mode_retains_all_local_targets_and_process_contracts(self):
-        self.copy("agent-sdk/scripts/verify_strict_live.sh")
-        self.write("agent-sdk/scripts/precheck_strict_live.sh", 'printf launched >> "${FIXTURE_ROOT}/live-launched"\nexit 94\n')
-        self.write("agent-sdk/scripts/report_question_grades.py", "raise SystemExit('live reporter must not run')\n")
-        result = self.run_script("agent-sdk/scripts/verify_strict_live.sh", "--skip-strict-live", active=True)
+        self.copy("agents-kit/scripts/verify_strict_live.sh")
+        self.write("agents-kit/scripts/precheck_strict_live.sh", 'printf launched >> "${FIXTURE_ROOT}/live-launched"\nexit 94\n')
+        self.write("agents-kit/scripts/report_question_grades.py", "raise SystemExit('live reporter must not run')\n")
+        result = self.run_script("agents-kit/scripts/verify_strict_live.sh", "--skip-strict-live", active=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertFalse((self.root / "live-launched").exists())
-        self.assertFalse((self.root / "target/agent-sdk-strict-live").exists())
+        self.assertFalse((self.root / "target/agents-kit-strict-live").exists())
         rows = self.observations()
         cargo = [row["args"] for row in rows if row.get("command") == "cargo"]
         targets = [args[args.index("--test") + 1] for args in cargo if "--test" in args]
@@ -399,19 +381,19 @@ release_stage fixture.second cargo test
         self.assertTrue(any(args[0] == "clippy" for args in cargo))
         self.assertTrue(any(args[0] == "fmt" for args in cargo))
         python = [row["args"] for row in rows if row.get("command") == "python3"]
-        self.assertEqual(python[:2], [["agent-sdk/tests/precheck_contract.py"], ["agent-sdk/tests/question_grade_contract.py"]])
-        self.assertEqual(python[2], ["-m", "unittest", "-v", "scripts.tests.test_vendor_update.AgentSdkProtocolAuthorityTests"])
+        self.assertEqual(python[:2], [["agents-kit/tests/precheck_contract.py"], ["agents-kit/tests/question_grade_contract.py"]])
+        self.assertEqual(python[2], ["-m", "unittest", "-v", "scripts.tests.test_vendor_update.AgentKitProtocolAuthorityTests"])
         self.assertIn("qualified non-live checks passed", result.stdout)
         for args in [("--unknown",), ("--skip-strict-live", "extra")]:
-            invalid = self.run_script("agent-sdk/scripts/verify_strict_live.sh", *args)
+            invalid = self.run_script("agents-kit/scripts/verify_strict_live.sh", *args)
             self.assertEqual(invalid.returncode, 2)
 
     def test_runner_bootstrap_failure_stops_before_cargo_and_owners_even_when_resuming(self):
         self.copy("scripts/verify_workspace_strict.sh")
         self.env["RUNNER_CONTRACT_EXIT"] = "47"
         for crate in ("agent", "provider", "storage", "tool", "app"):
-            self.write(f"{crate}-sdk/strict-tests.env", "export PROVIDER_SDK_RUN_LONG_BATCHES=1\n")
-            self.write(f"{crate}-sdk/scripts/verify_strict_live.sh",
+            self.write(f"{self.CRATE_NAMES[crate]}/strict-tests.env", "export PROVIDERS_KIT_RUN_LONG_BATCHES=1\n")
+            self.write(f"{self.CRATE_NAMES[crate]}/scripts/verify_strict_live.sh",
                        f"printf '{crate}\\n' >> \"${{FIXTURE_ROOT}}/owners\"\n")
         for active in (False, True):
             with self.subTest(active=active):
@@ -433,12 +415,12 @@ release_stage fixture.second cargo test
 
     def test_wrapper_full_default_still_dispatches_every_owner_and_storage_clippy_lane(self):
         self.copy("scripts/verify_workspace_strict.sh")
-        self.copy("storage-sdk/scripts/feature_policy.py")
+        self.copy("storage-kit/scripts/feature_policy.py")
         for name in ("check_no_path_wiring.sh", "check_no_type_aliases.sh", "check_docs_site.sh"):
             self.write("scripts/" + name, "exit 0\n")
         for crate in ("agent", "provider", "storage", "tool", "app"):
-            self.write(f"{crate}-sdk/strict-tests.env", "export PROVIDER_SDK_RUN_LONG_BATCHES=1\n")
-            self.write(f"{crate}-sdk/scripts/verify_strict_live.sh",
+            self.write(f"{self.CRATE_NAMES[crate]}/strict-tests.env", "export PROVIDERS_KIT_RUN_LONG_BATCHES=1\n")
+            self.write(f"{self.CRATE_NAMES[crate]}/scripts/verify_strict_live.sh",
                        f"printf '{crate}\\n' >> \"${{FIXTURE_ROOT}}/owners\"\n")
         result = self.run_script("scripts/verify_workspace_strict.sh", active=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -448,22 +430,22 @@ release_stage fixture.second cargo test
         calls = [row["args"] for row in self.observations() if row.get("command") == "cargo"]
         self.assertEqual(calls[0], ["fmt", "--all", "--check"])
         self.assertEqual(calls[1], ["clippy", "--locked", "--workspace", "--all-targets", "--all-features",
-                                   "--exclude", "storage-sdk", "--exclude", "app-sdk", "--", "-D", "warnings"])
+                                   "--exclude", "storage-kit", "--exclude", "app-kit", "--", "-D", "warnings"])
         storage = calls[2:]
-        self.assertEqual(len(storage), 8)
+        self.assertEqual(len(storage), 6)
         self.assertTrue(all("--no-default-features" in args and "--all-features" not in args for args in storage))
         self.assertEqual([args[args.index("--features") + 1] if "--features" in args else None for args in storage],
-                         [None, "redb", "postgres", "surrealdb", "sqlite", "qdrant",
-                          "redb,postgres,surrealdb,sqlite", "redb,postgres,surrealdb,qdrant"])
+                         [None, "redb", "postgres", "surrealdb", "sqlite",
+                          "redb,postgres,surrealdb,sqlite"])
 
     def test_resume_owner_failure_continues_independent_owners_but_default_stops(self):
         self.copy("scripts/verify_workspace_strict.sh")
-        self.copy("storage-sdk/scripts/feature_policy.py")
+        self.copy("storage-kit/scripts/feature_policy.py")
         for name in ("check_no_path_wiring.sh", "check_no_type_aliases.sh", "check_docs_site.sh"):
             self.write("scripts/" + name, "exit 0\n")
         for crate in ("agent", "provider", "storage", "tool", "app"):
-            self.write(f"{crate}-sdk/strict-tests.env", "export PROVIDER_SDK_RUN_LONG_BATCHES=1\n")
-            self.write(f"{crate}-sdk/scripts/verify_strict_live.sh",
+            self.write(f"{self.CRATE_NAMES[crate]}/strict-tests.env", "export PROVIDERS_KIT_RUN_LONG_BATCHES=1\n")
+            self.write(f"{self.CRATE_NAMES[crate]}/scripts/verify_strict_live.sh",
                        f"printf '{crate}\\n' >> \"${{FIXTURE_ROOT}}/owners\"\n" +
                        ("exit 43\n" if crate == "agent" else "exit 0\n"))
         for active, expected in [(False, ["agent"]), (True, ["agent", "storage", "tool", "app", "provider"])]:
@@ -475,17 +457,17 @@ release_stage fixture.second cargo test
                 (self.root / "owners").unlink()
 
     def test_compiler_failure_stops_owner_without_a_pass(self):
-        self.copy("provider-sdk/scripts/check.sh")
+        self.copy("providers-kit/scripts/check.sh")
         self.env["CARGO_FAILURE"] = "41"
-        result = self.run_script("provider-sdk/scripts/check.sh", active=True)
+        result = self.run_script("providers-kit/scripts/check.sh", active=True)
         self.assertEqual(result.returncode, 41)
         calls = [row for row in self.observations() if row.get("command") == "cargo"]
         self.assertEqual(calls, [{"command": "cargo", "args": ["fmt", "--all", "--check"]}])
 
     def test_every_ordinary_cargo_leaf_is_receipt_aware(self):
         paths = ["scripts/verify_workspace_strict.sh", "scripts/check_docs_site.sh",
-                 "agent-sdk/scripts/verify_strict_live.sh"]
-        paths += [f"{crate}-sdk/scripts/{script}.sh" for crate in ("provider", "storage", "tool", "app")
+                 "agents-kit/scripts/verify_strict_live.sh"]
+        paths += [f"{self.CRATE_NAMES[crate]}/scripts/{script}.sh" for crate in ("provider", "storage", "tool", "app")
                   for script in ("check", "verify_strict_live")]
         for name in paths:
             with self.subTest(script=name):

@@ -1,0 +1,1221 @@
+{
+  "provenance": {
+    "kind": "pinned-source-derived",
+    "archive_sha256": "5b5f20eb1d233467c600dc9dd249feaaa9046c5a303ae4e937040be5b6ecf25e",
+    "archive_commit": "005bfe3ece631e64b06dac2d42ef84235f727a4f",
+    "members": [
+      "rurr-main/crates/rurr-core/src/graph.rs:344-389",
+      "rurr-main/crates/rurr-core/src/graph.rs:577-629",
+      "rurr-main/crates/rurr-core/src/action/condition.rs:404-432"
+    ],
+    "note": "Source-derived serial routing and validation expectations. App JSON translates absent outgoing transitions to omitted/empty routes. Explicit end is App syntax, not a synthetic rurr action. Does not execute the archive. Condition-level required read validation precedes boolean evaluation; these cases are distinct from the lower rurr-expr evaluator alone. The optional exists fixture is explicitly an App extension; expression-only conditional evaluation keeps the pinned rurr-expr short circuit without the outer Condition required-read wrapper."
+  },
+  "cases": [
+    {
+      "id": "empty_outgoing_route_ends",
+      "definition": {
+        "schema": "app-kit.workflow/v2",
+        "id": "route-parity",
+        "revision": "v1",
+        "state": {
+          "output": "start"
+        },
+        "required": [],
+        "reducers": {
+          "output": "reject_concurrent"
+        },
+        "entry": "start",
+        "nodes": [
+          {
+            "id": "start",
+            "step": {
+              "kind": "state",
+              "mutations": []
+            }
+          }
+        ],
+        "routes": {
+          "start": {
+            "mode": "first",
+            "branches": []
+          }
+        }
+      },
+      "expected": {
+        "outcome": "succeeded",
+        "output": "start"
+      }
+    },
+    {
+      "id": "missing_outgoing_route_ends",
+      "definition": {
+        "schema": "app-kit.workflow/v2",
+        "id": "route-parity",
+        "revision": "v1",
+        "state": {
+          "output": "start"
+        },
+        "required": [],
+        "reducers": {
+          "output": "reject_concurrent"
+        },
+        "entry": "start",
+        "nodes": [
+          {
+            "id": "start",
+            "step": {
+              "kind": "state",
+              "mutations": []
+            }
+          }
+        ],
+        "routes": {}
+      },
+      "expected": {
+        "outcome": "succeeded",
+        "output": "start"
+      }
+    },
+    {
+      "id": "false_condition_exhaustion_ends",
+      "definition": {
+        "schema": "app-kit.workflow/v2",
+        "id": "route-parity",
+        "revision": "v1",
+        "state": {
+          "output": "start"
+        },
+        "required": [],
+        "reducers": {
+          "output": "reject_concurrent"
+        },
+        "entry": "start",
+        "nodes": [
+          {
+            "id": "start",
+            "step": {
+              "kind": "state",
+              "mutations": []
+            }
+          },
+          {
+            "id": "final",
+            "step": {
+              "kind": "state",
+              "mutations": [
+                {
+                  "kind": "assign",
+                  "target": "output",
+                  "value": {
+                    "kind": "literal",
+                    "value": "final"
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "routes": {
+          "start": {
+            "mode": "first",
+            "branches": [
+              {
+                "target": {
+                  "kind": "node",
+                  "id": "final"
+                },
+                "when": {
+                  "kind": "constant",
+                  "value": false
+                }
+              }
+            ]
+          },
+          "final": {
+            "mode": "first",
+            "branches": [
+              {
+                "target": {
+                  "kind": "end"
+                }
+              }
+            ]
+          }
+        }
+      },
+      "expected": {
+        "outcome": "succeeded",
+        "output": "start"
+      }
+    },
+    {
+      "id": "true_condition_without_default_selects",
+      "definition": {
+        "schema": "app-kit.workflow/v2",
+        "id": "route-parity",
+        "revision": "v1",
+        "state": {
+          "output": "start"
+        },
+        "required": [],
+        "reducers": {
+          "output": "reject_concurrent"
+        },
+        "entry": "start",
+        "nodes": [
+          {
+            "id": "start",
+            "step": {
+              "kind": "state",
+              "mutations": []
+            }
+          },
+          {
+            "id": "final",
+            "step": {
+              "kind": "state",
+              "mutations": [
+                {
+                  "kind": "assign",
+                  "target": "output",
+                  "value": {
+                    "kind": "literal",
+                    "value": "final"
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "routes": {
+          "start": {
+            "mode": "first",
+            "branches": [
+              {
+                "target": {
+                  "kind": "node",
+                  "id": "final"
+                },
+                "when": {
+                  "kind": "constant",
+                  "value": true
+                }
+              }
+            ]
+          },
+          "final": {
+            "mode": "first",
+            "branches": []
+          }
+        }
+      },
+      "expected": {
+        "outcome": "succeeded",
+        "output": "final"
+      }
+    },
+    {
+      "id": "first_true_keeps_authored_order",
+      "definition": {
+        "schema": "app-kit.workflow/v2",
+        "id": "route-parity",
+        "revision": "v1",
+        "state": {
+          "output": "start"
+        },
+        "required": [],
+        "reducers": {
+          "output": "reject_concurrent"
+        },
+        "entry": "start",
+        "nodes": [
+          {
+            "id": "start",
+            "step": {
+              "kind": "state",
+              "mutations": []
+            }
+          },
+          {
+            "id": "final",
+            "step": {
+              "kind": "state",
+              "mutations": [
+                {
+                  "kind": "assign",
+                  "target": "output",
+                  "value": {
+                    "kind": "literal",
+                    "value": "final"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "id": "alternate",
+            "step": {
+              "kind": "state",
+              "mutations": [
+                {
+                  "kind": "assign",
+                  "target": "output",
+                  "value": {
+                    "kind": "literal",
+                    "value": "alternate"
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "routes": {
+          "start": {
+            "mode": "first",
+            "branches": [
+              {
+                "target": {
+                  "kind": "node",
+                  "id": "final"
+                },
+                "when": {
+                  "kind": "constant",
+                  "value": true
+                }
+              },
+              {
+                "target": {
+                  "kind": "node",
+                  "id": "alternate"
+                },
+                "when": {
+                  "kind": "constant",
+                  "value": true
+                }
+              },
+              {
+                "target": {
+                  "kind": "end"
+                }
+              }
+            ]
+          },
+          "final": {
+            "mode": "first",
+            "branches": []
+          },
+          "alternate": {
+            "mode": "first",
+            "branches": []
+          }
+        }
+      },
+      "expected": {
+        "outcome": "succeeded",
+        "output": "final"
+      }
+    },
+    {
+      "id": "default_before_conditional_short_circuits_error",
+      "definition": {
+        "schema": "app-kit.workflow/v2",
+        "id": "route-parity",
+        "revision": "v1",
+        "state": {
+          "output": "start"
+        },
+        "required": [],
+        "reducers": {
+          "output": "reject_concurrent"
+        },
+        "entry": "start",
+        "nodes": [
+          {
+            "id": "start",
+            "step": {
+              "kind": "state",
+              "mutations": []
+            }
+          },
+          {
+            "id": "final",
+            "step": {
+              "kind": "state",
+              "mutations": [
+                {
+                  "kind": "assign",
+                  "target": "output",
+                  "value": {
+                    "kind": "literal",
+                    "value": "final"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "id": "alternate",
+            "step": {
+              "kind": "state",
+              "mutations": [
+                {
+                  "kind": "assign",
+                  "target": "output",
+                  "value": {
+                    "kind": "literal",
+                    "value": "alternate"
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "routes": {
+          "start": {
+            "mode": "first",
+            "branches": [
+              {
+                "target": {
+                  "kind": "node",
+                  "id": "final"
+                }
+              },
+              {
+                "target": {
+                  "kind": "node",
+                  "id": "alternate"
+                },
+                "when": {
+                  "kind": "equal",
+                  "left": {
+                    "kind": "divide",
+                    "left": {
+                      "kind": "literal",
+                      "value": 1
+                    },
+                    "right": {
+                      "kind": "literal",
+                      "value": 0
+                    }
+                  },
+                  "right": {
+                    "kind": "literal",
+                    "value": 1
+                  }
+                }
+              }
+            ]
+          },
+          "final": {
+            "mode": "first",
+            "branches": []
+          },
+          "alternate": {
+            "mode": "first",
+            "branches": []
+          }
+        }
+      },
+      "expected": {
+        "outcome": "succeeded",
+        "output": "final"
+      }
+    },
+    {
+      "id": "duplicate_defaults_reject",
+      "definition": {
+        "schema": "app-kit.workflow/v2",
+        "id": "route-parity",
+        "revision": "v1",
+        "state": {
+          "output": "start"
+        },
+        "required": [],
+        "reducers": {
+          "output": "reject_concurrent"
+        },
+        "entry": "start",
+        "nodes": [
+          {
+            "id": "start",
+            "step": {
+              "kind": "state",
+              "mutations": []
+            }
+          },
+          {
+            "id": "final",
+            "step": {
+              "kind": "state",
+              "mutations": [
+                {
+                  "kind": "assign",
+                  "target": "output",
+                  "value": {
+                    "kind": "literal",
+                    "value": "final"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "id": "alternate",
+            "step": {
+              "kind": "state",
+              "mutations": [
+                {
+                  "kind": "assign",
+                  "target": "output",
+                  "value": {
+                    "kind": "literal",
+                    "value": "alternate"
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "routes": {
+          "start": {
+            "mode": "first",
+            "branches": [
+              {
+                "target": {
+                  "kind": "node",
+                  "id": "final"
+                }
+              },
+              {
+                "target": {
+                  "kind": "node",
+                  "id": "alternate"
+                }
+              }
+            ]
+          },
+          "final": {
+            "mode": "first",
+            "branches": []
+          },
+          "alternate": {
+            "mode": "first",
+            "branches": []
+          }
+        }
+      },
+      "expected": {
+        "outcome": "definition_error"
+      }
+    },
+    {
+      "id": "false_condition_does_not_hide_later_condition_error",
+      "definition": {
+        "schema": "app-kit.workflow/v2",
+        "id": "route-parity",
+        "revision": "v1",
+        "state": {
+          "output": "start"
+        },
+        "required": [],
+        "reducers": {
+          "output": "reject_concurrent"
+        },
+        "entry": "start",
+        "nodes": [
+          {
+            "id": "start",
+            "step": {
+              "kind": "state",
+              "mutations": []
+            }
+          },
+          {
+            "id": "final",
+            "step": {
+              "kind": "state",
+              "mutations": [
+                {
+                  "kind": "assign",
+                  "target": "output",
+                  "value": {
+                    "kind": "literal",
+                    "value": "final"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "id": "alternate",
+            "step": {
+              "kind": "state",
+              "mutations": [
+                {
+                  "kind": "assign",
+                  "target": "output",
+                  "value": {
+                    "kind": "literal",
+                    "value": "alternate"
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "routes": {
+          "start": {
+            "mode": "first",
+            "branches": [
+              {
+                "target": {
+                  "kind": "node",
+                  "id": "final"
+                },
+                "when": {
+                  "kind": "constant",
+                  "value": false
+                }
+              },
+              {
+                "target": {
+                  "kind": "node",
+                  "id": "alternate"
+                },
+                "when": {
+                  "kind": "equal",
+                  "left": {
+                    "kind": "divide",
+                    "left": {
+                      "kind": "literal",
+                      "value": 1
+                    },
+                    "right": {
+                      "kind": "literal",
+                      "value": 0
+                    }
+                  },
+                  "right": {
+                    "kind": "literal",
+                    "value": 1
+                  }
+                }
+              }
+            ]
+          },
+          "final": {
+            "mode": "first",
+            "branches": []
+          },
+          "alternate": {
+            "mode": "first",
+            "branches": []
+          }
+        }
+      },
+      "expected": {
+        "outcome": "evaluation_error"
+      }
+    },
+    {
+      "id": "unknown_route_source_reject",
+      "definition": {
+        "schema": "app-kit.workflow/v2",
+        "id": "route-parity",
+        "revision": "v1",
+        "state": {
+          "output": "start"
+        },
+        "required": [],
+        "reducers": {
+          "output": "reject_concurrent"
+        },
+        "entry": "start",
+        "nodes": [
+          {
+            "id": "start",
+            "step": {
+              "kind": "state",
+              "mutations": []
+            }
+          }
+        ],
+        "routes": {
+          "start": {
+            "mode": "first",
+            "branches": [
+              {
+                "target": {
+                  "kind": "end"
+                }
+              }
+            ]
+          },
+          "missing": {
+            "mode": "first",
+            "branches": [
+              {
+                "target": {
+                  "kind": "end"
+                }
+              }
+            ]
+          }
+        }
+      },
+      "expected": {
+        "outcome": "definition_error"
+      }
+    },
+    {
+      "id": "unknown_route_target_reject",
+      "definition": {
+        "schema": "app-kit.workflow/v2",
+        "id": "route-parity",
+        "revision": "v1",
+        "state": {
+          "output": "start"
+        },
+        "required": [],
+        "reducers": {
+          "output": "reject_concurrent"
+        },
+        "entry": "start",
+        "nodes": [
+          {
+            "id": "start",
+            "step": {
+              "kind": "state",
+              "mutations": []
+            }
+          }
+        ],
+        "routes": {
+          "start": {
+            "mode": "first",
+            "branches": [
+              {
+                "target": {
+                  "kind": "node",
+                  "id": "missing"
+                }
+              }
+            ]
+          }
+        }
+      },
+      "expected": {
+        "outcome": "definition_error"
+      }
+    },
+    {
+      "id": "empty_graph_reject",
+      "definition": {
+        "schema": "app-kit.workflow/v2",
+        "id": "route-parity",
+        "revision": "v1",
+        "state": {
+          "output": "start"
+        },
+        "required": [],
+        "reducers": {
+          "output": "reject_concurrent"
+        },
+        "entry": "start",
+        "nodes": [],
+        "routes": {}
+      },
+      "expected": {
+        "outcome": "definition_error"
+      }
+    },
+    {
+      "id": "duplicate_nodes_reject",
+      "definition": {
+        "schema": "app-kit.workflow/v2",
+        "id": "route-parity",
+        "revision": "v1",
+        "state": {
+          "output": "start"
+        },
+        "required": [],
+        "reducers": {
+          "output": "reject_concurrent"
+        },
+        "entry": "start",
+        "nodes": [
+          {
+            "id": "start",
+            "step": {
+              "kind": "state",
+              "mutations": []
+            }
+          },
+          {
+            "id": "start",
+            "step": {
+              "kind": "state",
+              "mutations": []
+            }
+          }
+        ],
+        "routes": {
+          "start": {
+            "mode": "first",
+            "branches": [
+              {
+                "target": {
+                  "kind": "end"
+                }
+              }
+            ]
+          }
+        }
+      },
+      "expected": {
+        "outcome": "definition_error"
+      }
+    },
+    {
+      "id": "conditional_cycle_exhausts_without_synthetic_end",
+      "definition": {
+        "schema": "app-kit.workflow/v2",
+        "id": "route-parity",
+        "revision": "v1",
+        "state": {
+          "output": 0
+        },
+        "required": [],
+        "reducers": {
+          "output": "reject_concurrent"
+        },
+        "entry": "start",
+        "nodes": [
+          {
+            "id": "start",
+            "step": {
+              "kind": "state",
+              "mutations": [
+                {
+                  "kind": "increment",
+                  "target": "output",
+                  "value": {
+                    "kind": "literal",
+                    "value": 1
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "routes": {
+          "start": {
+            "mode": "first",
+            "branches": [
+              {
+                "target": {
+                  "kind": "node",
+                  "id": "start"
+                },
+                "when": {
+                  "kind": "less_than",
+                  "left": {
+                    "kind": "state",
+                    "path": "output"
+                  },
+                  "right": {
+                    "kind": "literal",
+                    "value": 3
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "expected": {
+        "outcome": "succeeded",
+        "output": 3
+      }
+    },
+    {
+      "id": "all_validates_missing_declared_reads_before_short_circuit",
+      "definition": {
+        "schema": "app-kit.workflow/v2",
+        "id": "route-parity",
+        "revision": "v1",
+        "state": {
+          "output": "start"
+        },
+        "required": [],
+        "reducers": {
+          "output": "reject_concurrent"
+        },
+        "entry": "start",
+        "nodes": [
+          {
+            "id": "start",
+            "step": {
+              "kind": "state",
+              "mutations": [
+                {
+                  "kind": "remove",
+                  "target": "output"
+                }
+              ]
+            }
+          },
+          {
+            "id": "final",
+            "step": {
+              "kind": "state",
+              "mutations": [
+                {
+                  "kind": "assign",
+                  "target": "output",
+                  "value": {
+                    "kind": "literal",
+                    "value": "final"
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "routes": {
+          "start": {
+            "mode": "first",
+            "branches": [
+              {
+                "when": {
+                  "kind": "all",
+                  "conditions": [
+                    {
+                      "kind": "constant",
+                      "value": false
+                    },
+                    {
+                      "kind": "equal",
+                      "left": {
+                        "kind": "state",
+                        "path": "output"
+                      },
+                      "right": {
+                        "kind": "literal",
+                        "value": 1
+                      }
+                    }
+                  ]
+                },
+                "target": {
+                  "kind": "node",
+                  "id": "final"
+                }
+              }
+            ]
+          }
+        }
+      },
+      "expected": {
+        "outcome": "evaluation_error"
+      }
+    },
+    {
+      "id": "any_validates_missing_declared_reads_before_short_circuit",
+      "definition": {
+        "schema": "app-kit.workflow/v2",
+        "id": "route-parity",
+        "revision": "v1",
+        "state": {
+          "output": "start"
+        },
+        "required": [],
+        "reducers": {
+          "output": "reject_concurrent"
+        },
+        "entry": "start",
+        "nodes": [
+          {
+            "id": "start",
+            "step": {
+              "kind": "state",
+              "mutations": [
+                {
+                  "kind": "remove",
+                  "target": "output"
+                }
+              ]
+            }
+          },
+          {
+            "id": "final",
+            "step": {
+              "kind": "state",
+              "mutations": [
+                {
+                  "kind": "assign",
+                  "target": "output",
+                  "value": {
+                    "kind": "literal",
+                    "value": "final"
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "routes": {
+          "start": {
+            "mode": "first",
+            "branches": [
+              {
+                "when": {
+                  "kind": "any",
+                  "conditions": [
+                    {
+                      "kind": "constant",
+                      "value": true
+                    },
+                    {
+                      "kind": "equal",
+                      "left": {
+                        "kind": "state",
+                        "path": "output"
+                      },
+                      "right": {
+                        "kind": "literal",
+                        "value": 1
+                      }
+                    }
+                  ]
+                },
+                "target": {
+                  "kind": "node",
+                  "id": "final"
+                }
+              }
+            ]
+          }
+        }
+      },
+      "expected": {
+        "outcome": "evaluation_error"
+      }
+    },
+    {
+      "id": "required_root_present_allows_nested_short_circuit",
+      "definition": {
+        "schema": "app-kit.workflow/v2",
+        "id": "route-parity",
+        "revision": "v1",
+        "state": {
+          "output": "start"
+        },
+        "required": [],
+        "reducers": {
+          "output": "reject_concurrent"
+        },
+        "entry": "start",
+        "nodes": [
+          {
+            "id": "start",
+            "step": {
+              "kind": "state",
+              "mutations": []
+            }
+          },
+          {
+            "id": "final",
+            "step": {
+              "kind": "state",
+              "mutations": [
+                {
+                  "kind": "assign",
+                  "target": "output",
+                  "value": {
+                    "kind": "literal",
+                    "value": "final"
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "routes": {
+          "start": {
+            "mode": "first",
+            "branches": [
+              {
+                "when": {
+                  "kind": "any",
+                  "conditions": [
+                    {
+                      "kind": "constant",
+                      "value": true
+                    },
+                    {
+                      "kind": "equal",
+                      "left": {
+                        "kind": "state",
+                        "path": "output/missing"
+                      },
+                      "right": {
+                        "kind": "literal",
+                        "value": 1
+                      }
+                    }
+                  ]
+                },
+                "target": {
+                  "kind": "node",
+                  "id": "final"
+                }
+              }
+            ]
+          }
+        }
+      },
+      "expected": {
+        "outcome": "succeeded",
+        "output": "final"
+      }
+    },
+    {
+      "id": "app_optional_exists_remains_false_after_key_removal",
+      "definition": {
+        "schema": "app-kit.workflow/v2",
+        "id": "route-parity",
+        "revision": "v1",
+        "state": {
+          "output": "start"
+        },
+        "required": [],
+        "reducers": {
+          "output": "reject_concurrent"
+        },
+        "entry": "start",
+        "nodes": [
+          {
+            "id": "start",
+            "step": {
+              "kind": "state",
+              "mutations": [
+                {
+                  "kind": "remove",
+                  "target": "output"
+                }
+              ]
+            }
+          },
+          {
+            "id": "final",
+            "step": {
+              "kind": "state",
+              "mutations": [
+                {
+                  "kind": "assign",
+                  "target": "output",
+                  "value": {
+                    "kind": "literal",
+                    "value": "final"
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "routes": {
+          "start": {
+            "mode": "first",
+            "branches": [
+              {
+                "when": {
+                  "kind": "exists",
+                  "path": "output"
+                },
+                "target": {
+                  "kind": "node",
+                  "id": "final"
+                }
+              }
+            ]
+          }
+        }
+      },
+      "expected": {
+        "outcome": "succeeded_state",
+        "state": {}
+      }
+    },
+    {
+      "id": "expression_conditional_keeps_unvalidated_short_circuit",
+      "definition": {
+        "schema": "app-kit.workflow/v2",
+        "id": "route-parity",
+        "revision": "v1",
+        "state": {
+          "output": "start"
+        },
+        "required": [],
+        "reducers": {
+          "output": "reject_concurrent"
+        },
+        "entry": "start",
+        "nodes": [
+          {
+            "id": "start",
+            "step": {
+              "kind": "state",
+              "mutations": [
+                {
+                  "kind": "remove",
+                  "target": "output"
+                },
+                {
+                  "kind": "assign",
+                  "target": "output",
+                  "value": {
+                    "kind": "conditional",
+                    "when": {
+                      "kind": "all",
+                      "conditions": [
+                        {
+                          "kind": "constant",
+                          "value": false
+                        },
+                        {
+                          "kind": "equal",
+                          "left": {
+                            "kind": "state",
+                            "path": "output"
+                          },
+                          "right": {
+                            "kind": "literal",
+                            "value": 1
+                          }
+                        }
+                      ]
+                    },
+                    "then": {
+                      "kind": "literal",
+                      "value": "wrong"
+                    },
+                    "else": {
+                      "kind": "literal",
+                      "value": "expression short circuit"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "routes": {}
+      },
+      "expected": {
+        "outcome": "succeeded",
+        "output": "expression short circuit"
+      }
+    }
+  ]
+}

@@ -52,7 +52,7 @@ Hard constraints:
 - Do not touch unrelated selected issues.
 - Do not revert user changes or other workers' changes.
 - Do not use macro-based reductive refactors.
-- The only macro exception is `tool-sdk::tool!`.
+- The only macro exception is `tools-kit::tool!`.
 - Do not add shims, hacks, escape hatches, synthetic behavior, deterministic
   output shortcuts, or backwards-compatibility bloat.
 - Preserve private exhaustive enum dispatch. Use the public RPITIT trait as the

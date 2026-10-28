@@ -1,0 +1,42 @@
+
+[package]
+name = "agents-kit"
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.99"
+license = "Apache-2.0"
+description = "Rust agent control Kit for Codex, OpenCode, and provider-backed Custom runtimes"
+readme = "README.md"
+keywords = ["agent", "codex", "custom", "opencode", "sdk"]
+categories = ["api-bindings", "asynchronous"]
+repository = "https://github.com/jecsand838/ai-kit"
+documentation = "https://docs.rs/agents-kit"
+include = ["src/**", "examples/**", "tests/**", "Cargo.toml", "README.md", "LICENSE"]
+
+[dependencies]
+base64 = { workspace = true }
+bytes = { workspace = true, features = ["serde"] }
+futures-util = { workspace = true }
+http = { workspace = true }
+jsonschema.workspace = true
+providers-kit = { workspace = true }
+reqwest = { workspace = true, default-features = false, features = ["json", "stream", "http2", "rustls", "query"] }
+secrecy = { workspace = true, features = ["serde"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+storage-kit = { workspace = true, default-features = false }
+time = { workspace = true, features = ["parsing"] }
+tokio = { workspace = true, features = ["macros", "process", "rt-multi-thread", "sync", "time", "io-util", "net"] }
+tokio-stream = { workspace = true, features = ["sync"] }
+tokio-tungstenite = { workspace = true }
+tools-kit = { workspace = true }
+tracing = { workspace = true }
+urlencoding = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
+
+[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
+rustix = { version = "=1.1.4", default-features = false, features = ["std", "fs"] }
+
+[package.metadata.docs.rs]
+default-target = "x86_64-unknown-linux-gnu"
+targets = ["x86_64-unknown-linux-gnu"]

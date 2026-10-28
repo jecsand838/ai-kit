@@ -55,7 +55,7 @@ run_crate_gate() {
         cd "${WORKSPACE_DIR}" || exit $?
         if [[ -n "${env_file}" ]]; then source "${env_file}" || exit $?; fi
         if [[ -n "${provider_long_mode}" ]]; then
-            export PROVIDER_SDK_RUN_LONG_BATCHES="${provider_long_mode}"
+            export PROVIDERS_KIT_RUN_LONG_BATCHES="${provider_long_mode}"
         fi
         if [[ -n "${script_argument}" ]]; then
             bash "${verify_script}" "${script_argument}"
@@ -90,16 +90,16 @@ cd "${WORKSPACE_DIR}"
 # Qualified non-live runs never load strict-live environment files.
 if (( ! skip_strict_live )); then
     (
-        source "provider-sdk/strict-tests.env"
-        case "${PROVIDER_SDK_RUN_LONG_BATCHES-1}" in
+        source "providers-kit/strict-tests.env"
+        case "${PROVIDERS_KIT_RUN_LONG_BATCHES-1}" in
             0|1) ;;
             *)
-                printf 'PROVIDER_SDK_RUN_LONG_BATCHES must be 0 or 1\n' >&2
+                printf 'PROVIDERS_KIT_RUN_LONG_BATCHES must be 0 or 1\n' >&2
                 exit 1
                 ;;
         esac
-        if [[ -z "${provider_long_override}" && "${PROVIDER_SDK_RUN_LONG_BATCHES-1}" != 1 ]]; then
-            printf 'workspace completion requires PROVIDER_SDK_RUN_LONG_BATCHES=1 unless --skip-long-provider-batches explicitly qualifies coverage\n' >&2
+        if [[ -z "${provider_long_override}" && "${PROVIDERS_KIT_RUN_LONG_BATCHES-1}" != 1 ]]; then
+            printf 'workspace completion requires PROVIDERS_KIT_RUN_LONG_BATCHES=1 unless --skip-long-provider-batches explicitly qualifies coverage\n' >&2
             exit 1
         fi
     )
@@ -128,28 +128,28 @@ run_required_gate "workspace type aliases" release_stage workspace.no_aliases ba
 printf '\n==> cargo fmt --all --check\n'
 run_required_gate "workspace formatting" release_stage workspace.format cargo fmt --all --check
 
-printf '\n==> cargo clippy --locked --workspace --all-targets --all-features --exclude storage-sdk --exclude app-sdk -- -D warnings\n'
-run_required_gate "workspace Clippy" release_stage workspace.clippy cargo clippy --locked --workspace --all-targets --all-features --exclude storage-sdk --exclude app-sdk -- -D warnings
+printf '\n==> cargo clippy --locked --workspace --all-targets --all-features --exclude storage-kit --exclude app-kit -- -D warnings\n'
+run_required_gate "workspace Clippy" release_stage workspace.clippy cargo clippy --locked --workspace --all-targets --all-features --exclude storage-kit --exclude app-kit -- -D warnings
 
-storage_lanes="$(python3 storage-sdk/scripts/feature_policy.py --all-backends --format lanes)"
+storage_lanes="$(python3 storage-kit/scripts/feature_policy.py --all-backends --format lanes)"
 while IFS= read -r features; do
     storage_args=(--no-default-features)
     if [[ "${features}" != - ]]; then storage_args+=(--features "${features}"); fi
     printf '\n==> Storage Clippy features: %s\n' "${features}"
     lane="${features//,/-}"
     if [[ "${lane}" == - ]]; then lane=lance; fi
-    run_required_gate "Storage Clippy ${lane}" release_stage "workspace.storage-clippy.${lane}" cargo clippy --locked -p storage-sdk --all-targets "${storage_args[@]}" -- -D warnings
+    run_required_gate "Storage Clippy ${lane}" release_stage "workspace.storage-clippy.${lane}" cargo clippy --locked -p storage-kit --all-targets "${storage_args[@]}" -- -D warnings
 done <<< "${storage_lanes}"
 
 printf '\n==> workspace docs site gate\n'
 export AI_KIT_WORKSPACE_OWNS_DOCS_SITE="${WORKSPACE_DIR}"
 run_required_gate "workspace docs site" bash scripts/check_docs_site.sh
 
-crate_order=(agent-sdk provider-sdk storage-sdk tool-sdk app-sdk)
+crate_order=(agents-kit providers-kit storage-kit tools-kit app-kit)
 if [[ "${AI_KIT_RELEASE_RECEIPT_RUN+x}" == x ]]; then
     # Provider batches have authored multi-day budgets. Finish independent
     # owners first when collecting an explicit resumed qualification.
-    crate_order=(agent-sdk storage-sdk tool-sdk app-sdk provider-sdk)
+    crate_order=(agents-kit storage-kit tools-kit app-kit providers-kit)
 fi
 for crate in "${crate_order[@]}"; do
     env_file="${crate}/strict-tests.env"
@@ -157,15 +157,15 @@ for crate in "${crate_order[@]}"; do
     script_argument=""
     gate_script="${crate}/scripts/verify_strict_live.sh"
     gate_label="${crate} strict completion"
-    if [[ "${crate}" == storage-sdk ]]; then env_file=""; fi
-    if [[ "${crate}" == provider-sdk ]]; then provider_mode="${provider_long_override}"; fi
+    if [[ "${crate}" == storage-kit ]]; then env_file=""; fi
+    if [[ "${crate}" == providers-kit ]]; then provider_mode="${provider_long_override}"; fi
     if (( skip_strict_live )); then
         env_file=""
         provider_mode=""
         gate_script="${crate}/scripts/check.sh"
         gate_label="${crate} qualified non-live checks"
-        if [[ "${crate}" == agent-sdk ]]; then
-            gate_script="agent-sdk/scripts/verify_strict_live.sh"
+        if [[ "${crate}" == agents-kit ]]; then
+            gate_script="agents-kit/scripts/verify_strict_live.sh"
             script_argument="--skip-strict-live"
         fi
     fi
@@ -185,8 +185,8 @@ fi
 if (( skip_strict_live )); then
     printf '\nWorkspace non-live qualification passed: QUALIFIED coverage; all strict-live suites and their prerequisite/service checks were excluded.\n'
     printf 'Excluded strict-live suites:\n'
-    printf '  %s\n' agent-sdk/strict_live provider-sdk/strict_live storage-sdk/strict_live \
-        tool-sdk/strict_live app-sdk/workflow_live
+    printf '  %s\n' agents-kit/strict_live providers-kit/strict_live storage-kit/strict_live \
+        tools-kit/strict_live app-kit/workflow_live
     printf 'Full workspace release qualification remains unproven.\n'
 elif [[ "${provider_long_override}" == 0 ]]; then
     printf '\nWorkspace strict completion passed: QUALIFIED coverage; only these seven long Provider cases were excluded:\n'

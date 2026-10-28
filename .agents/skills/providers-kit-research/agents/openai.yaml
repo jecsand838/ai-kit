@@ -1,0 +1,6 @@
+interface:
+  display_name: "providers-kit Research"
+  short_description: "Provider, model, continuation, and strict-live facts."
+  default_prompt: "Use $providers-kit-research to ground Provider, Model, Session, function continuation, hosted tools, and strict-live changes in current provider behavior."
+policy:
+  allow_implicit_invocation: true

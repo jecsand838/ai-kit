@@ -1,0 +1,229 @@
+//! Temporary public-contract audit probe for workspace compensation fencing.
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use agents_kit::conversation::{ConversationInfo, FileRead, NewConversation};
+use agents_kit::identity::{AgentId, AgentInfo, ConversationId, NotificationId, WorkspaceId};
+use agents_kit::knowledge::IngestKnowledgeRequest;
+use agents_kit::model::ModelInfo;
+use agents_kit::notification::{ConversationNotificationReceiver, NotificationResolution};
+use agents_kit::prompt::{PromptRequest, PromptResponse};
+use agents_kit::tool::ToolInfo;
+use agents_kit::workspace::{
+    DeleteWorkspaceRequest, NewWorkspace, UpdateWorkspaceRequest, WorkspaceInfo,
+    WorkspaceUpdateReadiness,
+};
+use agents_kit::{AgentBackend, ConversationBackend, KitError, WorkspaceBackend};
+use app_kit::{AgentSpec, App, AppConfig, AppError, AppState, Shutdown, WorkspaceConfig};
+use storage_kit::StateStore;
+use tokio::sync::Notify;
+
+#[derive(Clone, Copy)]
+enum Behavior {
+    ApplyFencedUpdates,
+    BlockThenRejectUpdate,
+}
+
+struct Probe {
+    behavior: Behavior,
+    agent_id: AgentId,
+    workspace_id: WorkspaceId,
+    conversation_id: ConversationId,
+    workspace: Mutex<Option<WorkspaceInfo>>,
+    update_fences: Mutex<Vec<u64>>,
+    entered: Notify,
+    release: Notify,
+}
+
+struct AuditAgent(Arc<Probe>);
+struct AuditWorkspace(Arc<Probe>);
+struct AuditConversation(Arc<Probe>);
+
+impl Probe {
+    fn new(behavior: Behavior, suffix: u8) -> Result<Arc<Self>, KitError> {
+        Ok(Arc::new(Self {
+            behavior,
+            agent_id: format!("agent_{suffix:032x}").parse()?,
+            workspace_id: format!("workspace_{suffix:032x}").parse()?,
+            conversation_id: format!("conversation_{suffix:032x}").parse()?,
+            workspace: Mutex::new(None),
+            update_fences: Mutex::new(Vec::new()),
+            entered: Notify::new(),
+            release: Notify::new(),
+        }))
+    }
+
+    fn workspace_info(&self) -> Result<WorkspaceInfo, KitError> {
+        self.workspace
+            .lock()
+            .expect("test workspace mutex")
+            .clone()
+            .ok_or_else(|| KitError::not_found("audit workspace absent"))
+    }
+
+    fn apply(&self, request: UpdateWorkspaceRequest) -> Result<WorkspaceInfo, KitError> {
+        let mut workspace = self.workspace.lock().expect("test workspace mutex");
+        let current = workspace.as_ref().ok_or_else(|| KitError::not_found("audit workspace absent"))?;
+        if current.id() != request.id() || current.revision() != request.expected_revision() {
+            return Err(KitError::conflict("audit workspace revision fence rejected"));
+        }
+        let info = WorkspaceInfo::new(
+            request.id().clone(), request.name().to_owned(), request.context().clone(),
+            request.defaults().clone(), current.revision() + 1,
+        )?;
+        *workspace = Some(info.clone());
+        Ok(info)
+    }
+}
+
+impl AgentBackend for AuditAgent {
+    type Workspace = AuditWorkspace;
+
+    fn id(&self) -> AgentId { self.0.agent_id.clone() }
+    async fn info(&self) -> Result<AgentInfo, KitError> {
+        AgentInfo::new(self.id(), Some("audit".to_owned()))
+    }
+    async fn new_workspace(&self, request: NewWorkspace) -> Result<Self::Workspace, KitError> {
+        let info = WorkspaceInfo::new(
+            self.0.workspace_id.clone(), request.name().to_owned(),
+            request.context().clone(), request.defaults().clone(), 1,
+        )?;
+        *self.0.workspace.lock().expect("test workspace mutex") = Some(info);
+        Ok(AuditWorkspace(Arc::clone(&self.0)))
+    }
+    async fn list_workspaces(&self) -> Result<Vec<WorkspaceInfo>, KitError> {
+        Ok(self.0.workspace.lock().expect("test workspace mutex").iter().cloned().collect())
+    }
+    async fn workspace_info(&self, id: WorkspaceId) -> Result<WorkspaceInfo, KitError> {
+        if id != self.0.workspace_id { return Err(KitError::not_found("audit workspace id")); }
+        self.0.workspace_info()
+    }
+    async fn get_workspace(&self, id: WorkspaceId) -> Result<Self::Workspace, KitError> {
+        self.workspace_info(id).await?;
+        Ok(AuditWorkspace(Arc::clone(&self.0)))
+    }
+    fn check_workspace_update(&self, request: &UpdateWorkspaceRequest)
+        -> impl std::future::Future<Output = Result<WorkspaceUpdateReadiness, KitError>> + Send + '_ {
+        let id = request.id().clone();
+        let expected = request.expected_revision();
+        async move {
+            let info = self.workspace_info(id).await?;
+            if info.revision() != expected {
+                return Err(KitError::conflict("audit preflight fence rejected"));
+            }
+            Ok(WorkspaceUpdateReadiness::Ready)
+        }
+    }
+    async fn update_workspace(&self, request: UpdateWorkspaceRequest)
+        -> Result<WorkspaceInfo, KitError> {
+        self.0.update_fences.lock().expect("test fence mutex").push(request.expected_revision());
+        match self.0.behavior {
+            Behavior::ApplyFencedUpdates => self.0.apply(request),
+            Behavior::BlockThenRejectUpdate => {
+                self.0.entered.notify_one();
+                self.0.release.notified().await;
+                Err(KitError::conflict("audit second agent rejected replacement"))
+            }
+        }
+    }
+    async fn delete_workspace(&self, _request: DeleteWorkspaceRequest)
+        -> Result<(), KitError> { Ok(()) }
+    async fn list_models(&self) -> Result<Vec<ModelInfo>, KitError> { Ok(Vec::new()) }
+    async fn ingest_knowledge(&self, _request: IngestKnowledgeRequest)
+        -> Result<(), KitError> { Ok(()) }
+    async fn shutdown(self) -> Result<(), KitError> { Ok(()) }
+}
+
+impl WorkspaceBackend for AuditWorkspace {
+    type Conversation = AuditConversation;
+
+    fn id(&self) -> WorkspaceId { self.0.workspace_id.clone() }
+    async fn info(&self) -> Result<WorkspaceInfo, KitError> { self.0.workspace_info() }
+    async fn new_conversation(&self, _request: NewConversation)
+        -> Result<Self::Conversation, KitError> { Err(KitError::unsupported("audit unused conversation")) }
+    async fn list_conversations(&self) -> Result<Vec<ConversationInfo>, KitError> { Ok(Vec::new()) }
+    async fn conversation_info(&self, _id: ConversationId) -> Result<ConversationInfo, KitError> {
+        Err(KitError::not_found("audit conversation absent"))
+    }
+    async fn get_conversation(&self, _id: ConversationId) -> Result<Self::Conversation, KitError> {
+        Err(KitError::not_found("audit conversation absent"))
+    }
+    async fn list_tools(&self) -> Result<Vec<ToolInfo>, KitError> { Ok(Vec::new()) }
+    async fn ingest_knowledge(&self, _request: IngestKnowledgeRequest)
+        -> Result<(), KitError> { Ok(()) }
+    async fn close(self) -> Result<(), KitError> { Ok(()) }
+}
+
+impl ConversationBackend for AuditConversation {
+    fn id(&self) -> ConversationId { self.0.conversation_id.clone() }
+    async fn info(&self) -> Result<ConversationInfo, KitError> {
+        ConversationInfo::new(self.id(), self.0.workspace_id.clone(), None)
+    }
+    async fn prompt(&self, _request: PromptRequest) -> Result<PromptResponse, KitError> {
+        Err(KitError::unsupported("audit unused prompt"))
+    }
+    async fn abort(&self) -> Result<(), KitError> { Ok(()) }
+    async fn read_file(&self, _path: PathBuf) -> Result<FileRead, KitError> {
+        Err(KitError::not_found("audit file absent"))
+    }
+    fn notification_stream(&self) -> Result<ConversationNotificationReceiver, KitError> {
+        Err(KitError::busy("unused audit notification stream"))
+    }
+    async fn resolve_notification(&self, _id: NotificationId, _resolution: NotificationResolution)
+        -> Result<(), KitError> { Ok(()) }
+    async fn close(self) -> Result<(), KitError> { Ok(()) }
+}
+
+#[tokio::test]
+async fn audit_compensation_does_not_overwrite_a_foreign_revision()
+    -> Result<(), Box<dyn std::error::Error>> {
+    let first = Probe::new(Behavior::ApplyFencedUpdates, 81)?;
+    let second = Probe::new(Behavior::BlockThenRejectUpdate, 82)?;
+    // Separate public lower handle represents another legitimate lower caller.
+    let foreign_caller = AuditAgent(Arc::clone(&first));
+    let config: AppConfig<StateStore, AuditAgent> = AppConfig::new(
+        AppState::Ephemeral,
+        vec![
+            AgentSpec::new("a".to_owned(), "v1".to_owned(), AuditAgent(Arc::clone(&first))),
+            AgentSpec::new("b".to_owned(), "v1".to_owned(), AuditAgent(Arc::clone(&second))),
+        ],
+        Vec::new(),
+    );
+    let mut app = App::open(config).await?;
+    let workspace = app.create_workspace(WorkspaceConfig {
+        name: Some("prior".to_owned()), root: std::env::current_dir()?,
+    }).await?;
+    let revision = workspace.snapshot().await?.revision;
+    let mut replacing = Box::pin(workspace.replace(revision, WorkspaceConfig {
+        name: Some("next".to_owned()), root: std::env::current_dir()?,
+    }));
+    tokio::time::timeout(Duration::from_secs(2), async {
+        tokio::select! {
+            _ = second.entered.notified() => {}
+            result = &mut replacing => panic!("replacement settled before the gated second update: {}", result.is_ok()),
+        }
+    }).await.expect("replacement must reach second lower update");
+
+    let applied = foreign_caller.workspace_info(first.workspace_id.clone()).await?;
+    assert_eq!(applied.name(), "next");
+    assert_eq!(applied.revision(), 2);
+    let foreign = foreign_caller.update_workspace(UpdateWorkspaceRequest::new(
+        applied.id().clone(), applied.revision(), "foreign".to_owned(),
+        applied.context().clone(), applied.defaults().clone(),
+    )?).await?;
+    assert_eq!(foreign.revision(), 3);
+    second.release.notify_one();
+
+    let outcome = tokio::time::timeout(Duration::from_secs(2), &mut replacing)
+        .await.expect("compensation must settle within probe bound");
+    assert!(matches!(outcome, Err(AppError::Conflict(_))));
+    drop(replacing);
+    let observed = foreign_caller.workspace_info(first.workspace_id.clone()).await?;
+    let fences = first.update_fences.lock().expect("test fence mutex").clone();
+    // Close before asserting the corruption observation, so the expected failing probe cleans up.
+    app.shutdown(Shutdown::Drain { timeout: Duration::from_secs(2) }).await?;
+    assert_eq!((observed.name(), observed.revision()), ("foreign", 3),
+        "compensation replaced a foreign lower revision; observed lower update fences were {fences:?}");
+    Ok(())
+}

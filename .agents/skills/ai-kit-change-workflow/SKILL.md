@@ -39,7 +39,7 @@ findings backlog.
 ## Hard Rules
 
 - Do not use macro-based reductive refactors. The only macro exception is
-  `tool-sdk::tool!`.
+  `tools-kit::tool!`.
 - Do not add shims, hacks, escape hatches, synthetic behavior, deterministic
   output shortcuts, or backwards-compatibility bloat.
 - Preserve private exhaustive enum dispatch. At the root-approved Tool seam,

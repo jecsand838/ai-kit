@@ -1,0 +1,52 @@
+[package]
+name = "tools-kit"
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.99"
+license = "Apache-2.0"
+description = "Portable Local and MCP tool execution with narrow extension traits."
+readme = "README.md"
+keywords = ["tools", "sdk", "mcp", "execution", "runtime"]
+categories = ["api-bindings", "asynchronous"]
+repository = "https://github.com/jecsand838/ai-kit"
+documentation = "https://docs.rs/tools-kit"
+include = ["src/**", "examples/**", "tests/**", "Cargo.toml", "README.md", "LICENSE"]
+
+[[test]]
+name = "tools_kit_mcp_stdio_server"
+harness = false
+test = false
+required-features = ["mcp-server"]
+
+[features]
+mcp-server = [
+    "dep:axum",
+    "dep:futures-core",
+    "rmcp/server",
+    "rmcp/transport-streamable-http-server",
+    "rmcp/transport-streamable-http-server-session",
+    "tokio/net",
+]
+
+[dependencies]
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio"], optional = true }
+futures-core = { version = "=0.3.32", default-features = false, optional = true }
+http = { workspace = true }
+jsonschema.workspace = true
+rmcp = { version = "1.5", default-features = false, features = ["client", "elicitation", "transport-child-process", "transport-io", "transport-streamable-http-client-reqwest"] }
+schemars = "1"
+serde = { workspace = true, features = ["derive"] }
+serde_path_to_error = "0.1"
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["macros", "process", "rt-multi-thread", "sync", "time"] }
+url = { workspace = true, features = ["serde"] }
+uuid = { workspace = true, features = ["v4"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[package.metadata.docs.rs]
+default-target = "x86_64-unknown-linux-gnu"
+targets = ["x86_64-unknown-linux-gnu"]
+features = ["mcp-server"]

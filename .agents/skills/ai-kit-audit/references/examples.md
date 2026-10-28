@@ -8,7 +8,7 @@ Use these prompts as canonical examples for `ai-kit-audit`.
 Use $ai-kit-audit.
 
 Audit the `ai-kit` workspace for crate-boundary architectural improvements
-between `agent-sdk`, `tool-sdk`, `provider-sdk`, and `storage-sdk`.
+between `agents-kit`, `tools-kit`, `providers-kit`, and `storage-kit`.
 
 Scope mode: `workspace`
 Audit topic: crate-boundary architecture
@@ -23,11 +23,11 @@ identified."
 ```markdown
 Use $ai-kit-audit.
 
-Audit `tool-sdk` for optimization and cleanup opportunities that preserve
+Audit `tools-kit` for optimization and cleanup opportunities that preserve
 public portability and source contracts.
 
 Scope mode: `crate`
-Target crate: `tool-sdk`
+Target crate: `tools-kit`
 
 Return findings with affected files/modules, overlap risk, parallelization
 status, and recommended validation commands.
@@ -38,11 +38,11 @@ status, and recommended validation commands.
 ```markdown
 Use $ai-kit-audit.
 
-Audit `storage-sdk/docs/testing.md` for stale strict-live guidance.
+Audit `storage-kit/docs/testing.md` for stale strict-live guidance.
 
 Scope mode: `paths`
 Target paths:
-- `storage-sdk/docs/testing.md`
+- `storage-kit/docs/testing.md`
 
 If there are no actionable findings, respond exactly:
 `No findings identified.`

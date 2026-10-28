@@ -68,13 +68,13 @@ Run these commands serially from the workspace root after the refresh, with
 feature lanes and native `--locked` behavior:
 
 ```bash
-cargo test --locked -p agent-sdk --test source_contract --all-features -- --nocapture
-cargo test --locked -p provider-sdk --test source_contract --all-features -- --nocapture
-cargo test --locked -p storage-sdk --test source_contract -- --nocapture
-cargo test --locked -p storage-sdk --test source_contract --no-default-features -- --nocapture
-cargo test --locked -p storage-sdk --test source_contract --no-default-features --features qdrant -- --nocapture
-cargo test --locked -p tool-sdk --test source_contract --all-features -- --nocapture
-cargo test --locked -p app-sdk --test public_surface --test docs_examples -- --nocapture --test-threads=1
+cargo test --locked -p agents-kit --test source_contract --all-features -- --nocapture
+cargo test --locked -p providers-kit --test source_contract --all-features -- --nocapture
+cargo test --locked -p storage-kit --test source_contract -- --nocapture
+cargo test --locked -p storage-kit --test source_contract --no-default-features -- --nocapture
+cargo test --locked -p storage-kit --test source_contract --no-default-features --features redb,postgres,surrealdb,sqlite -- --nocapture
+cargo test --locked -p tools-kit --test source_contract --all-features -- --nocapture
+cargo test --locked -p app-kit --test public_surface --test docs_examples -- --nocapture --test-threads=1
 ```
 
 Then run the shared docs gate:

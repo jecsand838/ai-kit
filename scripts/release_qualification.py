@@ -12,7 +12,6 @@ import itertools
 import json
 import os
 from pathlib import Path
-import re
 import subprocess
 import sys
 import time
@@ -56,20 +55,20 @@ class ReleaseQualification:
                 "python3", "-m", "unittest", "scripts.tests.test_release_stage_hooks",
                 "scripts.tests.test_release_evidence", "scripts.tests.test_release_qualification",
                 "scripts.tests.test_import_release_evidence"]),
-            ("storage-local-matrix", ["bash", "storage-sdk/scripts/check.sh", "--all-backends"]),
+            ("storage-local-matrix", ["bash", "storage-kit/scripts/check.sh", "--all-backends"]),
             ("workspace-wrapper", ["bash", "scripts/verify_workspace_strict.sh", *(["--skip-strict-live"] if skip_strict_live else [])]),
         ]
 
     @staticmethod
     def storage_inventory():
-        """Closed inventory of the existing local owner, including negative gates."""
-        backends = ("redb", "postgres", "surrealdb", "sqlite", "qdrant")
-        lanes = ["-", *backends, "redb,postgres,surrealdb,sqlite", "redb,postgres,surrealdb,qdrant"]
-        combinations = [parts for count in range(6) for parts in itertools.combinations(backends, count)]
-        legal = [",".join(parts) or "-" for parts in combinations if not {"sqlite", "qdrant"} <= set(parts)]
-        negative = [",".join(parts) for parts in combinations if {"sqlite", "qdrant"} <= set(parts)]
+        """Closed inventory of the supported local Storage owner."""
+        backends = ("redb", "postgres", "surrealdb", "sqlite")
+        lanes = ["-", *backends, "redb,postgres,surrealdb,sqlite"]
+        combinations = [parts for count in range(len(backends) + 1) for parts in itertools.combinations(backends, count)]
+        legal = [",".join(parts) or "-" for parts in combinations]
+        negative = []
         stages = {
-            "storage.contract.feature_policy": ["python3", "-m", "unittest", "discover", "-s", "storage-sdk/scripts/tests", "-v"],
+            "storage.contract.feature_policy": ["python3", "-m", "unittest", "discover", "-s", "storage-kit/scripts/tests", "-v"],
             "storage.format": ["cargo", "fmt", "--all", "--check"],
         }
         for features in lanes:
@@ -83,25 +82,23 @@ class ReleaseQualification:
                 targets.append("state_store_local")
             if "surrealdb" in selected:
                 targets.append("surreal_partition_deadline")
-            if "qdrant" in selected:
-                targets.append("qdrant_rest_completion")
-            stages["storage.compile." + lane] = ["cargo", "test", "--locked", "-p", "storage-sdk", "--all-targets", "--no-run", *args]
+            stages["storage.compile." + lane] = ["cargo", "test", "--locked", "-p", "storage-kit", "--all-targets", "--no-run", *args]
             for target in targets:
-                stages["storage.test." + lane + "." + target] = ["cargo", "test", "--locked", "-p", "storage-sdk", "--test", target, *args, "--", "--nocapture", "--test-threads=1"]
-            stages["storage.doctest." + lane] = ["cargo", "test", "--locked", "-p", "storage-sdk", "--doc", *args, "--", "--nocapture"]
-            stages["storage.clippy." + lane] = ["cargo", "clippy", "--locked", "-p", "storage-sdk", "--all-targets", *args, "--", "-D", "warnings"]
-            stages["storage.rustdoc." + lane] = ["env", "RUSTDOCFLAGS=-D warnings", "cargo", "doc", "--locked", "-p", "storage-sdk", "--no-deps", *args]
+                stages["storage.test." + lane + "." + target] = ["cargo", "test", "--locked", "-p", "storage-kit", "--test", target, *args, "--", "--nocapture", "--test-threads=1"]
+            stages["storage.doctest." + lane] = ["cargo", "test", "--locked", "-p", "storage-kit", "--doc", *args, "--", "--nocapture"]
+            stages["storage.clippy." + lane] = ["cargo", "clippy", "--locked", "-p", "storage-kit", "--all-targets", *args, "--", "-D", "warnings"]
+            stages["storage.rustdoc." + lane] = ["env", "RUSTDOCFLAGS=-D warnings", "cargo", "doc", "--locked", "-p", "storage-kit", "--no-deps", *args]
         for features in legal:
             lane = "lance" if features == "-" else features.replace(",", "-")
             args = ["--no-default-features", *(["--features", features] if features != "-" else [])]
-            stages["storage.check." + lane] = ["cargo", "check", "--locked", "-p", "storage-sdk", "--all-targets", *args]
+            stages["storage.check." + lane] = ["cargo", "check", "--locked", "-p", "storage-kit", "--all-targets", *args]
         return lanes, legal, negative, stages
 
     def storage_reuse(self, command):
         ident = "storage.owner.local_matrix"
         if ident not in self.bundle["stages"]:
             return None
-        if command != ["bash", "storage-sdk/scripts/check.sh", "--all-backends"]:
+        if command != ["bash", "storage-kit/scripts/check.sh", "--all-backends"]:
             raise EvidenceError("Storage owner reuse requires the exact complete local matrix")
         definition = self.bundle["stages"][ident]
         if (not isinstance(definition, dict) or definition.get("command") != command
@@ -153,34 +150,8 @@ class ReleaseQualification:
                 raise EvidenceError("Storage owner nested stage binding differs: " + stage_id)
             receipt = JsonFile.read(JsonFile.verified(item["receipt"]))
             Stage(self.directory, stage_id, arguments, compiler=self.compiler).matching(receipt)
-        checks = proof["negative"]
-        if not isinstance(checks, list) or len(checks) != len(negative):
-            raise EvidenceError("Storage owner requires all eight negative feature checks")
-        owner_log = JsonFile.verified(prior["log"]).read_text(errors="replace")
-        grades = []
-        for match in re.finditer("STORAGE_NEGATIVE_FEATURE_GRADE=", owner_log):
-            grade, _ = json.JSONDecoder(object_pairs_hook=JsonFile.unique_pairs).raw_decode(owner_log[match.end():])
-            grades.append(grade)
-        if len(grades) != len(negative):
-            raise EvidenceError("original Storage owner log lacks its eight negative outcomes")
-        observed = set()
-        diagnostic = re.compile(r"send_guard.*deadlock_detection|deadlock_detection.*send_guard|sqlite.*qdrant.*(incompatible|cannot)")
-        for item in checks:
-            if not isinstance(item, dict) or set(item) != {"receipt", "log"}:
-                raise EvidenceError("malformed negative feature evidence")
-            receipt = JsonFile.read(JsonFile.verified(item["receipt"]))
-            features = receipt.get("features")
-            expected_command = ["cargo", "check", "--locked", "-p", "storage-sdk", "--lib", "--no-default-features", "--features", features]
-            if (features not in negative or features in observed or receipt.get("schema") != 1
-                    or receipt.get("status") != "PASS" or type(receipt.get("returncode")) is not int
-                    or receipt["returncode"] == 0 or receipt.get("command") != expected_command
-                    or receipt.get("log") != item["log"] or receipt not in grades):
-                raise EvidenceError("negative feature check is missing, duplicated or unsuccessful")
-            text = JsonFile.verified(item["log"]).read_text(errors="replace")
-            reported = receipt.get("expected_diagnostic")
-            if not isinstance(reported, str) or not diagnostic.search(reported) or reported not in text:
-                raise EvidenceError("negative feature check lacks its required compiler diagnostic")
-            observed.add(features)
+        if proof["negative"] != []:
+            raise EvidenceError("Storage owner contains obsolete negative feature evidence")
         return {"execution": "REUSED", "reused_from": reference,
                 "original_run_report": proof["original_run_report"], "log": prior["log"],
                 "completion": {"schema": 1, "owner_proof": reference, "lanes": len(lanes),
@@ -209,8 +180,8 @@ class ReleaseQualification:
             "bundle": {"path": str(self.bundle_path), "sha256": JsonFile.digest(self.bundle_path)},
             "commands": [], "clean_checkout": "REQUIRED_SEPARATELY_AT_FINAL_COMMIT",
             "scope": "QUALIFIED_NONLIVE" if self.skip_strict_live else "FULL_CANONICAL_GATES",
-            "excluded_live_targets": ["agent-sdk/strict_live", "provider-sdk/strict_live",
-                "storage-sdk/strict_live", "tool-sdk/strict_live", "app-sdk/workflow_live"] if self.skip_strict_live else [],
+            "excluded_live_targets": ["agents-kit/strict_live", "providers-kit/strict_live",
+                "storage-kit/strict_live", "tools-kit/strict_live", "app-kit/workflow_live"] if self.skip_strict_live else [],
         }
         JsonFile.write(self.directory / "report.json", report)
         saved = {name: os.environ.get(name) for name in ("AI_KIT_RELEASE_RECEIPT_RUN", "CARGO_INCREMENTAL", "CARGO_BUILD_JOBS")}

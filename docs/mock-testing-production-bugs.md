@@ -20,14 +20,14 @@ release qualification remains unproven.
 
 ## MOCK-AGENT-001 — an unpolled unary prompt observer blocks completed cancellation
 
-**Affected crate/status:** Custom `agent-sdk`; resolved by the supplied patch, with its required regression enabled.
+**Affected crate/status:** Custom `agents-kit`; resolved by the supplied patch, with its required regression enabled.
 
-**Contract and expected behavior.** [Runtime Abort](../agent-sdk/specs/RUNTIME.md#abort)
+**Contract and expected behavior.** [Runtime Abort](../agents-kit/specs/RUNTIME.md#abort)
 requires success after the captured generation reaches a valid durable terminal
 and cancellation dispatch settles. The prompt waiter alone receives its result.
-[Foreground prompt](../agent-sdk/specs/CONVERSATION.md#foreground-prompt),
-[ConversationBackend](../agent-sdk/src/conversation.rs), and the
-[Custom architecture](../agent-sdk/ARCHITECTURE.md#custom-prompt-loop) preserve
+[Foreground prompt](../agents-kit/specs/CONVERSATION.md#foreground-prompt),
+[ConversationBackend](../agents-kit/src/conversation.rs), and the
+[Custom architecture](../agents-kit/ARCHITECTURE.md#custom-prompt-loop) preserve
 runtime ownership independently of observation. Abort must complete while a
 unary reply remains unread; later reading returns `Cancelled`, without duplicate effects.
 
@@ -38,7 +38,7 @@ The Tool had already cancelled once. This produced false cancellation timeouts
 and implicated cleanup paths waiting for the same settlement.
 
 **Required tests.** `abort_pending_interaction_cancels_exactly_one_handler` in
-[custom_mock_composition.rs](../agent-sdk/tests/custom_mock_composition.rs)
+[custom_mock_composition.rs](../agents-kit/tests/custom_mock_composition.rs)
 retains the unpolled observer, repeats abort, consumes `Cancelled`, verifies one
 cancellation and no interaction submission, and cleans up before asserting success.
 `polling_unary_observation_concurrently_allows_abort_to_join_one_cancelled_handler`
@@ -47,9 +47,9 @@ is the concurrent-observation control; streaming reuse is covered by
 The added unread-reply-drop case requires owned cleanup after abort.
 
 ```sh
-cargo test --locked -p agent-sdk --test custom_mock_composition abort_pending_interaction_cancels_exactly_one_handler -- --exact --nocapture
-cargo test --locked -p agent-sdk --test custom_mock_composition
-cargo test --locked -p agent-sdk --test custom_prompt_runtime --all-features
+cargo test --locked -p agents-kit --test custom_mock_composition abort_pending_interaction_cancels_exactly_one_handler -- --exact --nocapture
+cargo test --locked -p agents-kit --test custom_mock_composition
+cargo test --locked -p agents-kit --test custom_prompt_runtime --all-features
 ```
 
 **Fixture mistakes ruled out.** The scripted handler cancels immediately with no
@@ -98,8 +98,8 @@ See `target/mock-agent-001-resolution/auth-resolution-result.json`; owned servic
 
 **Affected crate/status:** Custom Agent; repaired in the authorized follow-up
 from `2da7fcaf`. This is separate from M001's unread-reply settlement.
-[Runtime Abort](../agent-sdk/specs/RUNTIME.md#abort) and the
-[Custom cancellation contract](../agent-sdk/specs/custom/CONVERSATION.md#cancellation-and-durability)
+[Runtime Abort](../agents-kit/specs/RUNTIME.md#abort) and the
+[Custom cancellation contract](../agents-kit/specs/custom/CONVERSATION.md#cancellation-and-durability)
 exclude later prompts from a captured target and require owned handler cleanup.
 
 **Expected and observed behavior.** Hold an abort observer after its admitted
@@ -127,7 +127,7 @@ state, durable schemas, unary acknowledgement, and close/shutdown quiescence are
 unchanged.
 
 **Required regressions.** The former supplemental probe is now committed in
-[custom_mock_composition.rs](../agent-sdk/tests/custom_mock_composition.rs):
+[custom_mock_composition.rs](../agents-kit/tests/custom_mock_composition.rs):
 
 - `delayed_abort_does_not_cancel_a_successor_interaction` requires successful old
   abort, normal successor completion, two resolved interactions, zero
@@ -151,8 +151,8 @@ unchanged.
   supplementary cleanup failure.
 
 ```sh
-cargo test --locked -p agent-sdk --test custom_mock_composition delayed_abort_does_not_cancel_a_successor_interaction -- --exact --nocapture
-cargo test --locked -p agent-sdk --test custom_mock_composition
+cargo test --locked -p agents-kit --test custom_mock_composition delayed_abort_does_not_cancel_a_successor_interaction -- --exact --nocapture
+cargo test --locked -p agents-kit --test custom_mock_composition
 ```
 
 **Fixture mistakes ruled out.** The admitted commit gate is settled independently
@@ -188,9 +188,9 @@ and does not claim native Codex/OpenCode or full strict-live qualification.
 ## MOCK-APP-001 — a conflicting read observation permanently fails shutdown
 
 **Affected crate/status:** App; independently reproduced and repaired in the
-follow-up from `2da7fcaf`. [App shutdown](../app-sdk/specs/APP.md#shutdown) owns
+follow-up from `2da7fcaf`. [App shutdown](../app-kit/specs/APP.md#shutdown) owns
 bounded drain/cancellation and recoverable read observations; the
-[storage architecture](../app-sdk/ARCHITECTURE.md) retains serializable snapshot
+[storage architecture](../app-kit/ARCHITECTURE.md) retains serializable snapshot
 validation and fresh deletion/generation fences.
 
 **Expected and observed behavior.** Shutdown captures a nonempty read-only run
@@ -210,7 +210,7 @@ conversion, mutation retries, uncertain receipts, rollback vetoes, semantic
 conflicts, and deletion/generation fences are unchanged.
 
 **Required regressions.** In
-[workflow_mock_composition.rs](../app-sdk/tests/workflow_mock_composition.rs),
+[workflow_mock_composition.rs](../app-kit/tests/workflow_mock_composition.rs),
 `drain_shutdown_reobserves_a_conflicting_read_only_transaction` and
 `cancelling_shutdown_reobserves_a_conflicting_read_only_transaction` hold the
 next nonempty read-only commit, complete the real gated action, then release the
@@ -223,9 +223,9 @@ requires a non-conflict serialization failure to remain `Integration` on both
 initial and repeated shutdown observations.
 
 ```sh
-cargo test --locked -p app-sdk --test workflow_mock_composition drain_shutdown_reobserves_a_conflicting_read_only_transaction -- --exact --nocapture
-cargo test --locked -p app-sdk --test workflow_mock_composition cancelling_shutdown_reobserves_a_conflicting_read_only_transaction -- --exact --nocapture
-cargo test --locked -p app-sdk --test workflow_mock_composition
+cargo test --locked -p app-kit --test workflow_mock_composition drain_shutdown_reobserves_a_conflicting_read_only_transaction -- --exact --nocapture
+cargo test --locked -p app-kit --test workflow_mock_composition cancelling_shutdown_reobserves_a_conflicting_read_only_transaction -- --exact --nocapture
+cargo test --locked -p app-kit --test workflow_mock_composition
 ```
 
 **Fixture mistakes ruled out.** No conflict is injected into the two regressions:
@@ -246,7 +246,7 @@ expectation, not the production failures. First repaired full-target validation
 passed all 34 App cases in `20261025T234102Z-19e03926/report.json`.
 
 The historical primary log
-`target/mock-contracts/20261025T223224Z-332b9212/32-app-sdk-workflow_mock_composition.log`
+`target/mock-contracts/20261025T223224Z-332b9212/32-app-kit-workflow_mock_composition.log`
 failed `state_workflow_retains_checkpoints_restores_independently_and_deletes_explicitly`
 at shutdown. Its assertion remains unchanged. That log alone does not establish
 which internal read produced its conflict; MOCK-APP-001 is classified from the

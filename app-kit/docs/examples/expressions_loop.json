@@ -1,0 +1,66 @@
+{
+  "schema": "app-kit.workflow/v2",
+  "id": "expressions_loop",
+  "revision": "r1",
+  "state": {"count": 0, "quotient": 0, "remainder": 0},
+  "required": ["count", "quotient", "remainder"],
+  "reducers": {
+    "count": "reject_concurrent",
+    "quotient": "reject_concurrent",
+    "remainder": "reject_concurrent"
+  },
+  "entry": "increment",
+  "nodes": [
+    {
+      "id": "increment",
+      "step": {
+        "kind": "state",
+        "mutations": [
+          {"kind": "increment", "target": "count", "value": {"kind": "literal", "value": 1}}
+        ]
+      }
+    },
+    {
+      "id": "calculate",
+      "step": {
+        "kind": "state",
+        "mutations": [
+          {
+            "kind": "assign",
+            "target": "quotient",
+            "value": {
+              "kind": "divide",
+              "left": {"kind": "literal", "value": 5},
+              "right": {"kind": "literal", "value": 2}
+            }
+          },
+          {
+            "kind": "assign",
+            "target": "remainder",
+            "value": {
+              "kind": "remainder",
+              "left": {"kind": "literal", "value": -5},
+              "right": {"kind": "literal", "value": 2}
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "routes": {
+    "increment": {
+      "mode": "first",
+      "branches": [
+        {
+          "when": {
+            "kind": "less_than",
+            "left": {"kind": "state", "path": "count"},
+            "right": {"kind": "literal", "value": 3}
+          },
+          "target": {"kind": "node", "id": "increment"}
+        },
+        {"target": {"kind": "node", "id": "calculate"}}
+      ]
+    }
+  }
+}

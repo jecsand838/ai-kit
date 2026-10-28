@@ -13,15 +13,15 @@ the plan or editing files.
 
 ## Add Contract Skills When
 
-- `agent-sdk/**` public rustdoc or contract tests are in scope:
-  `agent-sdk-change-contract`
-- `provider-sdk/**` public rustdoc or contract tests are in scope:
-  `provider-sdk-change-contract`
-- `storage-sdk/**` public rustdoc or contract tests are in scope:
-  `storage-sdk-change-contract`
-- `tool-sdk/**` public rustdoc or contract tests are in scope:
-  `tool-sdk-change-contract`
-- `app-sdk/**`: read `app-sdk/AGENTS.md` and the owning App specifications;
+- `agents-kit/**` public rustdoc or contract tests are in scope:
+  `agents-kit-change-contract`
+- `providers-kit/**` public rustdoc or contract tests are in scope:
+  `providers-kit-change-contract`
+- `storage-kit/**` public rustdoc or contract tests are in scope:
+  `storage-kit-change-contract`
+- `tools-kit/**` public rustdoc or contract tests are in scope:
+  `tools-kit-change-contract`
+- `app-kit/**`: read `app-kit/AGENTS.md` and the owning App specifications;
   load `ai-kit-public-surface-contract`. App has no separate change-contract
   skill; preserve its five static workflow seams and exact exceptions.
 
@@ -30,17 +30,17 @@ Load every crate contract skill that matches the requested scope.
 ## Add Research Skills Only When
 
 - App graph/workflow semantics, checkpoint/recovery behavior, rurr evidence,
-  or lower-crate composition facts matter: `app-sdk-research`
+  or lower-crate composition facts matter: `app-kit-research`
 - provider behavior, model support, or live examples depend on upstream facts:
-  `provider-sdk-research`
+  `providers-kit-research`
 - backend behavior, capability behavior, or live examples depend on upstream
   facts:
-  `storage-sdk-research`
+  `storage-kit-research`
 - Codex App Server or OpenCode behavior affects the documented public surface:
-  `agent-sdk-research`
+  `agents-kit-research`
 - MCP protocol, provider-hosted tool behavior, local runtime semantics, or
   composite routing affects the documented public surface:
-  `tool-sdk-research`
+  `tools-kit-research`
 
 Do not load research skills for purely repo-local rustdoc cleanup that current
 tests and source already settle.

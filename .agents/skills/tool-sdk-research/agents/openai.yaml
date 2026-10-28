@@ -1,6 +1,0 @@
-interface:
-  display_name: "tool-sdk Research"
-  short_description: "Local/MCP execution and independent MCP server facts."
-  default_prompt: "Use $tool-sdk-research to ground tool-sdk changes in MCP, Local tool, schema, lifecycle, and Rust runtime facts."
-policy:
-  allow_implicit_invocation: true

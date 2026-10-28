@@ -19,7 +19,7 @@ Use this phase to implement the work described by scoped inline TODO comments.
 - Do not add shims, hacks, escape hatches, synthetic behavior, deterministic
   shortcuts, or compatibility bloat.
 - Do not use macro-based reductive refactors. The only macro exception is
-  `tool-sdk::tool!`.
+  `tools-kit::tool!`.
 - Keep backend-, provider-, database-, agent-, runtime-, and source-specific
   behavior behind owning crate boundaries.
 - Preserve explicit receiver-method dispatch through the owning behavioral

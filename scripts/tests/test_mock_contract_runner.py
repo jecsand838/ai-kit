@@ -27,7 +27,7 @@ class Commands:
     def artifacts(self, root):
         rows = []
         for crate, targets in RUNNER.TARGETS.items():
-            for target in (*targets, *(("compile_contract",) if crate == "app-sdk" else ())):
+            for target in (*targets, *(("compile_contract",) if crate == "app-kit" else ())):
                 executable = root / "target/fixture-bin" / crate / target
                 executable.parent.mkdir(parents=True, exist_ok=True)
                 executable.write_text("fixture binary\n")
@@ -39,7 +39,7 @@ class Commands:
                 }
                 if target == "compile_contract" and self.artifact_fault == "compile-only-missing":
                     continue
-                if crate == "provider-sdk":
+                if crate == "providers-kit":
                     if self.artifact_fault in ("missing", "partial"):
                         continue
                     if self.artifact_fault == "manifest":
@@ -99,13 +99,15 @@ class RunnerTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
+        (self.root / "scripts").mkdir()
+        (self.root / "scripts/security_exceptions.toml").write_text("advisories = []\n")
         for crate, targets in RUNNER.TARGETS.items():
             directory = self.root / crate / "tests"
             directory.mkdir(parents=True)
             for target in targets:
                 (directory / (target + ".rs")).write_text("// fixture target marker\n")
             (self.root / crate / "Cargo.toml").write_text("[package]\n")
-        (self.root / "app-sdk/tests/compile_contract.rs").write_text("// compile-only fixture\n")
+        (self.root / "app-kit/tests/compile_contract.rs").write_text("// compile-only fixture\n")
 
     def run_fixture(self, fault=None, selected=None, mode="mocks", artifact_fault=None, gate_fault=None):
         commands = Commands(fault, artifact_fault, gate_fault)
@@ -127,18 +129,18 @@ class RunnerTests(unittest.TestCase):
                 continue
             self.assertIn("--locked", command)
             self.assertEqual(command.count("--test"), 1)
-            self.assertEqual("--no-default-features" in command, "storage-sdk" in command)
+            self.assertEqual("--no-default-features" in command, "storage-kit" in command)
             self.assertNotIn("--all-features", command)
 
     def test_scoped_report_does_not_claim_workspace_pass(self):
-        result, report, commands, _ = self.run_fixture(selected=("tool-sdk",))
+        result, report, commands, _ = self.run_fixture(selected=("tools-kit",))
         self.assertEqual(result, 0)
         self.assertEqual(report["scope"], "scoped")
-        self.assertEqual(report["crates"], ["tool-sdk"])
-        self.assertFalse(any("app-sdk" in call for call in commands.calls))
+        self.assertEqual(report["crates"], ["tools-kit"])
+        self.assertFalse(any("app-kit" in call for call in commands.calls))
 
     def test_compiler_failure_preserves_independent_target_execution(self):
-        result, report, commands, _ = self.run_fixture("compiler", ("agent-sdk",))
+        result, report, commands, _ = self.run_fixture("compiler", ("agents-kit",))
         self.assertEqual(result, 1)
         self.assertEqual(report["status"], "FAIL")
         self.assertTrue(any("custom_mock_composition" in call and "--list" not in call for call in commands.calls))
@@ -146,7 +148,7 @@ class RunnerTests(unittest.TestCase):
     def test_behavioral_faults_cannot_be_pass_evidence(self):
         for fault in ("failure", "ignored", "filtered", "empty", "wrong-name", "crash"):
             with self.subTest(fault=fault):
-                result, report, _, _ = self.run_fixture(fault, ("tool-sdk",))
+                result, report, _, _ = self.run_fixture(fault, ("tools-kit",))
                 self.assertEqual(result, 1)
                 self.assertNotEqual(report["status"], "PASS")
 
@@ -170,35 +172,25 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(stage["status"], "PASS")
 
     def test_source_mutation_invalidates_the_receipt(self):
-        runner = RUNNER.Runner(self.root, ("tool-sdk",), "mocks", Commands())
-        source = self.root / "tool-sdk/tests/mock_contracts.rs"
+        runner = RUNNER.Runner(self.root, ("tools-kit",), "mocks", Commands())
+        source = self.root / "tools-kit/tests/mock_contracts.rs"
         with patch.object(runner, "mocks", side_effect=lambda: source.write_text("// changed\n")), contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(runner.run(), 1)
         self.assertEqual(runner.report["status"], "INCOMPLETE")
 
-    def test_verified_patch_binary_inputs_and_modes_change_fingerprint(self):
-        relative = "third-party/security/arrow-ipc-58.4.1/fixture.bin"
-        source = self.root / relative
-        source.parent.mkdir(parents=True)
-        source.write_bytes(b"original compressed bytes")
-        runner = RUNNER.Runner(self.root, ("tool-sdk",), "mocks", Commands())
-        with patch.object(RUNNER, "SecurityPatches", create=True) as patches:
-            patches.return_value.inputs.return_value = (relative,)
-            before = runner.fingerprint()
-            source.write_bytes(b"different compressed bytes")
-            after_content = runner.fingerprint()
-            self.assertNotEqual(before, after_content)
-            source.chmod(0o755)
-            self.assertNotEqual(after_content, runner.fingerprint())
-            patches.assert_called_with(self.root)
+    def test_security_exception_changes_invalidate_fingerprint(self):
+        source = self.root / "scripts/security_exceptions.toml"
+        runner = RUNNER.Runner(self.root, ("tools-kit",), "mocks", Commands())
+        before = runner.fingerprint()
+        source.write_text('advisories = ["RUSTSEC-2026-0001"]\n')
+        self.assertNotEqual(before, runner.fingerprint())
 
-    def test_invalid_patch_provenance_prevents_any_cargo_execution(self):
+    def test_invalid_exception_policy_prevents_any_cargo_execution(self):
         commands = Commands()
         runner = RUNNER.Runner(self.root, tuple(RUNNER.TARGETS), "ci-tests", commands)
-        with patch.object(RUNNER, "SecurityPatches", create=True) as patches:
-            patches.return_value.inputs.side_effect = ValueError("patch source hash differs")
-            with self.assertRaisesRegex(ValueError, "patch source hash differs"):
-                runner.run()
+        (self.root / "scripts/security_exceptions.toml").write_text('advisories = ["RUSTSEC-2026"]\n')
+        with self.assertRaisesRegex(ValueError, "full RUSTSEC"):
+            runner.run()
         self.assertFalse(any(call[0] == "cargo" for call in commands.calls))
 
     def test_ci_bootstrap_runs_security_and_wiring_regressions(self):
@@ -212,21 +204,21 @@ class RunnerTests(unittest.TestCase):
             if command[0] in ("git", "rustc"):
                 return subprocess.CompletedProcess(command, 1)
             return commands(command, **kwargs)
-        runner = RUNNER.Runner(self.root, ("tool-sdk",), "mocks", unavailable)
+        runner = RUNNER.Runner(self.root, ("tools-kit",), "mocks", unavailable)
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(runner.run(), 1)
         self.assertEqual(runner.report["status"], "FAIL")
 
     def test_missing_target_is_incomplete_and_other_targets_run(self):
-        (self.root / "app-sdk/tests/mock_contracts.rs").unlink()
-        result, report, commands, _ = self.run_fixture(selected=("app-sdk",))
+        (self.root / "app-kit/tests/mock_contracts.rs").unlink()
+        result, report, commands, _ = self.run_fixture(selected=("app-kit",))
         self.assertEqual(result, 1)
         self.assertEqual(report["status"], "INCOMPLETE")
         self.assertTrue(any("workflow_mock_composition" in call for call in commands.calls))
 
     def test_log_open_failure_never_executes_or_passes(self):
         commands = Commands()
-        runner = RUNNER.Runner(self.root, ("tool-sdk",), "mocks", commands)
+        runner = RUNNER.Runner(self.root, ("tools-kit",), "mocks", commands)
         (runner.directory / "1-capture.log").mkdir()
         with contextlib.redirect_stdout(io.StringIO()):
             stage, _ = runner.command("capture", ["cargo", "test"])
@@ -235,7 +227,7 @@ class RunnerTests(unittest.TestCase):
 
     def test_timeout_and_launch_failure_are_incomplete(self):
         for error in (subprocess.TimeoutExpired("cargo", 7200), FileNotFoundError("cargo")):
-            runner = RUNNER.Runner(self.root, ("tool-sdk",), "mocks")
+            runner = RUNNER.Runner(self.root, ("tools-kit",), "mocks")
             with patch.object(runner, "execute", side_effect=error), contextlib.redirect_stdout(io.StringIO()):
                 stage, _ = runner.command("launch", ["cargo", "test"])
             self.assertEqual(stage["status"], "INCOMPLETE")
@@ -402,7 +394,7 @@ class RunnerTests(unittest.TestCase):
                 self.assertNotEqual(report["status"], "PASS")
                 executions = [call for call in commands.calls if "fixture-bin" in Path(call[0]).parts]
                 self.assertTrue(executions, "unaffected targets must still execute")
-                self.assertFalse(any(Path(call[0]).parent.name == "provider-sdk" for call in executions))
+                self.assertFalse(any(Path(call[0]).parent.name == "providers-kit" for call in executions))
 
     def test_ci_partial_build_failure_keeps_other_targets_and_overall_failure(self):
         result, report, _, _ = self.run_fixture(mode="ci", artifact_fault="partial")
@@ -442,8 +434,8 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(runner.environment["CARGO_INCREMENTAL"], "0")
 
     def test_fresh_runs_never_reuse_pass_receipts(self):
-        _, _, _, first = self.run_fixture(selected=("tool-sdk",))
-        result, _, commands, second = self.run_fixture("failure", ("tool-sdk",))
+        _, _, _, first = self.run_fixture(selected=("tools-kit",))
+        result, _, commands, second = self.run_fixture("failure", ("tools-kit",))
         self.assertNotEqual(first.directory, second.directory)
         self.assertEqual(result, 1)
         self.assertEqual(len(commands.calls), 5)
@@ -451,9 +443,9 @@ class RunnerTests(unittest.TestCase):
     def test_invalid_cli_arguments_fail_before_execution(self):
         for args in (("mocks", "--crate", "unknown"), ("mocks", "case_filter"),
                      ("mocks", "--ignored"), ("mocks", "--crate"),
-                     ("ci", "--crate", "tool-sdk"), ("mocks", "--cr", "tool-sdk"),
-                     ("ci-tests", "--crate", "tool-sdk"), ("ci-tests", "case_filter"),
-                     ("ci-lint", "--crate", "tool-sdk"), ("ci-lint", "--all-targets")):
+                     ("ci", "--crate", "tools-kit"), ("mocks", "--cr", "tools-kit"),
+                     ("ci-tests", "--crate", "tools-kit"), ("ci-tests", "case_filter"),
+                     ("ci-lint", "--crate", "tools-kit"), ("ci-lint", "--all-targets")):
             with self.subTest(args=args), contextlib.redirect_stderr(io.StringIO()):
                 with self.assertRaises(SystemExit) as failure:
                     RUNNER.Runner.main(args)

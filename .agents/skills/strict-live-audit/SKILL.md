@@ -25,8 +25,8 @@ scripts, or README and `AGENTS.md` validation guidance.
 
 1. Confirm every canonical command uses its owning crate's supported feature
    lane. Use `--all-features` only where the crate contract permits it; keep
-   Storage Lance-only plus selected alternative lanes separate; never combine
-   SQLite and Qdrant. Verify actual nonempty feature-selected inventories.
+   Storage Lance-only plus explicit supported alternative lanes; never use
+   Storage `--all-features`. Verify actual nonempty feature-selected inventories.
 2. Confirm strict-live suites live under crate `/tests`.
 3. Confirm strict-live suites use real services and fail on missing env instead
    of skipping.

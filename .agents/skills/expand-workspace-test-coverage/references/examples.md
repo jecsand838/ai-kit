@@ -30,7 +30,7 @@ mkdir -p /tmp/codex-skill-forwardtest
 CODEX_HOME=/tmp/codex-skill-forwardtest codex exec --ephemeral --sandbox read-only \
   -C /Users/connorsanders/scratch/ai-kit \
   -o /tmp/expand-workspace-full.txt \
-  $'Use $expand-workspace-test-coverage. Start from these accepted workspace test coverage findings and produce a decision-complete plan.\n\n1. agent-sdk strict-live coverage does not exercise abort, command execution, and approval-control paths.\n2. provider-sdk normalizer helpers and file/live flows need broader unit and strict-live coverage.\n3. storage-sdk shared pagination helpers, Lance codecs, and Qdrant adapter branches need narrower unit coverage.\n\nPlan only; do not implement in this read-only boundary check. Do not restate the audit.'
+  $'Use $expand-workspace-test-coverage. Start from these accepted workspace test coverage findings and produce a decision-complete plan.\n\n1. agents-kit strict-live coverage does not exercise abort, command execution, and approval-control paths.\n2. providers-kit normalizer helpers and file/live flows need broader unit and strict-live coverage.\n3. storage-kit shared pagination helpers, Lance codecs, and SurrealDB adapter branches need narrower unit coverage.\n\nPlan only; do not implement in this read-only boundary check. Do not restate the audit.'
 ```
 
 Expected checks:
@@ -47,14 +47,14 @@ mkdir -p /tmp/codex-skill-forwardtest
 CODEX_HOME=/tmp/codex-skill-forwardtest codex exec --ephemeral --sandbox read-only \
   -C /Users/connorsanders/scratch/ai-kit \
   -o /tmp/expand-workspace-storage.txt \
-  $'Use $expand-workspace-test-coverage. Plan a storage-sdk-only resolution for these accepted findings.\n\n1. storage-sdk core pagination helpers need direct unit coverage for invalid page tokens and overfetch trimming.\n2. storage-sdk Qdrant adapter coverage needs branch-local tests for projection shaping and merge rejection.\n\nPlan only; do not implement in this read-only boundary check.'
+  $'Use $expand-workspace-test-coverage. Plan a storage-kit-only resolution for these accepted findings.\n\n1. storage-kit core pagination helpers need direct unit coverage for invalid page tokens and overfetch trimming.\n2. storage-kit SurrealDB adapter coverage needs branch-local tests for projection shaping and invalid-query rejection.\n\nPlan only; do not implement in this read-only boundary check.'
 ```
 
 Expected checks:
 
-- The response stays anchored to `storage-sdk`.
-- The response loads `storage-sdk-change-contract`,
-  `storage-sdk-research`, and the matching Rust testing guidance.
+- The response stays anchored to `storage-kit`.
+- The response loads `storage-kit-change-contract`,
+  `storage-kit-research`, and the matching Rust testing guidance.
 - The response does not broaden into unrelated workspace churn.
 
 ## Boundary Check

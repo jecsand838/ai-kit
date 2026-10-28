@@ -13,7 +13,7 @@ For each completed worker:
 5. Reject or send back work that:
    - changed behavior during a comment-only phase
    - left scoped TODO markers unresolved during implementation
-   - introduced macros outside `tool-sdk::tool!`
+   - introduced macros outside `tools-kit::tool!`
    - added shims, hacks, synthetic behavior, or compatibility bloat
    - leaked backend- or provider-specific behavior through public APIs
    - skipped required validation without a concrete blocker

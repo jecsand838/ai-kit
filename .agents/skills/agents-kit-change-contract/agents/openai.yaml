@@ -1,0 +1,6 @@
+interface:
+  display_name: "agents-kit Change Contract"
+  short_description: "agents-kit rules, validation, and portable-surface checks."
+  default_prompt: "Use $agents-kit-change-contract to enforce agents-kit crate rules, validation, and public-surface contract changes."
+policy:
+  allow_implicit_invocation: true

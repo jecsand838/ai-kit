@@ -1,6 +1,6 @@
 ---
 name: expand-workspace-test-coverage
-description: "Plan and implement ai-kit workspace test coverage improvements from concrete findings, including unit-level, primary public-trait mocks, integration, strict-live, docs, and completion-gate changes, then run the authorized validation gates and address exposed production defects within the task scope. Use when the user explicitly wants to execute previously identified workspace test coverage work across agent-sdk, provider-sdk, storage-sdk, tool-sdk, and app-sdk. Prefer plan mode; do not use for audit-only requests or when no concrete findings exist."
+description: "Plan and implement ai-kit workspace test coverage improvements from concrete findings, including unit-level, primary public-trait mocks, integration, strict-live, docs, and completion-gate changes, then run the authorized validation gates and address exposed production defects within the task scope. Use when the user explicitly wants to execute previously identified workspace test coverage work across agents-kit, providers-kit, storage-kit, tools-kit, and app-kit. Prefer plan mode; do not use for audit-only requests or when no concrete findings exist."
 ---
 
 # Expand Workspace Test Coverage
@@ -13,8 +13,8 @@ validation changes, with production fixes only within the authorized scope.
 ## Trigger Boundary
 
 Use this skill when the user explicitly wants to execute previously identified
-test coverage work across `agent-sdk`, `provider-sdk`, `storage-sdk`,
-`tool-sdk`, and `app-sdk`. Do not use it for a fresh audit, vague brainstorming,
+test coverage work across `agents-kit`, `providers-kit`, `storage-kit`,
+`tools-kit`, and `app-kit`. Do not use it for a fresh audit, vague brainstorming,
 or requests that do not start from concrete findings or a bounded coverage goal.
 
 ## Prerequisites

@@ -1,6 +1,0 @@
-interface:
-  display_name: "storage-sdk Change Contract"
-  short_description: "storage-sdk rules, validation, and backend-portability checks."
-  default_prompt: "Use $storage-sdk-change-contract to enforce storage-sdk crate rules, validation, and backend-portability contract changes."
-policy:
-  allow_implicit_invocation: true

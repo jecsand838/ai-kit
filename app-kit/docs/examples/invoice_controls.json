@@ -1,0 +1,14 @@
+{
+  "schema": "app-kit.workflow/v2",
+  "id": "invoice_controls",
+  "revision": "r1",
+  "state": {"unit_price": 7, "total": 0},
+  "required": ["unit_price", "total"],
+  "reducers": {"unit_price": "reject_concurrent", "total": "reject_concurrent"},
+  "entry": "calculate",
+  "nodes": [
+    {"id": "calculate", "step": {"kind": "action", "action": "invoice", "revision": "r1", "project_result": false}},
+    {"id": "recalculate", "step": {"kind": "action", "action": "invoice", "revision": "r1", "project_result": false}}
+  ],
+  "routes": {"calculate": {"mode": "first", "branches": [{"target": {"kind": "node", "id": "recalculate"}}]}}
+}

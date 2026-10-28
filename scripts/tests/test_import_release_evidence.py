@@ -18,12 +18,13 @@ class LegacyImportTests(unittest.TestCase):
         self.root = Path(directory.name).resolve()
         self.evidence = self.root / "target/evidence"
         self.evidence.mkdir(parents=True)
-        sources = {"Cargo.toml": '[workspace]\nmembers = ["provider-sdk"]\n',
+        sources = {"scripts/security_exceptions.toml": "advisories = []\n",
+                   "Cargo.toml": '[workspace]\nmembers = ["providers-kit"]\n',
                    "Cargo.lock": "# locked fixture\n", "rust-toolchain.toml": '[toolchain]\nchannel = "stable"\n',
-                   "provider-sdk/Cargo.toml": '[package]\nname = "provider-sdk"\nversion = "0.1.0"\n',
-                   "provider-sdk/src/lib.rs": "// original fixture source\n",
-                   "provider-sdk/tests/first.rs": "// first integration fixture\n",
-                   "provider-sdk/tests/second.rs": "// independent integration fixture\n"}
+                   "providers-kit/Cargo.toml": '[package]\nname = "providers-kit"\nversion = "0.0.1"\n',
+                   "providers-kit/src/lib.rs": "// original fixture source\n",
+                   "providers-kit/tests/first.rs": "// first integration fixture\n",
+                   "providers-kit/tests/second.rs": "// independent integration fixture\n"}
         for name, contents in sources.items():
             path = self.root / name
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -33,7 +34,7 @@ class LegacyImportTests(unittest.TestCase):
         self.git("-c", "user.name=Evidence Fixture", "-c", "user.email=fixture@example.invalid",
                  "-c", "core.hooksPath=/dev/null", "commit", "-qm", "retained fixture snapshot")
         self.revision = self.git("rev-parse", "HEAD").strip()
-        self.command = ["cargo", "test", "--locked", "-p", "provider-sdk", "--test", "first", "--", "--nocapture"]
+        self.command = ["cargo", "test", "--locked", "-p", "providers-kit", "--test", "first", "--", "--nocapture"]
         self.log = self.evidence / "original.log"
         self.log.write_text("     Running tests/first.rs (target/debug/deps/first-fixture)\n\nrunning 1 test\n"
                             "test confirms_contract ... ok\n\n"
@@ -110,12 +111,12 @@ class LegacyImportTests(unittest.TestCase):
         self.assertEqual(imported["scope_override"]["audit"], self.ref(self.approval_path))
 
     def test_changed_source_cannot_be_imported(self):
-        (self.root / "provider-sdk/src/lib.rs").write_text("// changed production\n")
+        (self.root / "providers-kit/src/lib.rs").write_text("// changed production\n")
         with self.assertRaisesRegex(EvidenceError, "snapshot differs"):
             self.execute()
 
     def test_unrelated_target_can_be_excluded_only_by_exact_review(self):
-        path = "provider-sdk/tests/second.rs"
+        path = "providers-kit/tests/second.rs"
         self.approval["paths"].remove(path)
         self.approval["excluded_paths"][path] = "Separate integration target; selected first.rs does not include it."
         self.persist()
@@ -123,7 +124,7 @@ class LegacyImportTests(unittest.TestCase):
         self.execute()
 
     def test_missing_exclusion_reason_fails(self):
-        self.approval["paths"].remove("provider-sdk/tests/second.rs")
+        self.approval["paths"].remove("providers-kit/tests/second.rs")
         self.persist()
         with self.assertRaisesRegex(EvidenceError, "explain every omitted"):
             self.execute()
@@ -190,13 +191,13 @@ class LegacyImportTests(unittest.TestCase):
             self.execute()
 
     def test_changed_executable_mode_is_a_source_change(self):
-        (self.root / "provider-sdk/tests/first.rs").chmod(0o755)
+        (self.root / "providers-kit/tests/first.rs").chmod(0o755)
         with self.assertRaisesRegex(EvidenceError, "snapshot differs"):
             self.execute()
 
     def test_claimed_subcommand_without_owning_script_proof_fails(self):
         self.report["stages"][0].update(status="FAIL", returncode=143,
-                                       command=["bash", "provider-sdk/scripts/check.sh"])
+                                       command=["bash", "providers-kit/scripts/check.sh"])
         self.write(self.report_path, self.report)
         self.legacy["original_command"] = self.report["stages"][0]["command"]
         self.refresh_report_references()
@@ -247,7 +248,7 @@ class LegacyImportTests(unittest.TestCase):
         self.approval["command_equivalence"] = {
             "original": Command.canonical(self.command), "current": self.approval["command"],
             "reason": "Fixture package has no features; reviewed manifest proves identical feature selection.",
-            "witnesses": [self.ref(self.root / "provider-sdk/Cargo.toml")]}
+            "witnesses": [self.ref(self.root / "providers-kit/Cargo.toml")]}
         self.persist()
         self.execute()
 

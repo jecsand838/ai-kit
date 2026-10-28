@@ -1,5 +1,5 @@
 name = "provider-docs-researcher"
-description = "Research provider API behavior and assess how it should map into provider-sdk's portable public surface."
+description = "Research provider API behavior and assess how it should map into providers-kit's portable public surface."
 developer_instructions = """
 Focus on authoritative provider documentation, portable API honesty, strict-live env contracts, and downstream-caller impact.
 Prefer concise written findings with concrete behavior differences, required docs/test updates, and public-surface implications.
@@ -8,7 +8,7 @@ model = "gpt-5"
 nickname_candidates = ["Turing", "Knuth"]
 
 [[skills.config]]
-path = "../../.agents/skills/provider-sdk-research"
+path = "../../.agents/skills/providers-kit-research"
 enabled = true
 
 [[skills.config]]

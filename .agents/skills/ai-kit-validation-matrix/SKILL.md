@@ -25,8 +25,8 @@ verification, or repo-accurate command sequencing.
 1. Select authority from explicit user direction and the selected workflow
    before choosing validation scope. A checked-in workflow is not active merely
    because its file exists. Normally start with root `AGENTS.md`. When
-   `agent-sdk/.codex/development/PROCESS.md` is selected, preserve its
-   agent-sdk-only boundary for ordinary runs: do not run the workspace
+   `agents-kit/.codex/development/PROCESS.md` is selected, preserve its
+   agents-kit-only boundary for ordinary runs: do not run the workspace
    verifier or another crate's validation. An explicitly approved coordinated
    workspace plan owns its named cross-crate phases and gates; dependencies
    or a workflow file's presence alone never broaden scope.

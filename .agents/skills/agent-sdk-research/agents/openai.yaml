@@ -1,6 +1,0 @@
-interface:
-  display_name: "agent-sdk Research"
-  short_description: "Codex/OpenCode docs, runtime facts, and strict-live assumptions."
-  default_prompt: "Use $agent-sdk-research to ground agent-sdk changes in Codex App Server and OpenCode behavior."
-policy:
-  allow_implicit_invocation: true

@@ -26,12 +26,12 @@ import tomllib
 import uuid
 
 if __package__:
-    from .security_dependencies import SecurityPatches
+    from .security_dependencies import SecurityPolicy
 else:
-    from security_dependencies import SecurityPatches
+    from security_dependencies import SecurityPolicy
 
 
-CRATES = ("provider-sdk", "storage-sdk", "tool-sdk", "agent-sdk", "app-sdk")
+CRATES = ("providers-kit", "storage-kit", "tools-kit", "agents-kit", "app-kit")
 SUMMARY = re.compile(r"^test result: (ok|FAILED)\. (\d+) passed; (\d+) failed; (\d+) ignored; (\d+) measured; (\d+) filtered out", re.M)
 SECRET_NAME = re.compile(r"KEY|TOKEN|PASSWORD|SECRET|CREDENTIAL|AUTH|ENV_JSON|ENVIRONMENT", re.I)
 BUILD_NAMES = ("RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS", "RUSTDOCFLAGS", "RUSTC_WRAPPER", "RUSTC_WORKSPACE_WRAPPER", "CARGO_INCREMENTAL", "CARGO_BUILD_JOBS")
@@ -239,15 +239,15 @@ class Command:
     def allow_empty(arguments):
         inner, _ = Command.unwrap(arguments)
         return ("--lib" in inner or "--doc" in inner
-                or Command.values(inner, "-p", "--package") == ["app-sdk"]
+                or Command.values(inner, "-p", "--package") == ["app-kit"]
                 and Command.values(inner, "--test") == ["compile_contract"])
 
     @staticmethod
     def supervised_parent(arguments):
         packages, targets = Command.values(arguments, "-p", "--package"), Command.values(arguments, "--test")
-        if packages == ["app-sdk"] and targets == ["prepare_contract"]:
+        if packages == ["app-kit"] and targets == ["prepare_contract"]:
             return "app-prepare"
-        if packages == ["storage-sdk"] and targets == ["lancedb_state_store"]:
+        if packages == ["storage-kit"] and targets == ["lancedb_state_store"]:
             return "storage-lance"
         return "integration" if len(targets) == 1 else None
 
@@ -285,9 +285,9 @@ class SourceIdentity:
     @staticmethod
     def security_inputs(root):
         try:
-            return set(SecurityPatches(root).inputs())
+            return set(SecurityPolicy(root).inputs())
         except (OSError, ValueError) as error:
-            raise EvidenceError(f"security patch provenance: {error}") from error
+            raise EvidenceError(f"security exception policy: {error}") from error
 
     @staticmethod
     def doctest_output_independence(root, paths):

@@ -7,7 +7,7 @@ description: "Enforce ai-kit's reduced public surface: functional public modules
 
 ## Purpose
 
-Keep the five compiled SDK crates small, portable, and independently usable
+Keep the five compiled Kit crates small, portable, and independently usable
 without leaking private implementation topology or recreating deleted
 frameworks.
 
@@ -146,24 +146,24 @@ Never restore:
 
 ## Cross-Crate Ownership
 
-- `provider-sdk` owns provider credentials, provider/model resources,
+- `providers-kit` owns provider credentials, provider/model resources,
   generation/streaming/embedding/batch/session behavior, normalized
   function-call/result values, portable hosted-tool configuration, wire
   adaptation, and provider lifecycle.
-- `tool-sdk` owns executable Local/MCP client Toolsets, ToolHandlers,
+- `tools-kit` owns executable Local/MCP client Toolsets, ToolHandlers,
   interaction state, and the independent McpServer product.
-- `storage-sdk` owns Database behavior and separate transactional StateStore
+- `storage-kit` owns Database behavior and separate transactional StateStore
   behavior. It does not produce tools.
-- `agent-sdk` owns durable agent/workspace/conversation state, notifications,
+- `agents-kit` owns durable agent/workspace/conversation state, notifications,
   conflict reconciliation, private managed knowledge, and the Custom
   multi-turn loop. It composes direct `P: ProviderBackend` and already-built
   `T: ToolsetBackend` values with direct StateStoreBackend and DatabaseBackend
   implementations. Children remain `P::Model` and `T::Handler`; neither `T`
   nor its Handler requires Clone.
-- `app-sdk` owns application workspaces, workflow execution, checkpoints, and
+- `app-kit` owns application workspaces, workflow execution, checkpoints, and
   app control-plane records. It preserves a direct `A: AgentBackend` and
   statically retains its app `CS: StateStoreBackend`. It uses associated
-  Workspace and Conversation types and has no provider-sdk or tool-sdk
+  Workspace and Conversation types and has no providers-kit or tools-kit
   dependency. Action, condition, typing, lifecycle, and child-executor values
   remain concrete under `workflow`. Only its process-global field/tag
   serialization registry may privately erase captured codec functions; it
@@ -180,10 +180,10 @@ reconstructs them from declarations, inspects private enums, or asks callers
 to branch on implementation identity.
 
 Provider models return normalized function calls and own an associated
-continuation type. Agent-sdk executes those calls through Toolset/ToolHandler,
+continuation type. agents-kit executes those calls through Toolset/ToolHandler,
 returns normalized function results, and preserves the exact continuation only
 inside the active prompt loop.
-Provider-sdk has no dependency on tool-sdk.
+providers-kit has no dependency on tools-kit.
 
 ## Testing Contract
 

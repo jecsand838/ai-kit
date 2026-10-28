@@ -8,7 +8,7 @@ Dependencies still compile, including unconditional native dependencies.
 
 ```bash
 bash scripts/check_mock_contracts.sh
-bash scripts/check_mock_contracts.sh --crate agent-sdk
+bash scripts/check_mock_contracts.sh --crate agents-kit
 bash scripts/check_ci.sh
 python3 scripts/qualify_mock_runtime.py
 ```
@@ -54,7 +54,7 @@ as required status checks; replace any former **Deterministic CI** requirement.
 | Formatting | Pinned Rust toolchain, `cargo fmt --all --check` | 5 minutes |
 | Tests | `python3 scripts/mock_contract_runner.py ci-tests`: guards, runner contracts, unified compile proofs, all seven public-trait mock targets | 20 minutes |
 | Linting | `python3 scripts/mock_contract_runner.py ci-lint`: one Clippy invocation over the five libraries and selected mock targets, with warnings denied | 10 minutes |
-| Security audit | Provenance verification, pinned `cargo-audit`, committed lockfile and seven patched-parent identities, current RustSec advisories | 5 minutes |
+| Security audit | Registry-source verification, pinned `cargo-audit`, committed lockfile, current RustSec advisories and explicit temporary exceptions | 5 minutes |
 
 Formatting gates Tests, and Tests gates Linting so Clippy can reuse compiled
 outputs instead of starting a second cold build concurrently. Failed or cancelled
@@ -75,9 +75,10 @@ Cargo dependencies still compile, including unconditional LanceDB/Lance/Arrow
 dependencies. Tests and Linting install their native build prerequisites and use
 two build workers, no incremental compilation, and no development/test debug
 information. Both cache Cargo downloads and `target/debug` by Ubuntu version,
-architecture, toolchain, explicit build-settings version, lockfile, and workspace
-manifests, and every `third-party/security/**` input. Provenance verification precedes cache restoration. Separate `-tests` and `-linting` primary keys let each job preserve its
-own outputs. A cache miss can restore the other job's current dependency cache,
+architecture, toolchain, explicit build-settings version, lockfile and workspace
+manifests. Registry-source verification precedes cache restoration. Separate
+`-tests` and `-linting` primary keys let each job preserve its own outputs.
+A cache miss can restore the other job's current dependency cache,
 the previous combined CI cache, or an older dependency cache under the same
 toolchain/settings prefix. Cargo decides what needs rebuilding. Exact hits do
 not upload another copy. Formatting and Security audit do not transfer build
@@ -109,16 +110,24 @@ The security job downloads the official cargo-audit 0.22.2 Linux binary and chec
 its pinned SHA-256 before executing it. It fetches current RustSec advisories and
 scans the entire committed lockfile, including optional and target-specific
 packages. It neither compiles nor tests dependencies, updates the lockfile, nor
-runs provider requests. Scanner download, checksum, database, and audit failures
-fail the job. The audit runs outside the checkout with an explicit lockfile path;
-repository-local scanner configuration cannot silently weaken the check. A second temporary lockfile scans all seven verified path parents under their original registry identities against the same database. Either scan failing blocks the check; see [the dependency security policy](security-dependencies.md).
+runs provider requests. Scanner download, checksum, database and incomplete-scan
+failures fail the job. The audit uses an explicit lockfile path and isolated scanner
+configuration so checkout-local or user defaults cannot weaken the check.
+It retains an unfiltered report, then applies only the full RustSec IDs in
+[`scripts/security_exceptions.toml`](../scripts/security_exceptions.toml) against
+the same advisory database. Raw findings remain visible even when the qualified
+scan succeeds; see [the dependency security policy](security-dependencies.md).
 
-Known vulnerabilities and unsoundness advisories are blocking. Unmaintained
-package warnings remain visible but are not denied. `--no-yanked` omits registry
-yank checks, not security advisories. There are no ignored advisory IDs, baseline
-exceptions, or `continue-on-error`. The audit wrapper propagates either scanner failure and uploads both logs, the supplemental lockfile and aggregate report. Provenance, guard and source-fingerprint regression tests run in the inexpensive Python bootstrap; dependency runtime tests remain outside CI.
-Existing dependency findings require remediation or a separately reviewed policy
-decision; adding the job does not approve dependency changes or suppressions.
+Vulnerabilities and unsoundness outside the explicit temporary exception list
+are blocking. Unmaintained package warnings remain visible but are not denied.
+`--no-yanked` omits registry yank checks, not security advisories. There are no
+year-wide exclusions or `continue-on-error`. The wrapper retains both scan
+reports and logs, accepted findings and the aggregate result. A result with
+accepted findings is `PASS_WITH_EXCEPTIONS`, not a clean security audit.
+Policy, guard and source-fingerprint regression tests run in the inexpensive
+Python bootstrap; dependency runtime tests remain outside CI. Remove each
+exception as soon as compatible upstream fixes are available. The exceptions
+do not authorize additional dependency changes or weaken behavioral gates.
 
 ## Test ownership and boundaries
 

@@ -11,8 +11,8 @@ Use this file for the exact `ai-kit` top-level vendor campaign sequence.
 4. For each in-scope crate whose vendor manifest runs a strict-live verify
    completion gate, confirm the crate-local `strict-tests.env` file exists and
    is populated before the first updater run. Today that means
-   `agent-sdk/strict-tests.env` and `storage-sdk/strict-tests.env`.
-5. For `agent-sdk` Codex vendor refreshes, confirm the Codex app-server used by
+   `agents-kit/strict-tests.env` and `storage-kit/strict-tests.env`.
+5. For `agents-kit` Codex vendor refreshes, confirm the Codex app-server used by
    strict-live matches the target vendored Codex release. When the installed
    `codex --version` matches the target tag, use that installed binary. When it
    does not, install the matching stable package through the user's existing
@@ -176,7 +176,7 @@ python3 scripts/vendor_update.py coordinate --dossier <existing-codex-dossier> -
 Preparation validates the retained Codex recovery inputs, checks that both
 approved tags are still latest stable, downloads the official OpenCode source
 archive, records its hash, and copies frozen inputs into
-`target/vendor-updates/agent-sdk/coordinated/<codex-tag>_<opencode-tag>/`.
+`target/vendor-updates/agents-kit/coordinated/<codex-tag>_<opencode-tag>/`.
 The original leaf's recovery metadata, plans, and evidence stay unchanged.
 Preparation permits only the Agent scope, manifest-owned external paths, and
 the exact coordination updater/test/workflow files. Unrelated dirty paths,

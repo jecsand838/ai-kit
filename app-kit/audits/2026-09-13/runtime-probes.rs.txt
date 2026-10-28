@@ -1,0 +1,192 @@
+//! Temporary audit probes. Exercise only public app/agent contracts.
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use agents_kit::conversation::{ConversationInfo, FileRead, NewConversation};
+use agents_kit::identity::{AgentId, AgentInfo, ConversationId, NotificationId, WorkspaceId};
+use agents_kit::knowledge::IngestKnowledgeRequest;
+use agents_kit::model::ModelInfo;
+use agents_kit::notification::{ConversationNotificationReceiver, NotificationResolution};
+use agents_kit::prompt::{PromptRequest, PromptResponse};
+use agents_kit::tool::ToolInfo;
+use agents_kit::workspace::{
+    DeleteWorkspaceRequest, NewWorkspace, UpdateWorkspaceRequest, WorkspaceInfo,
+    WorkspaceUpdateReadiness,
+};
+use agents_kit::{AgentBackend, ConversationBackend, KitError, WorkspaceBackend};
+use app_kit::workflow::{RunStatus, WorkflowDefinition};
+use app_kit::{AgentSpec, App, AppConfig, AppState, Shutdown, WorkspaceConfig};
+use serde_json::Map;
+use storage_kit::StateStore;
+use tokio::sync::Notify;
+
+#[derive(Clone, Copy)]
+enum Behavior {
+    HangDuringConversationCreation,
+    PanicDuringConversationCreation,
+}
+
+struct Probe {
+    behavior: Behavior,
+    agent_id: AgentId,
+    workspace_id: WorkspaceId,
+    conversation_id: ConversationId,
+    workspace: Mutex<Option<WorkspaceInfo>>,
+    entered: Notify,
+}
+
+struct AuditAgent(Arc<Probe>);
+struct AuditWorkspace(Arc<Probe>);
+struct AuditConversation(Arc<Probe>);
+
+impl Probe {
+    fn new(behavior: Behavior) -> Result<Arc<Self>, KitError> {
+        Ok(Arc::new(Self {
+            behavior,
+            agent_id: "agent_00000000000000000000000000000071".parse()?,
+            workspace_id: "workspace_00000000000000000000000000000072".parse()?,
+            conversation_id: "conversation_00000000000000000000000000000073".parse()?,
+            workspace: Mutex::new(None),
+            entered: Notify::new(),
+        }))
+    }
+
+    fn workspace_info(&self) -> Result<WorkspaceInfo, KitError> {
+        self.workspace
+            .lock()
+            .expect("test workspace mutex")
+            .clone()
+            .ok_or_else(|| KitError::not_found("audit workspace absent"))
+    }
+
+    async fn observe(behavior: Behavior) -> Result<RunStatus, Box<dyn std::error::Error>> {
+        let state = Self::new(behavior)?;
+        let definition = WorkflowDefinition::parse(r#"{
+          "schema":"app-kit.workflow/v1", "id":"audit", "revision":"v1",
+          "state":{"output":""}, "required":[], "reducers":{"output":"reject_concurrent"}, "entry":"agent",
+          "nodes":[{"id":"agent", "deadline_ms":25,
+            "step":{"kind":"agent", "agent":"probe", "text_target":"output",
+              "prompt":[{"kind":"text", "text":"audit"}]}}],
+          "routes":{"agent":{"mode":"first", "branches":[{"target":{"kind":"end"}}]}}
+        }"#)?;
+        let config: AppConfig<StateStore, AuditAgent> = AppConfig::new(
+            AppState::Ephemeral,
+            vec![AgentSpec::new("probe".to_owned(), "v1".to_owned(), AuditAgent(Arc::clone(&state)))],
+            vec![definition],
+        );
+        let mut app = App::open(config).await?;
+        let workspace = app.create_workspace(WorkspaceConfig {
+            name: Some("audit-probe".to_owned()), root: std::env::current_dir()?,
+        }).await?;
+        let workflow = workspace.workflow("audit".parse()?).await?;
+        let run = workflow.start(Map::new()).await?;
+        tokio::time::timeout(Duration::from_secs(2), state.entered.notified())
+            .await.expect("probe must reach the exact lower call");
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let status = run.snapshot().await?.status;
+        // Bounded cleanup observation, even when the broken runtime cannot converge.
+        let _ = tokio::time::timeout(Duration::from_millis(200), app.shutdown(
+            Shutdown::CancelAndDrain { timeout: Duration::from_millis(100) }
+        )).await;
+        Ok(status)
+    }
+}
+
+impl AgentBackend for AuditAgent {
+    type Workspace = AuditWorkspace;
+    fn id(&self) -> AgentId { self.0.agent_id.clone() }
+    async fn info(&self) -> Result<AgentInfo, KitError> {
+        AgentInfo::new(self.id(), Some("audit".to_owned()))
+    }
+    async fn new_workspace(&self, request: NewWorkspace) -> Result<Self::Workspace, KitError> {
+        let info = WorkspaceInfo::new(self.0.workspace_id.clone(), request.name().to_owned(),
+            request.context().clone(), request.defaults().clone(), 1)?;
+        *self.0.workspace.lock().expect("test workspace mutex") = Some(info);
+        Ok(AuditWorkspace(Arc::clone(&self.0)))
+    }
+    async fn list_workspaces(&self) -> Result<Vec<WorkspaceInfo>, KitError> {
+        Ok(self.0.workspace.lock().expect("test workspace mutex").iter().cloned().collect())
+    }
+    async fn workspace_info(&self, id: WorkspaceId) -> Result<WorkspaceInfo, KitError> {
+        if id != self.0.workspace_id { return Err(KitError::not_found("audit workspace id")); }
+        self.0.workspace_info()
+    }
+    async fn get_workspace(&self, id: WorkspaceId) -> Result<Self::Workspace, KitError> {
+        self.workspace_info(id).await?;
+        Ok(AuditWorkspace(Arc::clone(&self.0)))
+    }
+    fn check_workspace_update(&self, _request: &UpdateWorkspaceRequest)
+        -> impl std::future::Future<Output = Result<WorkspaceUpdateReadiness, KitError>> + Send + '_ {
+        async { Ok(WorkspaceUpdateReadiness::Ready) }
+    }
+    async fn update_workspace(&self, _request: UpdateWorkspaceRequest)
+        -> Result<WorkspaceInfo, KitError> { Err(KitError::unsupported("audit update")) }
+    async fn delete_workspace(&self, _request: DeleteWorkspaceRequest)
+        -> Result<(), KitError> { Ok(()) }
+    async fn list_models(&self) -> Result<Vec<ModelInfo>, KitError> { Ok(Vec::new()) }
+    async fn ingest_knowledge(&self, _request: IngestKnowledgeRequest)
+        -> Result<(), KitError> { Ok(()) }
+    async fn shutdown(self) -> Result<(), KitError> { Ok(()) }
+}
+
+impl WorkspaceBackend for AuditWorkspace {
+    type Conversation = AuditConversation;
+    fn id(&self) -> WorkspaceId { self.0.workspace_id.clone() }
+    async fn info(&self) -> Result<WorkspaceInfo, KitError> { self.0.workspace_info() }
+    async fn new_conversation(&self, _request: NewConversation)
+        -> Result<Self::Conversation, KitError> {
+        self.0.entered.notify_one();
+        match self.0.behavior {
+            Behavior::HangDuringConversationCreation => std::future::pending().await,
+            Behavior::PanicDuringConversationCreation => panic!("audit: lower conversation construction panicked"),
+        }
+    }
+    async fn list_conversations(&self) -> Result<Vec<ConversationInfo>, KitError> { Ok(Vec::new()) }
+    async fn conversation_info(&self, _id: ConversationId) -> Result<ConversationInfo, KitError> {
+        Err(KitError::not_found("audit conversation absent"))
+    }
+    async fn get_conversation(&self, _id: ConversationId) -> Result<Self::Conversation, KitError> {
+        Err(KitError::not_found("audit conversation absent"))
+    }
+    async fn list_tools(&self) -> Result<Vec<ToolInfo>, KitError> { Ok(Vec::new()) }
+    async fn ingest_knowledge(&self, _request: IngestKnowledgeRequest)
+        -> Result<(), KitError> { Ok(()) }
+    async fn close(self) -> Result<(), KitError> { Ok(()) }
+}
+
+impl ConversationBackend for AuditConversation {
+    fn id(&self) -> ConversationId { self.0.conversation_id.clone() }
+    async fn info(&self) -> Result<ConversationInfo, KitError> {
+        ConversationInfo::new(self.id(), self.0.workspace_id.clone(), None)
+    }
+    async fn prompt(&self, _request: PromptRequest) -> Result<PromptResponse, KitError> {
+        Ok(PromptResponse::new("unused".to_owned(), None))
+    }
+    async fn abort(&self) -> Result<(), KitError> { Ok(()) }
+    async fn read_file(&self, _path: PathBuf) -> Result<FileRead, KitError> {
+        Err(KitError::not_found("audit file absent"))
+    }
+    fn notification_stream(&self) -> Result<ConversationNotificationReceiver, KitError> {
+        Err(KitError::busy("unused audit notification stream"))
+    }
+    async fn resolve_notification(&self, _id: NotificationId, _resolution: NotificationResolution)
+        -> Result<(), KitError> { Ok(()) }
+    async fn close(self) -> Result<(), KitError> { Ok(()) }
+}
+
+#[tokio::test]
+async fn audit_node_deadline_bounds_lower_conversation_creation() -> Result<(), Box<dyn std::error::Error>> {
+    let status = Probe::observe(Behavior::HangDuringConversationCreation).await?;
+    assert!(!matches!(status, RunStatus::Running),
+        "25 ms activation deadline left hung lower conversation creation Running after 300 ms");
+    Ok(())
+}
+
+#[tokio::test]
+async fn audit_lower_panic_becomes_durable_failure_or_unknown() -> Result<(), Box<dyn std::error::Error>> {
+    let status = Probe::observe(Behavior::PanicDuringConversationCreation).await?;
+    assert!(!matches!(status, RunStatus::Running),
+        "lower panic silently orphaned a Running run instead of publishing Execution/Unknown");
+    Ok(())
+}

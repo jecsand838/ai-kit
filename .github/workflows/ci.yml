@@ -47,7 +47,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Verify checked-in dependency patches
+      - name: Verify registry sources and explicit audit exceptions
         run: python3 scripts/security_dependencies.py verify --root "$GITHUB_WORKSPACE"
 
       - name: Install the repository Rust toolchain
@@ -72,10 +72,10 @@ jobs:
             ~/.cargo/git
             target/debug
           # Bump v1 when changing artifact-affecting build settings, not timeouts/triggers.
-          key: cargo-unified-v1-nodebug-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'provider-sdk/Cargo.toml', 'storage-sdk/Cargo.toml', 'tool-sdk/Cargo.toml', 'agent-sdk/Cargo.toml', 'app-sdk/Cargo.toml', 'third-party/security/**') }}-tests
+          key: cargo-unified-v1-nodebug-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'providers-kit/Cargo.toml', 'storage-kit/Cargo.toml', 'tools-kit/Cargo.toml', 'agents-kit/Cargo.toml', 'app-kit/Cargo.toml') }}-tests
           restore-keys: |
-            cargo-unified-v1-nodebug-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'provider-sdk/Cargo.toml', 'storage-sdk/Cargo.toml', 'tool-sdk/Cargo.toml', 'agent-sdk/Cargo.toml', 'app-sdk/Cargo.toml', 'third-party/security/**') }}-linting
-            cargo-unified-v1-nodebug-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'provider-sdk/Cargo.toml', 'storage-sdk/Cargo.toml', 'tool-sdk/Cargo.toml', 'agent-sdk/Cargo.toml', 'app-sdk/Cargo.toml', 'third-party/security/**') }}
+            cargo-unified-v1-nodebug-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'providers-kit/Cargo.toml', 'storage-kit/Cargo.toml', 'tools-kit/Cargo.toml', 'agents-kit/Cargo.toml', 'app-kit/Cargo.toml') }}-linting
+            cargo-unified-v1-nodebug-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'providers-kit/Cargo.toml', 'storage-kit/Cargo.toml', 'tools-kit/Cargo.toml', 'agents-kit/Cargo.toml', 'app-kit/Cargo.toml') }}
             cargo-unified-v1-nodebug-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-
 
       - name: Run all seven public-trait mock targets
@@ -143,7 +143,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Verify checked-in dependency patches
+      - name: Verify registry sources and explicit audit exceptions
         run: python3 scripts/security_dependencies.py verify --root "$GITHUB_WORKSPACE"
 
       - name: Install the repository Rust toolchain
@@ -168,10 +168,10 @@ jobs:
             ~/.cargo/git
             target/debug
           # Bump v1 when changing artifact-affecting build settings, not timeouts/triggers.
-          key: cargo-unified-v1-nodebug-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'provider-sdk/Cargo.toml', 'storage-sdk/Cargo.toml', 'tool-sdk/Cargo.toml', 'agent-sdk/Cargo.toml', 'app-sdk/Cargo.toml', 'third-party/security/**') }}-linting
+          key: cargo-unified-v1-nodebug-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'providers-kit/Cargo.toml', 'storage-kit/Cargo.toml', 'tools-kit/Cargo.toml', 'agents-kit/Cargo.toml', 'app-kit/Cargo.toml') }}-linting
           restore-keys: |
-            cargo-unified-v1-nodebug-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'provider-sdk/Cargo.toml', 'storage-sdk/Cargo.toml', 'tool-sdk/Cargo.toml', 'agent-sdk/Cargo.toml', 'app-sdk/Cargo.toml', 'third-party/security/**') }}-tests
-            cargo-unified-v1-nodebug-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'provider-sdk/Cargo.toml', 'storage-sdk/Cargo.toml', 'tool-sdk/Cargo.toml', 'agent-sdk/Cargo.toml', 'app-sdk/Cargo.toml', 'third-party/security/**') }}
+            cargo-unified-v1-nodebug-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'providers-kit/Cargo.toml', 'storage-kit/Cargo.toml', 'tools-kit/Cargo.toml', 'agents-kit/Cargo.toml', 'app-kit/Cargo.toml') }}-tests
+            cargo-unified-v1-nodebug-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'providers-kit/Cargo.toml', 'storage-kit/Cargo.toml', 'tools-kit/Cargo.toml', 'agents-kit/Cargo.toml', 'app-kit/Cargo.toml') }}
             cargo-unified-v1-nodebug-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-
 
       - name: Lint libraries and mock targets with Clippy
@@ -233,7 +233,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Verify checked-in dependency patches
+      - name: Verify registry sources and explicit audit exceptions
         run: python3 scripts/security_dependencies.py verify --root "$GITHUB_WORKSPACE"
 
       - name: Install the pinned prebuilt security scanner
@@ -247,7 +247,7 @@ jobs:
             cargo-audit.tgz | sha256sum --check --strict
           tar -xzf cargo-audit.tgz --strip-components=1
 
-      - name: Audit the committed lockfile and verified upstream parents
+      - name: Audit the lockfile and retain raw findings with qualified results
         shell: bash
         working-directory: ${{ runner.temp }}
         run: |

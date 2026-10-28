@@ -12,25 +12,25 @@ writing the plan or starting implementation.
 
 ## Add The Matching Crate Skills
 
-- `agent-sdk`:
-  load `agent-sdk-change-contract`;
-  add `agent-sdk-research` when Codex App Server or OpenCode facts, runtime
+- `agents-kit`:
+  load `agents-kit-change-contract`;
+  add `agents-kit-research` when Codex App Server or OpenCode facts, runtime
   behavior, or live-validation assumptions matter
-- `provider-sdk`:
-  load `provider-sdk-change-contract`;
-  add `provider-sdk-research` when provider docs, model support, files, or
+- `providers-kit`:
+  load `providers-kit-change-contract`;
+  add `providers-kit-research` when provider docs, model support, files, or
   strict-live provider facts matter
-- `storage-sdk`:
-  load `storage-sdk-change-contract`;
-  add `storage-sdk-research` when backend behavior, embedded-vs-remote
+- `storage-kit`:
+  load `storage-kit-change-contract`;
+  add `storage-kit-research` when backend behavior, embedded-vs-remote
   behavior, or strict-live backend facts matter
-- `tool-sdk`:
-  load `tool-sdk-change-contract`;
-  add `tool-sdk-research` when MCP protocol, provider-hosted tool, local
+- `tools-kit`:
+  load `tools-kit-change-contract`;
+  add `tools-kit-research` when MCP protocol, provider-hosted tool, local
   runtime, composite-source, or strict-live tool facts matter
-- `app-sdk`:
-  read `app-sdk/AGENTS.md` and its owning specs; load
-  `ai-kit-public-surface-contract`; add `app-sdk-research` when workflow,
+- `app-kit`:
+  read `app-kit/AGENTS.md` and its owning specs; load
+  `ai-kit-public-surface-contract`; add `app-kit-research` when workflow,
   checkpoint, recovery, rurr, or lower-crate composition facts matter
 
 ## Add Rust Specialty Skills When

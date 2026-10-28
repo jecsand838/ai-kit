@@ -4,16 +4,23 @@
   <img src="docs/assets/ai-kit-logo.png" alt="ai-kit logo" width="220">
 </p>
 
-`ai-kit` is a private Rust workspace of reusable Genaptic SDK building blocks.
+`ai-kit` is a Rust workspace of reusable Genaptic Kit building blocks.
 It contains five independently usable library crates:
 
 | Crate | Primary hierarchy | Purpose |
 | --- | --- | --- |
-| `provider-sdk` | `Provider -> Model -> Session` | Portable model and provider resources across OpenAI, Anthropic, Gemini, and Ollama |
-| `storage-sdk` | `Database`; `StateStore -> StateTransaction` | Portable data/search plus transactional control-plane storage |
-| `tool-sdk` | `Toolset -> ToolHandler` | Executable Local/MCP tools and independent MCP serving |
-| `agent-sdk` | `Agent -> Workspace -> Conversation` | Portable Codex, OpenCode, and provider-backed Custom agents |
-| `app-sdk` | `App -> Workspace -> Workflow -> WorkflowRun` | Durable application and workflow orchestration over caller-built agents |
+| `providers-kit` | `Provider -> Model -> Session` | Portable model and provider resources across OpenAI, Anthropic, Gemini, and Ollama |
+| `storage-kit` | `Database`; `StateStore -> StateTransaction` | Portable data/search plus transactional control-plane storage |
+| `tools-kit` | `Toolset -> ToolHandler` | Executable Local/MCP tools and independent MCP serving |
+| `agents-kit` | `Agent -> Workspace -> Conversation` | Portable Codex, OpenCode, and provider-backed Custom agents |
+| `app-kit` | `App -> Workspace -> Workflow -> WorkflowRun` | Durable application and workflow orchestration over caller-built agents |
+
+## Versioning and compatibility
+
+The initial release version is `0.0.1`. Until `1.0.0`, backwards compatibility
+is not guaranteed: public APIs, behavior, and supported backends may change
+between releases. Pin exact versions when reproducibility matters, and review
+the release notes before upgrading.
 
 ## Public Design
 
@@ -59,24 +66,24 @@ Primary handles, backend traits, and errors remain at crate roots. Supporting
 types are organized into functional modules:
 
 ```text
-provider_sdk::{
+providers_kit::{
     config, generation, embedding, hosted, files, batch, models, session,
     runtime, error
 }
 
-storage_sdk::{
+storage_kit::{
     database::{config, catalog, data, query, index},
     state::{config, record, transaction}
 }
 
-tool_sdk::{declaration, execution, interaction, local, mcp, schema}
+tools_kit::{declaration, execution, interaction, local, mcp, schema}
 
-agent_sdk::{
+agents_kit::{
     config, identity, workspace, conversation, prompt, notification, model,
     tool, knowledge, error
 }
 
-app_sdk::{workflow}
+app_kit::{workflow}
 ```
 
 This keeps the root surface small without exposing implementation trees.
@@ -118,8 +125,8 @@ joins its server task, and never shuts down the underlying shared Toolset.
 
 ## Storage Workflow
 
-`Database::connect(DatabaseConfig)` selects always-available LanceDB, opt-in SurrealDB, or
-feature-gated Qdrant. Its portable API contains only operations with honest
+`Database::connect(DatabaseConfig)` selects always-available LanceDB or opt-in
+SurrealDB. Its portable API contains only operations with honest
 matching semantics in at least two backend families.
 
 `StateStore::connect(StateStoreConfig)` selects always-available embedded Lance or opt-in
@@ -132,7 +139,7 @@ rollback-on-drop, cancellation safety, and deterministic task/thread cleanup.
 Database and StateStore are independent products. Callers implement
 `DatabaseBackend` or `StateStoreBackend` directly, with the latter returning
 its own `StateTransactionBackend` associated type. A caller-owned enum may
-provide optional runtime composition without an SDK `Extension` variant.
+provide optional runtime composition without a Kit `Extension` variant.
 
 ## Agent Workflow
 
@@ -146,7 +153,7 @@ caller-owned provider enum in an App inventory. Built-in defaults preserve the
 ordinary `AgentStorage`, `Agent`, `Workspace`, and `Conversation` spellings.
 The Agent hierarchy retains `S`, `D`, `P`, and `T`; handlers remain exact
 `T::Handler` values. Neither toolsets nor their handlers need Clone.
-Reopening requires callers to resupply runtime values; agent-sdk does not
+Reopening requires callers to resupply runtime values; agents-kit does not
 persist lower-crate credentials or reconstruction declarations.
 
 The direct static traits form `Agent -> Workspace -> Conversation`. Caller
@@ -168,7 +175,7 @@ and durable-reopen contracts.
 Callers supply an app control-plane `CS: StateStoreBackend` and transfer ready
 `A: AgentBackend` values through `AgentSpec<A>` into `AppConfig<CS, A>`.
 Callers choose `CS` and `A` explicitly; App does not require supplied lower
-handles or provide lower-type defaults. App-sdk validates
+handles or provide lower-type defaults. app-kit validates
 workflows, coordinates app workspaces, and persists only app-owned workflow
 state. It never reconstructs agents or inspects `AgentId`, lower credentials,
 protocols, or storage records.
@@ -189,11 +196,11 @@ ownership model; focused crate specifications define exact contracts.
 - [Workspace architecture](ARCHITECTURE.md)
 - [Repository operating contract](AGENTS.md)
 - [Workspace skill catalog](SKILLS.md)
-- [agent-sdk](agent-sdk/README.md)
-- [provider-sdk](provider-sdk/README.md)
-- [storage-sdk](storage-sdk/README.md)
-- [tool-sdk](tool-sdk/README.md)
-- [app-sdk](app-sdk/README.md)
+- [agents-kit](agents-kit/README.md)
+- [providers-kit](providers-kit/README.md)
+- [storage-kit](storage-kit/README.md)
+- [tools-kit](tools-kit/README.md)
+- [app-kit](app-kit/README.md)
 
 Each crate's `AGENTS.md` owns its exact validation commands. The shared final
 gate covers formatting, clippy across supported feature lanes, docs/doctests,
@@ -222,10 +229,10 @@ The Storage verifier runs the selected deterministic lanes before starting
 services; its default is Lance-only, and `--all-backends` adds all eight lanes
 and the complete legal/illegal feature matrix. Any owned service-cleanup
 failure also fails the gate.
-Agent's [strict-testing contract](agent-sdk/docs/STRICT_TESTING.md) and Provider's
-[strict-testing contract](provider-sdk/docs/STRICT_TESTING.md) separate raw
+Agent's [strict-testing contract](agents-kit/docs/STRICT_TESTING.md) and Provider's
+[strict-testing contract](providers-kit/docs/STRICT_TESTING.md) separate raw
 model-copy quality for exactly two OpenCode Question cases and two OpenAI
-Realtime cases. SDK correctness, correlation, output progress, authoritative
+Realtime cases. Kit correctness, correlation, output progress, authoritative
 terminals, complete grade receipts and cleanup remain mandatory. OpenCode also
 requires independently observed native/portable terminal-text fidelity and
 unchanged native Question descriptions; answer and description copying are
@@ -249,3 +256,9 @@ Known defects and unresolved coverage belong in the
 [mock-testing bug ledger](docs/mock-testing-production-bugs.md). Dated results
 live in [PR #22 validation history](docs/pr22-validation.md); they do not certify
 the current checkout.
+
+## Releases
+
+Maintainers publish from `main` using the manual [release process](docs/RELEASING.md).
+The initial `0.0.1` release has an explicit qualification override; later releases
+require their recorded qualification evidence.

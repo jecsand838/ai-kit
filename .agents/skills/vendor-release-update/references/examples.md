@@ -55,7 +55,7 @@ mkdir -p /tmp/codex-skill-forwardtest
 CODEX_HOME=/tmp/codex-skill-forwardtest codex exec --ephemeral --sandbox read-only \
   -C /Users/connorsanders/scratch/ai-kit \
   -o /tmp/vendor-release-update-negative-boundary.txt \
-  $'Use $vendor-release-update. Refresh all outdated vendors in `agent-sdk` and `storage-sdk`, leave the final result on my current branch, and rerun the workspace validation gates.'
+  $'Use $vendor-release-update. Refresh all outdated vendors in `agents-kit` and `storage-kit`, leave the final result on my current branch, and rerun the workspace validation gates.'
 ```
 
 Expected checks:

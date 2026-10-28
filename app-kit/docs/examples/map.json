@@ -1,0 +1,11 @@
+{
+  "schema": "app-kit.workflow/v2",
+  "id": "map",
+  "revision": "r1",
+  "state": {"items": [1, 2, 3], "sum": 0},
+  "required": ["items", "sum"],
+  "reducers": {"items": "reject_concurrent", "sum": "sum_integer"},
+  "entry": "increment_each",
+  "nodes": [{"id": "increment_each", "step": {"kind": "map", "workflow": "child_counter", "items": {"kind": "state", "path": "items"}, "input_key": "value", "max_parallel": 2, "reductions": [{"source": "value", "target": "sum", "reducer": "sum_integer"}]}}],
+  "routes": {}
+}

@@ -24,41 +24,41 @@ refresh.
 
 ## Add Crate Skills When
 
-- `agent-sdk/**`: `agent-sdk-change-contract`
-- `storage-sdk/**`: `storage-sdk-change-contract`
-- `provider-sdk/**`: `provider-sdk-change-contract` only if a future vendor
+- `agents-kit/**`: `agents-kit-change-contract`
+- `storage-kit/**`: `storage-kit-change-contract`
+- `providers-kit/**`: `providers-kit-change-contract` only if a future vendor
   workflow or campaign scope actually reaches that crate
 
-Current manifest-backed vendor workflows are owned by `agent-sdk` and
-`storage-sdk`.
+Current manifest-backed vendor workflows are owned by `agents-kit` and
+`storage-kit`.
 
 Before execution, confirm any in-scope crate with strict-live completion gates
 has a populated crate-local `strict-tests.env` file. Today that means
-`agent-sdk/strict-tests.env` and `storage-sdk/strict-tests.env`.
+`agents-kit/strict-tests.env` and `storage-kit/strict-tests.env`.
 
 ## Add Research Skills Only When
 
-- provider documentation or runtime behavior matters: `provider-sdk-research`
-- backend documentation or strict-live behavior matters: `storage-sdk-research`
-- Codex/OpenCode protocol or runtime behavior matters: `agent-sdk-research`
+- provider documentation or runtime behavior matters: `providers-kit-research`
+- backend documentation or strict-live behavior matters: `storage-kit-research`
+- Codex/OpenCode protocol or runtime behavior matters: `agents-kit-research`
 
-When the campaign includes `storage-sdk/turso`, load
-`storage-sdk-change-contract`, `storage-sdk-research`, and
+When the campaign includes `storage-kit/turso`, load
+`storage-kit-change-contract`, `storage-kit-research`, and
 `use-rust-best-practices-dependencies-platforms` for that vendor. Turso uses
 the GitHub releases feed with stable semver tags under the configured `v`
 prefix; prerelease tags such as `v0.7.0-pre.*` must stay out of the stable
 queue. Turso is vendored for SQLite StateStore research and implementation
 work only; do not route it as a `Database` backend.
 
-When the campaign includes `storage-sdk/redb`, load
-`storage-sdk-change-contract`, `storage-sdk-research` with `state stores`
+When the campaign includes `storage-kit/redb`, load
+`storage-kit-change-contract`, `storage-kit-research` with `state stores`
 scope, and `use-rust-best-practices-dependencies-platforms` for that vendor.
 Redb uses the GitHub releases feed with stable semver tags under the configured
 `v` prefix; prerelease tags must stay out of the stable queue. Redb is vendored
 for embedded StateStore research and implementation work only; do not route it
 as a `Database` backend. If release drift touches transaction, savepoint,
 durability, storage backend, in-memory, or file-backed behavior, review
-`storage-sdk-research/references/redb-state-stores.md` before planning code.
+`storage-kit-research/references/redb-state-stores.md` before planning code.
 
 ## Output Contract
 

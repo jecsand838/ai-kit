@@ -4,8 +4,8 @@ Operating contract for the five compiled `ai-kit` crates.
 
 ## Scope
 
-- Workspace crates: `provider-sdk`, `storage-sdk`, `tool-sdk`, `agent-sdk`,
-  and `app-sdk`.
+- Workspace crates: `providers-kit`, `storage-kit`, `tools-kit`, `agents-kit`,
+  and `app-kit`.
 - `tmp/**` contains immutable historical planning artifacts. Do not edit,
   validate, stage, or treat those files as current architecture.
 - Do not create an app substitute, compatibility crate, or shared runtime
@@ -72,15 +72,15 @@ same-name inherent forwarding contracts.
 Crate roots expose primary handles, backend traits, errors, and few frequent
 construction owners. Supporting types belong in functional public modules:
 
-- `provider-sdk`: `config`, `generation`, `embedding`, `hosted`, `files`,
+- `providers-kit`: `config`, `generation`, `embedding`, `hosted`, `files`,
   `batch`, `models`, `session`, `runtime`, `error`;
-- `storage-sdk`: `database::{config,catalog,data,query,index}` and
+- `storage-kit`: `database::{config,catalog,data,query,index}` and
   `state::{config,record,transaction}`;
-- `tool-sdk`: `declaration`, `execution`, `interaction`, `local`, `mcp`,
+- `tools-kit`: `declaration`, `execution`, `interaction`, `local`, `mcp`,
   `schema`;
-- `agent-sdk`: `config`, `identity`, `workspace`, `conversation`, `prompt`,
+- `agents-kit`: `config`, `identity`, `workspace`, `conversation`, `prompt`,
   `notification`, `model`, `tool`, `knowledge`, `error`.
-- `app-sdk`: `workflow`.
+- `app-kit`: `workflow`.
 
 Do not flatten advanced DTOs onto roots or bury primary handles.
 Rustdoc/examples use documented public modules, never private source paths.
@@ -116,7 +116,7 @@ tombstone modules, feature stubs, or parallel routes.
 
 ### Provider
 
-`provider-sdk` owns credentials, discovery/resources, validated `ModelId`
+`providers-kit` owns credentials, discovery/resources, validated `ModelId`
 selection, normalized generation/streaming, embeddings, batches, sessions,
 portable hosted-tool configuration, wire adaptation and shared shutdown.
 
@@ -138,7 +138,7 @@ unsupported error.
 
 ### Tools
 
-`tool-sdk` owns executable Local/MCP client toolsets, schema validation,
+`tools-kit` owns executable Local/MCP client toolsets, schema validation,
 source-neutral `ToolInfo`, unique handlers, resumable interactions and shared
 shutdown. Construct built-ins directly with `Toolset::local`/`Toolset::mcp`.
 
@@ -168,8 +168,9 @@ safety, terminal authority and deterministic task/thread joins. Never consolidat
 backend guards with differing native transaction semantics.
 
 Storage default build/strict-live uses Lance for both products. Alternatives
-require explicit `redb`, `postgres`, `surrealdb`, `sqlite` or `qdrant` features;
-SQLite/Qdrant cannot coexist. Never use Storage `--all-features`. Direct backend
+require explicit `redb`, `postgres`, `surrealdb` or `sqlite` features.
+Qdrant support is temporarily removed, including its feature and validation
+lanes. Never use Storage `--all-features`. Direct backend
 and shared-abstraction changes require relevant alternative strict-live coverage.
 Downstream persistence/knowledge fixtures use Lance; backend-specific proof
 stays in Storage.
@@ -180,26 +181,20 @@ defaults and cloud object-store features disabled. This does not authorize
 remote supplied Storage routes, additional public behavior or unrelated
 dependency features; the local filesystem/memory boundary remains required.
 
-A separate approved exception permits exact registry `webbrowser =1.2.5`,
-optional on macOS and activated only by Storage's `qdrant` feature, with defaults
-disabled. Qdrant Edge uses 0.9.0. This replaces the former 1.2.1 compiler
-workaround without adding a browser API. Preserve the broader lock-resolution
-impact and downstream limits in [Storage's dependency policy](storage-sdk/AGENTS.md#backend-and-secret-ownership).
-
-Seven explicitly approved upstream source patches under `third-party/security/`
-are excluded from workspace membership and verified by
-`scripts/security_dependencies.py`. Only successfully verified roots may retain
-upstream implementation conventions, including aliases, macros, unsafe code and
-test placement; all SDK architecture prohibitions and unrelated-path rejection
-remain binding. No other Cargo patches are authorized. Preserve the exact
-identities, original manifests, licenses, reviewed diffs, inventories and hashes
-described in [the dependency security policy](docs/security-dependencies.md).
-These root patches remediate workspace source builds; published SDK consumers
-must supply their own root patch configuration.
+External Rust dependencies must resolve from crates.io. Cargo patches,
+replacements, and external path overrides are forbidden; the dependency checker
+permits only the five local workspace packages. No upstream source tree is
+exempt from the Kit path or alias guards.
+The temporary advisory exceptions in `scripts/security_exceptions.toml` require
+complete, individually reviewed RustSec IDs. Preserve unfiltered findings and
+fail on new vulnerabilities or unsoundness outside that list. Remove exceptions
+as soon as compatible upstream fixes are available. Risk acceptance does not
+establish remediation or waive behavioral validation. Follow
+[the dependency security policy](docs/security-dependencies.md).
 
 ### Agents
 
-`agent-sdk` owns portable `Agent -> Workspace -> Conversation`, durable
+`agents-kit` owns portable `Agent -> Workspace -> Conversation`, durable
 control-plane state, notifications, conflict reconciliation, cancellation and
 Codex/OpenCode/Custom adaptation.
 
@@ -230,9 +225,9 @@ owner; observer drop does not cancel accepted work.
 
 ### Applications
 
-`app-sdk` owns application workspaces, workflow validation/execution, checkpoints,
+`app-kit` owns application workspaces, workflow validation/execution, checkpoints,
 recovery and app control-plane state. It consumes ready `A: AgentBackend` via
-`AgentSpec<A>` plus direct `CS: StateStoreBackend`; no provider-sdk/tool-sdk
+`AgentSpec<A>` plus direct `CS: StateStoreBackend`; no providers-kit/tools-kit
 dependency.
 
 App uses `A::Workspace` and its associated Conversation, never independent child
@@ -262,7 +257,7 @@ products outside App core completion.
 - No unsafe code, `async_trait`, generated source, `include!`, `#[path]`,
   negative conditional compilation, or production test branches.
 - No `macro_rules!`, proc macros, generated dispatch, or codegen to hide
-  repetition; `tool_sdk::tool!` is the sole narrow ergonomic exception.
+  repetition; `tools_kit::tool!` is the sole narrow ergonomic exception.
 - No standalone library functions/loose helpers absent an exact human-written
   spec requirement. Put behavior on the smallest honest domain owner, builder,
   data-carrying enum or trait.
@@ -302,7 +297,7 @@ Share ordinary test-local helpers only within a crate. No public conformance
 API, production fixture, callback framework, macro, or shared conformance crate.
 
 Only the two OpenCode interaction cases named in Agent's strict guide and two
-OpenAI Realtime cases named in Provider's strict guide separate SDK/scenario
+OpenAI Realtime cases named in Provider's strict guide separate Kit/scenario
 correctness from verbatim-copy quality. Exact native delivery where independently
 observed, correlation, output fidelity, recovery, streaming and cleanup stay
 blocking. Within the two Question cases, answer copying and each option
@@ -311,7 +306,7 @@ description fidelity and every other typed Question requirement remain blocking.
 Realtime requires new audio and nonblank transcription after successful
 function-result submission; public-session evidence does not independently prove
 native parity or semantic result use. Report every raw copy grade, including
-failures; they do not determine SDK completion. Missing/invalid grades fail
+failures; they do not determine Kit completion. Missing/invalid grades fail
 validation. These exceptions change no other acceptance rule and prove neither
 model-quality acceptance nor statistical reliability.
 

@@ -20,9 +20,9 @@ class CoordinatedVendorTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name).resolve()
-        self.vendor = self.root / "agent-sdk/vendor"
+        self.vendor = self.root / "agents-kit/vendor"
         self.vendor.mkdir(parents=True)
-        (self.root / ".gitignore").write_text("target/\nagent-sdk/vendor/*/\n")
+        (self.root / ".gitignore").write_text("target/\nagents-kit/vendor/*/\n")
         self.updater = self.module.VendorUpdater(self.root, stdout=io.StringIO())
         manifest = "version = 1\n"
         locks = {}
@@ -34,7 +34,7 @@ channel = "stable"
 release_tag_prefix = "v"
 archive_prefix = "{name}"
 upstream_focus_paths = ["README.md"]
-local_focus_paths = ["agent-sdk/src"]
+local_focus_paths = ["agents-kit/src"]
 plan_prompt_suffix = "Adapt selected release."
 preflight_gates = [["preflight"]]
 completion_gates = [["complete"]]
@@ -51,9 +51,9 @@ completion_gates = [["complete"]]
         self.git("config", "user.email", "test@example.test")
         self.git("add", ".")
         self.git("-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "-m", "base")
-        self.source = self.root / "target/vendor-updates/agent-sdk/codex/v2.0.0"
+        self.source = self.root / "target/vendor-updates/agents-kit/codex/v2.0.0"
         self.source.mkdir(parents=True)
-        current = self.updater._load_crate_state("agent-sdk")
+        current = self.updater._load_crate_state("agents-kit")
         target = self.archive(self.vendor / "codex-2.0.0.zip", "new codex")
         metadata = {"current": vars(locks["codex"]), "target": {
             "tag": "v2.0.0", "archive": target.name, "extracted_dir": "codex-2.0.0",
@@ -107,31 +107,31 @@ completion_gates = [["complete"]]
     def test_coordination_rejects_prerequisite_import_before_discovery(self):
         for name in ("release.json", "upstream_diff_stat.txt", "upstream_changed_files.txt"):
             (self.source / name).write_text("{}\n")
-        prerequisite = self.root / "app-sdk/src/lib.rs"
+        prerequisite = self.root / "app-kit/src/lib.rs"
         prerequisite.parent.mkdir(parents=True)
         prerequisite.write_text("//! Corrected rustdoc link.\n")
-        self.git("add", "--", "app-sdk/src/lib.rs")
+        self.git("add", "--", "app-kit/src/lib.rs")
         self.git("commit", "-m", "fix prerequisite docs")
         destination = self.source.with_name("v2.0.0-prerequisite")
         self.updater.import_prerequisite(
-            self.source, destination, self.git("rev-parse", "HEAD"), ["app-sdk/src/lib.rs"])
+            self.source, destination, self.git("rev-parse", "HEAD"), ["app-kit/src/lib.rs"])
         with mock.patch.object(self.updater, "_resolve_latest_release", side_effect=AssertionError("discovery")), \
              mock.patch.object(self.updater, "_run_codex_implementation", side_effect=AssertionError("implementation")):
             with self.assertRaisesRegex(self.module.VendorUpdateError, "original strict"):
                 self.updater.coordinate(destination, "opencode", "v2.0.0", self.plan)
-        self.assertFalse((self.root / "target/vendor-updates/agent-sdk/coordinated").exists())
+        self.assertFalse((self.root / "target/vendor-updates/agents-kit/coordinated").exists())
         self.assertEqual((self.vendor / "vendor-lock.toml").read_bytes(), self.original)
 
     def test_all_implementations_precede_common_gates_and_failure_restores_every_archive(self):
         dossier = self.prepare()
         events = []
         def implement(crate, config, *args, **kwargs):
-            locks = self.updater._load_crate_state("agent-sdk").locks
+            locks = self.updater._load_crate_state("agents-kit").locks
             self.assertEqual([lock.tag for lock in locks.values()], ["v2.0.0", "v2.0.0"])
             events.append(config.name)
-            (self.root / "agent-sdk/retained.txt").write_text("keep edit")
+            (self.root / "agents-kit/retained.txt").write_text("keep edit")
         def fail(*args):
-            self.assertEqual([lock.tag for lock in self.updater._load_crate_state("agent-sdk").locks.values()],
+            self.assertEqual([lock.tag for lock in self.updater._load_crate_state("agents-kit").locks.values()],
                              ["v2.0.0", "v2.0.0"])
             events.append("complete")
             raise self.module.VendorUpdateError("gate failed")
@@ -153,7 +153,7 @@ completion_gates = [["complete"]]
             for version in ("1.0.0", "2.0.0"):
                 self.assertTrue((self.vendor / f"{name}-{version}.zip").is_file())
                 self.assertTrue((self.vendor / f"{name}-{version}").is_dir())
-        self.assertEqual((self.root / "agent-sdk/retained.txt").read_text(), "keep edit")
+        self.assertEqual((self.root / "agents-kit/retained.txt").read_text(), "keep edit")
 
     def test_resume_rejects_changed_head_branch_archive_lock_plan_and_unrelated_dirt(self):
         dossier = self.prepare()
@@ -350,7 +350,7 @@ completion_gates = [["complete"]]
             self.assertTrue((self.vendor / f"{name}-2.0.0.zip").exists())
 
     def test_success_preserves_unchanged_target_archive_and_extract(self):
-        original_lock = self.updater._load_crate_state("agent-sdk").locks["opencode"]
+        original_lock = self.updater._load_crate_state("agents-kit").locks["opencode"]
         dossier = self.prepare(opencode_tag="v1.0.0")
         archive = self.vendor / original_lock.archive
         readme = self.vendor / original_lock.extracted_dir / "README.md"
@@ -366,10 +366,10 @@ completion_gates = [["complete"]]
         self.assertTrue(readme.is_file(), "the selected unchanged extraction must survive cleanup")
         self.assertEqual(archive.read_bytes(), archive_bytes)
         self.assertEqual(readme.read_bytes(), readme_bytes)
-        self.assertEqual(self.updater._load_crate_state("agent-sdk").locks["opencode"], original_lock)
-        self.assertEqual(self.git("ls-files", "--error-unmatch", "agent-sdk/vendor/opencode-1.0.0.zip"),
-                         "agent-sdk/vendor/opencode-1.0.0.zip")
-        self.assertEqual(self.git("show", "HEAD:agent-sdk/vendor/vendor-lock.toml"),
+        self.assertEqual(self.updater._load_crate_state("agents-kit").locks["opencode"], original_lock)
+        self.assertEqual(self.git("ls-files", "--error-unmatch", "agents-kit/vendor/opencode-1.0.0.zip"),
+                         "agents-kit/vendor/opencode-1.0.0.zip")
+        self.assertEqual(self.git("show", "HEAD:agents-kit/vendor/vendor-lock.toml"),
                          (dossier / "candidate-vendor-lock.toml").read_text().strip())
         self.assertFalse((self.vendor / "codex-1.0.0.zip").exists())
         self.assertFalse((self.vendor / "codex-1.0.0").exists())
@@ -406,9 +406,9 @@ completion_gates = [["complete"]]
             self.assertTrue((self.vendor / f"{name}.zip").is_file())
             self.assertTrue((self.vendor / name / "README.md").is_file())
         self.assertEqual(set(self.git("diff", "--cached", "--name-only").splitlines()), {
-            "agent-sdk/vendor/codex-1.0.0.zip",
-            "agent-sdk/vendor/codex-2.0.0.zip",
-            "agent-sdk/vendor/vendor-lock.toml",
+            "agents-kit/vendor/codex-1.0.0.zip",
+            "agents-kit/vendor/codex-2.0.0.zip",
+            "agents-kit/vendor/vendor-lock.toml",
         })
 
     def test_default_resume_cannot_commit_coordinated_work_without_explicit_phase(self):
@@ -423,7 +423,7 @@ completion_gates = [["complete"]]
             with self.assertRaisesRegex(self.module.VendorUpdateError, "preflight"):
                 self.updater.resume(dossier, validation_only=True)
         self.assertEqual((self.vendor / "vendor-lock.toml").read_bytes(), self.original)
-        (self.root / "agent-sdk/escape").symlink_to(self.root / "target", target_is_directory=True)
+        (self.root / "agents-kit/escape").symlink_to(self.root / "target", target_is_directory=True)
         with self.assertRaises(self.module.VendorUpdateError):
             self.updater.resume(dossier, validation_only=True)
 

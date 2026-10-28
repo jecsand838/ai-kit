@@ -48,7 +48,7 @@ mkdir -p /tmp/codex-skill-forwardtest
 CODEX_HOME=/tmp/codex-skill-forwardtest codex exec --ephemeral --sandbox read-only \
   -C /Users/connorsanders/scratch/ai-kit \
   -o /tmp/refresh-workspace-rustdocs-happy.txt \
-  $'Use $refresh-workspace-rustdocs from /plan. Refresh the public rustdoc comments, runnable examples, and rustdoc validation across agent-sdk, provider-sdk, storage-sdk, and tool-sdk against current HEAD.'
+  $'Use $refresh-workspace-rustdocs from /plan. Refresh the public rustdoc comments, runnable examples, and rustdoc validation across agents-kit, providers-kit, storage-kit, and tools-kit against current HEAD.'
 ```
 
 Expected checks:
@@ -97,7 +97,7 @@ mkdir -p /tmp/codex-skill-forwardtest
 CODEX_HOME=/tmp/codex-skill-forwardtest codex exec --ephemeral --sandbox read-only \
   -C /Users/connorsanders/scratch/ai-kit \
   -o /tmp/refresh-workspace-rustdocs-narrow-boundary.txt \
-  $'Use $refresh-workspace-rustdocs from /plan. Refresh the rustdoc for one public builder method in provider-sdk without touching the rest of the workspace.'
+  $'Use $refresh-workspace-rustdocs from /plan. Refresh the rustdoc for one public builder method in providers-kit without touching the rest of the workspace.'
 ```
 
 Expected checks:

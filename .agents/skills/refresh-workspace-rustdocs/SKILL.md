@@ -1,6 +1,6 @@
 ---
 name: refresh-workspace-rustdocs
-description: "Refresh ai-kit public rustdoc end to end across agent-sdk, provider-sdk, storage-sdk, tool-sdk, and app-sdk. Use when public Rust APIs, crate or module docs, doctestable examples, source-contract expectations, or workspace rustdoc validation need a coordinated refresh against current HEAD. Do not use it for markdown-only documentation refreshes or narrow single-item rustdoc edits; use `refresh-workspace-agentic-documentation` for markdown-only work and `rust-public-api-docs` for focused item-level rustdoc work."
+description: "Refresh ai-kit public rustdoc end to end across agents-kit, providers-kit, storage-kit, tools-kit, and app-kit. Use when public Rust APIs, crate or module docs, doctestable examples, source-contract expectations, or workspace rustdoc validation need a coordinated refresh against current HEAD. Do not use it for markdown-only documentation refreshes or narrow single-item rustdoc edits; use `refresh-workspace-agentic-documentation` for markdown-only work and `rust-public-api-docs` for focused item-level rustdoc work."
 ---
 
 # Refresh Workspace Rustdocs

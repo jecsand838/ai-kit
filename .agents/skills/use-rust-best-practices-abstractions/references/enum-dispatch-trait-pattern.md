@@ -66,7 +66,7 @@ For Provider, Model, Session, Database, StateStore, StateTransaction, Agent,
 Workspace, and Conversation, keep the supplied handle's private dispatcher
 closed over built-ins. Their public RPITIT traits are direct static
 implementation contracts. Callers retain a concrete implementation hierarchy
-or define their own exhaustive enums; the SDK must not erase or normalize it.
+or define their own exhaustive enums; the Kit must not erase or normalize it.
 
 App's five `workflow` traits are additional static behavior seams, not new
 lower-backend dispatchers. Its `ChildExecutor` alone uses the exact generic

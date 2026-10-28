@@ -16,13 +16,13 @@ the repository.
   `ai-kit-public-surface-contract`
 - Validation, strict-live, docs gates, or command sequencing:
   `ai-kit-validation-matrix` and `strict-live-audit`
-- Crate behavior or public surface in `agent-sdk`: `agent-sdk-change-contract`
-- Crate behavior or public surface in `provider-sdk`:
-  `provider-sdk-change-contract`
-- Crate behavior or public surface in `storage-sdk`:
-  `storage-sdk-change-contract`
-- Crate behavior or public surface in `tool-sdk`: `tool-sdk-change-contract`
-- Crate behavior or public surface in `app-sdk`: read its `AGENTS.md` and
+- Crate behavior or public surface in `agents-kit`: `agents-kit-change-contract`
+- Crate behavior or public surface in `providers-kit`:
+  `providers-kit-change-contract`
+- Crate behavior or public surface in `storage-kit`:
+  `storage-kit-change-contract`
+- Crate behavior or public surface in `tools-kit`: `tools-kit-change-contract`
+- Crate behavior or public surface in `app-kit`: read its `AGENTS.md` and
   owning specs and load `ai-kit-public-surface-contract`
 - Rust design, tests, async, networking, architecture, abstraction, or
   dependency questions: the matching `use-rust-best-practices-*` skills
@@ -30,14 +30,14 @@ the repository.
 ## Add Research Skills Only When Needed
 
 - App graph/workflow semantics, checkpoint/recovery behavior, rurr evidence,
-  or lower-crate composition facts matter: `app-sdk-research`
-- `agent-sdk-research`: Codex App Server, OpenCode, transport, capability, or
+  or lower-crate composition facts matter: `app-kit-research`
+- `agents-kit-research`: Codex App Server, OpenCode, transport, capability, or
   strict-live behavior.
-- `provider-sdk-research`: provider API, model support, hosted-tool behavior,
+- `providers-kit-research`: provider API, model support, hosted-tool behavior,
   or strict-live behavior.
-- `storage-sdk-research`: backend capability, embedded-vs-remote behavior, or
+- `storage-kit-research`: backend capability, embedded-vs-remote behavior, or
   strict-live behavior.
-- `tool-sdk-research`: MCP, local/composite tool behavior, provider-hosted
+- `tools-kit-research`: MCP, local/composite tool behavior, provider-hosted
   tool behavior, or strict-live behavior.
 
 ## Boundary

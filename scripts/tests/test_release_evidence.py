@@ -39,18 +39,19 @@ class ReceiptTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         self.directory = self.root / "target" / "release"
         self.directory.mkdir(parents=True)
-        (self.root / "Cargo.toml").write_text('[workspace]\nmembers = ["agent-sdk", "provider-sdk"]\n[workspace.dependencies]\nprovider-sdk = {path = "provider-sdk"}\n')
+        (self.root / "Cargo.toml").write_text('[workspace]\nmembers = ["agents-kit", "providers-kit"]\n[workspace.dependencies]\nproviders-kit = {path = "providers-kit"}\n')
         (self.root / "Cargo.lock").write_text("version = 4\n")
-        for crate in ("agent-sdk", "provider-sdk", "app-sdk"):
+        for crate in ("agents-kit", "providers-kit", "app-kit"):
             (self.root / crate / "src").mkdir(parents=True)
             (self.root / crate / "tests").mkdir()
             (self.root / crate / "src" / "lib.rs").write_text("pub struct Owner;\n")
             (self.root / crate / "tests" / "behavior.rs").write_text("// integration input\n")
-            dependency = '\n[dependencies]\nprovider-sdk = {workspace = true}\n' if crate == "agent-sdk" else ""
-            (self.root / crate / "Cargo.toml").write_text(f'[package]\nname = "{crate}"\nversion = "0.1.0"\n{dependency}')
+            dependency = '\n[dependencies]\nproviders-kit = {workspace = true}\n' if crate == "agents-kit" else ""
+            (self.root / crate / "Cargo.toml").write_text(f'[package]\nname = "{crate}"\nversion = "0.0.1"\n{dependency}')
         (self.root / "scripts").mkdir()
+        (self.root / "scripts/security_exceptions.toml").write_text("advisories = []\n")
         (self.root / "scripts" / "gate.sh").write_text("exit 0\n")
-        self.command = ["cargo", "test", "--locked", "-p", "agent-sdk", "--test", "behavior", "--", "--nocapture"]
+        self.command = ["cargo", "test", "--locked", "-p", "agents-kit", "--test", "behavior", "--", "--nocapture"]
         self.compiler = "rustc fixture identity"
         self.manifest = {"schema": 1, "root": str(self.root), "compiler": self.compiler, "stages": {}}
         self.save_manifest()
@@ -131,7 +132,7 @@ class ReceiptTests(unittest.TestCase):
         self.assertEqual(len(self.calls), 2)
 
     def test_doctest_output_directory_alias_reuses_same_verified_execution(self):
-        plain = ["cargo", "test", "--locked", "-p", "agent-sdk", "--doc", "--", "--nocapture"]
+        plain = ["cargo", "test", "--locked", "-p", "agents-kit", "--doc", "--", "--nocapture"]
         isolated = ["env", "CARGO_TARGET_DIR=target/docs", *plain]
         self.assertEqual(self.run_stage(self.stage("docs.agent.doctest", isolated)), 0)
         self.assertEqual(self.run_stage(self.stage("agent.doctest", plain)), 0)
@@ -185,7 +186,7 @@ class ReceiptTests(unittest.TestCase):
 
     def test_source_change_rejects_reuse_without_running(self):
         self.assertEqual(self.run_stage(), 0)
-        (self.root / "provider-sdk" / "src" / "lib.rs").write_text("pub struct Changed;\n")
+        (self.root / "providers-kit" / "src" / "lib.rs").write_text("pub struct Changed;\n")
         with self.assertRaisesRegex(EvidenceError, "source changed within"):
             self.run_stage()
         self.assertEqual(len(self.calls), 2)
@@ -203,7 +204,7 @@ class ReceiptTests(unittest.TestCase):
         with self.assertRaisesRegex(EvidenceError, "compiler identity"):
             self.stage()
         self.manifest["compiler"] = self.compiler
-        self.manifest["stages"]["agent.test.behavior"] = {"command": self.command, "cwd": "agent-sdk"}
+        self.manifest["stages"]["agent.test.behavior"] = {"command": self.command, "cwd": "agents-kit"}
         self.save_manifest()
         with self.assertRaisesRegex(EvidenceError, "workspace root"):
             self.stage()
@@ -285,9 +286,9 @@ class ReceiptTests(unittest.TestCase):
         self.assertFalse(self.calls)
 
     def test_future_target_path_observation_cannot_inherit_doctest_equivalence(self):
-        command = ["cargo", "test", "-p", "agent-sdk", "--doc"]
+        command = ["cargo", "test", "-p", "agents-kit", "--doc"]
         SourceIdentity.capture(self.root, command)
-        (self.root / "agent-sdk" / "src" / "lib.rs").write_text('/// let output = std::env::var("CARGO_TARGET_DIR");\npub struct Owner;\n')
+        (self.root / "agents-kit" / "src" / "lib.rs").write_text('/// let output = std::env::var("CARGO_TARGET_DIR");\npub struct Owner;\n')
         with self.assertRaisesRegex(EvidenceError, "renewed source review"):
             SourceIdentity.capture(self.root, command)
 
@@ -337,50 +338,38 @@ class ReceiptTests(unittest.TestCase):
         before = SourceIdentity.capture(self.root, self.command)
         (self.root / "scripts" / "gate.sh").write_text("exit 1\n")
         self.assertEqual(before, SourceIdentity.capture(self.root, self.command))
-        (self.root / "provider-sdk" / "src" / "lib.rs").write_text("pub struct DependencyChanged;\n")
+        (self.root / "providers-kit" / "src" / "lib.rs").write_text("pub struct DependencyChanged;\n")
         self.assertNotEqual(before, SourceIdentity.capture(self.root, self.command))
 
-    def test_security_patch_inputs_are_required_in_all_source_scopes(self):
-        relative = "third-party/security/arrow-ipc-58.4.1/fixture.bin"
+    def test_security_exception_policy_is_required_in_all_source_scopes(self):
+        relative = "scripts/security_exceptions.toml"
         source = self.root / relative
-        source.parent.mkdir(parents=True)
-        source.write_bytes(b"compressed fixture")
-        with mock.patch("scripts.release_evidence.SecurityPatches", create=True) as patches:
-            patches.return_value.inputs.return_value = (relative,)
-            for command in (self.command, ["bash", "scripts/gate.sh"]):
-                with self.subTest(command=command):
-                    before = SourceIdentity.capture(self.root, command)
-                    self.assertIn(relative, before["files"])
-                    source.write_bytes(source.read_bytes() + b"changed")
-                    self.assertNotEqual(before, SourceIdentity.capture(self.root, command))
-                    before_mode = SourceIdentity.capture(self.root, command)
-                    source.chmod(0o755 if source.stat().st_mode & 0o111 == 0 else 0o644)
-                    self.assertNotEqual(before_mode, SourceIdentity.capture(self.root, command))
+        for command in (self.command, ["bash", "scripts/gate.sh"]):
+            with self.subTest(command=command):
+                source.write_text("advisories = []\n")
+                before = SourceIdentity.capture(self.root, command)
+                self.assertIn(relative, before["files"])
+                source.write_text('advisories = ["RUSTSEC-2026-0001"]\n')
+                self.assertNotEqual(before, SourceIdentity.capture(self.root, command))
 
-    def test_invalid_security_patch_provenance_rejects_release_receipts(self):
-        with mock.patch("scripts.release_evidence.SecurityPatches", create=True) as patches:
-            patches.return_value.inputs.side_effect = ValueError("security patch hash differs")
-            with self.assertRaisesRegex(EvidenceError, "security patch"):
-                SourceIdentity.capture(self.root, self.command)
+    def test_invalid_security_exception_policy_rejects_release_receipts(self):
+        (self.root / "scripts/security_exceptions.toml").write_text('advisories = ["RUSTSEC-2026"]\n')
+        with self.assertRaisesRegex(EvidenceError, "security exception policy"):
+            SourceIdentity.capture(self.root, self.command)
 
-    def test_scope_review_cannot_exclude_a_verified_patch_input(self):
-        relative = "third-party/security/arrow-ipc-58.4.1/fixture.bin"
-        source = self.root / relative
-        source.parent.mkdir(parents=True)
-        source.write_bytes(b"\x00upstream-build-input\xff")
-        with mock.patch("scripts.release_evidence.SecurityPatches", create=True) as patches:
-            patches.return_value.inputs.return_value = (relative,)
-            paths = SourceIdentity.paths(self.root, self.command)
-            selected = [name for name in paths if name != relative]
-            audit_path = self.root / "target" / "scope.json"
-            audit_path.write_text(json.dumps({
-                "schema": 1, "status": "APPROVED", "reviewer": "independent fixture",
-                "reason": "bounded source audit", "command": Command.canonical(self.command),
-                "paths": selected, "excluded_paths": {relative: "cannot omit patched build inputs"},
-            }))
-            override = {"paths": selected, "audit": {"path": str(audit_path), "sha256": JsonFile.digest(audit_path)}}
-            with self.assertRaisesRegex(EvidenceError, "root build authority"):
-                SourceIdentity.capture(self.root, self.command, scope_override=override)
+    def test_scope_review_cannot_exclude_the_security_exception_policy(self):
+        relative = "scripts/security_exceptions.toml"
+        paths = SourceIdentity.paths(self.root, self.command)
+        selected = [name for name in paths if name != relative]
+        audit_path = self.root / "target" / "scope.json"
+        audit_path.write_text(json.dumps({
+            "schema": 1, "status": "APPROVED", "reviewer": "independent fixture",
+            "reason": "bounded source audit", "command": Command.canonical(self.command),
+            "paths": selected, "excluded_paths": {relative: "cannot omit security policy inputs"},
+        }))
+        override = {"paths": selected, "audit": {"path": str(audit_path), "sha256": JsonFile.digest(audit_path)}}
+        with self.assertRaisesRegex(EvidenceError, "root build authority"):
+            SourceIdentity.capture(self.root, self.command, scope_override=override)
 
     def test_contract_scope_includes_scripts_and_documentation(self):
         command = self.command.copy()
@@ -390,29 +379,29 @@ class ReceiptTests(unittest.TestCase):
         self.assertNotEqual(before, SourceIdentity.capture(self.root, command))
 
     def test_contract_scope_includes_other_crates_script_and_template_inputs(self):
-        other = self.root / "storage-sdk"
+        other = self.root / "storage-kit"
         (other / "scripts").mkdir(parents=True)
         (other / "scripts" / "check.sh").write_text("exit 0\n")
         (other / "strict-tests.env.example").write_text("export TEST_NONSECRET_MODEL=fixture\n")
-        command = ["cargo", "test", "-p", "provider-sdk", "--test", "strict_env_contract"]
+        command = ["cargo", "test", "-p", "providers-kit", "--test", "strict_env_contract"]
         paths = SourceIdentity.paths(self.root, command)
-        self.assertIn("storage-sdk/scripts/check.sh", paths)
-        self.assertIn("storage-sdk/strict-tests.env.example", paths)
+        self.assertIn("storage-kit/scripts/check.sh", paths)
+        self.assertIn("storage-kit/strict-tests.env.example", paths)
 
     def test_vendor_scope_uses_archives_and_never_walks_ignored_extractions(self):
-        vendor = self.root / "agent-sdk" / "vendor"
+        vendor = self.root / "agents-kit" / "vendor"
         vendor.mkdir()
         (vendor / "pinned.zip").write_bytes(b"archive")
         (vendor / "ignored-checkout").symlink_to(self.root / "outside", target_is_directory=True)
-        listing = subprocess.CompletedProcess([], 0, b"agent-sdk/vendor/pinned.zip\0", b"")
+        listing = subprocess.CompletedProcess([], 0, b"agents-kit/vendor/pinned.zip\0", b"")
         with mock.patch("scripts.release_evidence.subprocess.run", return_value=listing) as run:
             paths = SourceIdentity.paths(self.root, self.command)
-        self.assertIn("agent-sdk/vendor/pinned.zip", paths)
-        self.assertNotIn("agent-sdk/vendor/ignored-checkout", paths)
+        self.assertIn("agents-kit/vendor/pinned.zip", paths)
+        self.assertNotIn("agents-kit/vendor/ignored-checkout", paths)
         self.assertIn("--exclude-standard", run.call_args.args[0])
 
     def test_unknown_local_cargo_dependency_is_not_silently_omitted(self):
-        manifest = self.root / "agent-sdk" / "Cargo.toml"
+        manifest = self.root / "agents-kit" / "Cargo.toml"
         manifest.write_text(manifest.read_text() + 'new-local = {path = "vendor/local"}\n')
         with self.assertRaisesRegex(EvidenceError, "local Cargo dependency"):
             SourceIdentity.paths(self.root, self.command)
@@ -428,7 +417,7 @@ class ReceiptTests(unittest.TestCase):
 
     def test_scope_override_requires_exclusion_review_and_root_authority(self):
         paths = SourceIdentity.paths(self.root, self.command)
-        excluded = "agent-sdk/tests/behavior.rs"
+        excluded = "agents-kit/tests/behavior.rs"
         selected = [name for name in paths if name != excluded]
         audit_path = self.root / "target" / "scope.json"
         audit = {"schema": 1, "status": "APPROVED", "reviewer": "independent fixture", "reason": "bounded source audit",
@@ -474,32 +463,32 @@ class ReceiptTests(unittest.TestCase):
 
 class CommandAndOutcomeTests(unittest.TestCase):
     def test_cargo_option_order_normalizes_but_features_do_not(self):
-        left = ["cargo", "test", "-p", "agent-sdk", "--features", "b,a", "--locked", "--test", "contract"]
-        right = ["cargo", "test", "--test", "contract", "--locked", "--features=a,b", "--package=agent-sdk"]
+        left = ["cargo", "test", "-p", "agents-kit", "--features", "b,a", "--locked", "--test", "contract"]
+        right = ["cargo", "test", "--test", "contract", "--locked", "--features=a,b", "--package=agents-kit"]
         self.assertEqual(Command.canonical(left), Command.canonical(right))
         self.assertNotEqual(Command.canonical(left), Command.canonical(right + ["--no-default-features"]))
 
     def test_env_wrapped_cargo_keeps_semantics_and_effective_build_identity(self):
-        command = ["env", "RUSTDOCFLAGS=-D warnings", "CARGO_TARGET_DIR=target/docs", "cargo", "test", "--doc", "-p", "agent-sdk"]
+        command = ["env", "RUSTDOCFLAGS=-D warnings", "CARGO_TARGET_DIR=target/docs", "cargo", "test", "--doc", "-p", "agents-kit"]
         self.assertEqual(Command.kind(command), "tests")
-        self.assertEqual(Command.values(command, "-p"), ["agent-sdk"])
+        self.assertEqual(Command.values(command, "-p"), ["agents-kit"])
         self.assertIn("--list", Command.listing(command))
         self.assertEqual(Command.environment(command)["CARGO_BUILD_JOBS"], "1")
         self.assertNotEqual(RuntimeIdentity.capture(BUILD_NAMES, Command.environment(command)), RuntimeIdentity.capture(BUILD_NAMES))
 
     def test_only_workspace_doctest_build_output_directory_is_nonsemantic(self):
-        plain = ["cargo", "test", "--locked", "-p", "agent-sdk", "--doc", "--", "--nocapture"]
+        plain = ["cargo", "test", "--locked", "-p", "agents-kit", "--doc", "--", "--nocapture"]
         for alternate in (["env", "CARGO_TARGET_DIR=target/a", *plain],
                           plain[:2] + ["--target-dir", "target/b"] + plain[2:],
                           plain[:2] + ["--target-dir=target/c"] + plain[2:]):
             self.assertEqual(Command.canonical(plain), Command.canonical(alternate))
-        for operation in (["cargo", "doc", "-p", "agent-sdk"],
-                          ["cargo", "test", "-p", "agent-sdk", "--test", "behavior"]):
+        for operation in (["cargo", "doc", "-p", "agents-kit"],
+                          ["cargo", "test", "-p", "agents-kit", "--test", "behavior"]):
             self.assertNotEqual(Command.canonical(operation), Command.canonical(operation + ["--target-dir", "target/a"]))
             self.assertNotEqual(Command.canonical(operation), Command.canonical(["env", "CARGO_TARGET_DIR=target/a", *operation]))
 
     def test_doctest_directory_equivalence_preserves_features_filters_and_threads(self):
-        plain = ["cargo", "test", "--locked", "-p", "agent-sdk", "--doc", "--", "--nocapture"]
+        plain = ["cargo", "test", "--locked", "-p", "agents-kit", "--doc", "--", "--nocapture"]
         variants = [plain[:2] + ["--no-default-features"] + plain[2:],
                     plain + ["--test-threads=1"], plain + ["--skip", "case"],
                     ["env", "CARGO_TARGET_DIR=target/a", "RUSTDOCFLAGS=-D warnings", *plain]]
@@ -509,8 +498,8 @@ class CommandAndOutcomeTests(unittest.TestCase):
     def test_foreign_or_manifest_selected_doctests_keep_exact_output_directory(self):
         for command in (["cargo", "test", "--doc", "-p", "foreign-crate"],
                         ["cargo", "test", "--doc", "-pforeign-crate"],
-                        ["cargo", "test", "--doc", "--manifest-path", "agent-sdk/Cargo.toml"],
-                        ["cargo", "test", "--doc", "--manifest-path=agent-sdk/Cargo.toml"]):
+                        ["cargo", "test", "--doc", "--manifest-path", "agents-kit/Cargo.toml"],
+                        ["cargo", "test", "--doc", "--manifest-path=agents-kit/Cargo.toml"]):
             self.assertFalse(Command.workspace_doctest(command))
             self.assertNotEqual(Command.canonical(command), Command.canonical(command + ["--target-dir", "target/a"]))
             self.assertNotEqual(Command.canonical(command), Command.canonical(["env", "CARGO_TARGET_DIR=target/a", *command]))
@@ -518,7 +507,7 @@ class CommandAndOutcomeTests(unittest.TestCase):
     def test_build_identity_omits_only_settings_irrelevant_to_command(self):
         self.assertNotIn("RUSTDOCFLAGS", Command.build_names(["cargo", "test", "--test", "behavior"]))
         self.assertIn("RUSTDOCFLAGS", Command.build_names(["cargo", "test", "--doc"]))
-        self.assertIn("RUSTDOCFLAGS", Command.build_names(["cargo", "test", "-p", "agent-sdk"]))
+        self.assertIn("RUSTDOCFLAGS", Command.build_names(["cargo", "test", "-p", "agents-kit"]))
         self.assertEqual(Command.build_names(["cargo", "fmt", "--check"]), ())
 
     def test_unknown_or_secret_env_prefix_is_rejected(self):
@@ -606,9 +595,9 @@ class CommandAndOutcomeTests(unittest.TestCase):
                           output.replace("test crash_boundaries ... ok\n", "")):
             with self.assertRaises(EvidenceError):
                 Outcome.validate("tests", malformed, names, supervised_parent=True)
-        self.assertTrue(Command.supervised_parent(["cargo", "test", "-p", "app-sdk", "--test", "prepare_contract"]))
-        self.assertEqual(Command.supervised_parent(["cargo", "test", "-p", "provider-sdk", "--test", "prepare_contract"]), "integration")
-        self.assertFalse(Command.supervised_parent(["cargo", "test", "-p", "app-sdk", "--doc"]))
+        self.assertTrue(Command.supervised_parent(["cargo", "test", "-p", "app-kit", "--test", "prepare_contract"]))
+        self.assertEqual(Command.supervised_parent(["cargo", "test", "-p", "providers-kit", "--test", "prepare_contract"]), "integration")
+        self.assertFalse(Command.supervised_parent(["cargo", "test", "-p", "app-kit", "--doc"]))
 
     def test_lance_parent_accounts_completed_and_deliberately_lost_children(self):
         names = ["child_entry", "lease", "crash"]
@@ -639,7 +628,7 @@ class CommandAndOutcomeTests(unittest.TestCase):
         self.assertEqual(Outcome.validate("tests", rust_output(["a"], filtered=7), ["a"], expected_filtered=7)["filtered"], 7)
 
     def test_compile_only_and_library_empty_inventory_remain_explicit(self):
-        self.assertTrue(Command.allow_empty(["cargo", "test", "-p", "app-sdk", "--test", "compile_contract"]))
+        self.assertTrue(Command.allow_empty(["cargo", "test", "-p", "app-kit", "--test", "compile_contract"]))
         self.assertTrue(Command.allow_empty(["cargo", "test", "--lib"]))
         self.assertFalse(Command.allow_empty(["cargo", "test", "--test", "mock_contracts"]))
         self.assertEqual(Outcome.validate("tests", rust_output([]), [], allow_empty=True)["passed"], 0)

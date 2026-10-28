@@ -62,16 +62,16 @@ compatibility path.
   supplied handles, intentional passive DTOs, associated child types, one
   erased Tool ingress, direct static Provider/Storage/Agent traits, private enum
   dispatch, and cross-crate ownership.
-- `provider-sdk-change-contract`: Provider/Model/Session ownership, normalized
+- `providers-kit-change-contract`: Provider/Model/Session ownership, normalized
   provider messages and Model-associated function continuation, portable hosted-tool values,
   model/session lifecycle, and provider validation.
-- `storage-sdk-change-contract`: reduced honest Database operations,
+- `storage-kit-change-contract`: reduced honest Database operations,
   StateStore/StateTransaction ownership, actor correctness, feature lanes, and
   storage validation.
-- `tool-sdk-change-contract`: Toolset/ToolHandler behavior, direct Local/MCP
+- `tools-kit-change-contract`: Toolset/ToolHandler behavior, direct Local/MCP
   construction, independent MCP server ownership, interaction state, and tool
   validation.
-- `agent-sdk-change-contract`: Agent/Workspace/Conversation behavior, static
+- `agents-kit-change-contract`: Agent/Workspace/Conversation behavior, static
   Provider/Storage/Toolset composition with associated, non-Clone handlers,
   private managed knowledge, prompt-local associated continuation, one Custom
   unary/streaming prompt owner, durable provider-neutral state, notifications, and
@@ -79,15 +79,15 @@ compatibility path.
 
 ## Research Skills
 
-- `provider-sdk-research`: official OpenAI, Anthropic, Gemini, and Ollama
+- `providers-kit-research`: official OpenAI, Anthropic, Gemini, and Ollama
   behavior, model support, continuation metadata, and strict-live facts.
-- `storage-sdk-research`: official/vendored LanceDB, SurrealDB, Qdrant, Redb,
+- `storage-kit-research`: official/vendored LanceDB, SurrealDB, Redb,
   SQLite/Turso, PostgreSQL, transaction, feature, and strict-live facts.
-- `tool-sdk-research`: MCP client/server protocol, Local/MCP portability, and
+- `tools-kit-research`: MCP client/server protocol, Local/MCP portability, and
   runtime ownership facts.
-- `agent-sdk-research`: pinned Codex App Server and OpenCode protocol plus
+- `agents-kit-research`: pinned Codex App Server and OpenCode protocol plus
   strict-live behavior.
-- `app-sdk-research`: app workflow semantics, the checksum-fixed rurr snapshot,
+- `app-kit-research`: app workflow semantics, the checksum-fixed rurr snapshot,
   lower-crate composition contracts, and current official graph sources.
 
 Research distinguishes sourced facts from implementation inference. It never
@@ -114,7 +114,7 @@ uses an existing adapter as proof of dependency behavior.
   security, and portability hygiene.
 
 Workspace Rust policy bans item type aliases, unsafe code, generated dispatch,
-compatibility shims, and macro-based reduction. `tool_sdk::tool!` remains the
+compatibility shims, and macro-based reduction. `tools_kit::tool!` remains the
 only narrow ergonomic macro exception.
 
 ## Documentation and Validation Skills
@@ -144,8 +144,8 @@ core. Add async, testing, abstraction, architecture, structuring, networking,
 or dependency skills when that concern is material.
 
 Public-surface changes always pair with `ai-kit-public-surface-contract`.
-App changes load `app-sdk/AGENTS.md`, its owning specifications, and
-`ai-kit-public-surface-contract`; add `app-sdk-research` when workflow or
+App changes load `app-kit/AGENTS.md`, its owning specifications, and
+`ai-kit-public-surface-contract`; add `app-kit-research` when workflow or
 external graph semantics matter. Protocol/backend claims always pair with the
 owning research skill. When
 context is interrupted, reload the current governing docs and applicable

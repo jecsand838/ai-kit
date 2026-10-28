@@ -100,7 +100,7 @@ pub enum AgentRunState {
     },
     Failed {
         started_at: SystemTime,
-        error: SdkError,
+        error: KitError,
     },
 }
 

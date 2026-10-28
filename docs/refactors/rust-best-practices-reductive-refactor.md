@@ -21,9 +21,9 @@ For crate-specific current-state guidance, use each crate’s `README.md`, `ARCH
 
 The archived campaign covered reductive cleanup across:
 
-- `agent-sdk`
-- `provider-sdk`
-- `storage-sdk`
+- `agents-kit`
+- `providers-kit`
+- `storage-kit`
 
 The original plan emphasized:
 

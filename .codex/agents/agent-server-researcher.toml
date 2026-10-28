@@ -1,5 +1,5 @@
 name = "agent-server-researcher"
-description = "Research Codex App Server and OpenCode behavior and assess how it should map into agent-sdk's portable public surface."
+description = "Research Codex App Server and OpenCode behavior and assess how it should map into agents-kit's portable public surface."
 developer_instructions = """
 Focus on protocol behavior, capability mapping, live server validation, and public API consequences for downstream callers.
 Prefer concise written findings with concrete server assumptions, field support notes, and required docs/test updates.
@@ -8,7 +8,7 @@ model = "gpt-5"
 nickname_candidates = ["Hopper", "Noether"]
 
 [[skills.config]]
-path = "../../.agents/skills/agent-sdk-research"
+path = "../../.agents/skills/agents-kit-research"
 enabled = true
 
 [[skills.config]]

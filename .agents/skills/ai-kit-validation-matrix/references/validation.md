@@ -6,10 +6,10 @@ Use this file for the canonical `ai-kit` validation sequence.
 
 Select authority from explicit user direction and the selected workflow before
 choosing a gate. The presence of a checked-in workflow does not select it.
-When selected, `agent-sdk/.codex/development/PROCESS.md` intentionally narrows
-the workspace baseline to its agent-sdk-only validation boundary unless an
+When selected, `agents-kit/.codex/development/PROCESS.md` intentionally narrows
+the workspace baseline to its agents-kit-only validation boundary unless an
 explicitly approved workspace-wide plan owns coordinated cross-crate work.
-In an ordinary Agent-only run, use only the commands in `agent-sdk/AGENTS.md`;
+In an ordinary Agent-only run, use only the commands in `agents-kit/AGENTS.md`;
 never run the workspace baseline, `scripts/verify_workspace_strict.sh`, the
 workspace docs-site gate, or another crate's validation. If another crate owns
 required proof and no approved workspace-wide plan is active, stop for a
@@ -66,12 +66,12 @@ use `--locked`; a missing or stale lockfile fails instead of being updated:
 
 ```bash
 cargo fmt --all --check
-cargo clippy --locked --workspace --all-targets --all-features --exclude storage-sdk --exclude app-sdk -- -D warnings
-storage_lanes="$(python3 storage-sdk/scripts/feature_policy.py --all-backends --format lanes)"
+cargo clippy --locked --workspace --all-targets --all-features --exclude storage-kit --exclude app-kit -- -D warnings
+storage_lanes="$(python3 storage-kit/scripts/feature_policy.py --all-backends --format lanes)"
 while IFS= read -r features; do
     storage_args=(--no-default-features)
     if [[ "${features}" != - ]]; then storage_args+=(--features "${features}"); fi
-    cargo clippy --locked -p storage-sdk --all-targets "${storage_args[@]}" -- -D warnings
+    cargo clippy --locked -p storage-kit --all-targets "${storage_args[@]}" -- -D warnings
 done <<< "${storage_lanes}"
 bash scripts/check_docs_site.sh
 ```
@@ -83,9 +83,9 @@ crate-owned test blocks with `cargo test --locked --workspace --all-targets --al
 
 `bash scripts/verify_workspace_strict.sh` reruns the workspace baseline and
 invokes the crate-owned verify scripts in isolated subshells that source
-`agent-sdk/strict-tests.env`, `provider-sdk/strict-tests.env`,
-`tool-sdk/strict-tests.env`, and
-`app-sdk/strict-tests.env`. Tool-sdk fails fast unless a real independently
+`agents-kit/strict-tests.env`, `providers-kit/strict-tests.env`,
+`tools-kit/strict-tests.env`, and
+`app-kit/strict-tests.env`. tools-kit fails fast unless a real independently
 configured MCP service is supplied.
 The repository-managed scripted MCP fixtures remain deterministic transport
 evidence and never satisfy that lane. The wrapper is full workspace
@@ -132,7 +132,7 @@ submission; pre-tool narration cannot satisfy that progress. The ordinary
 speech turn retains its own audio, nonblank input/output transcription and
 completion checks. Public Session evidence does not independently prove native
 parity or semantic result use. The verifier requires two valid case receipts
-and all three named boolean grades; missing, malformed or SDK-failed receipts
+and all three named boolean grades; missing, malformed or Kit-failed receipts
 remain failures.
 
 Report all untouched whole-string copy grades, including visible nonblocking
@@ -141,7 +141,7 @@ four named cases create no other exception; knowledge, pending-interaction
 recovery and all other exact-output assertions remain blocking.
 
 Preserve Provider's exact model/operation/case eligibility and complete evidence
-requirements in [its strict guide](../../../../provider-sdk/docs/STRICT_TESTING.md).
+requirements in [its strict guide](../../../../providers-kit/docs/STRICT_TESTING.md).
 The narrow Gemini streaming File Search unpaired-declaration exception proves
 neither exclusive hosted-family behavior nor code execution. Management absence
 after store deletion does not prove retrieval erasure. Only the exact eligible
@@ -154,50 +154,50 @@ resource absence.
 
 After the workspace baseline, run the exact crate-specific command sets from:
 
-- `agent-sdk/AGENTS.md`
-- `provider-sdk/AGENTS.md`
-- `storage-sdk/AGENTS.md`
-- `tool-sdk/AGENTS.md`
-- `app-sdk/AGENTS.md`
+- `agents-kit/AGENTS.md`
+- `providers-kit/AGENTS.md`
+- `storage-kit/AGENTS.md`
+- `tools-kit/AGENTS.md`
+- `app-kit/AGENTS.md`
 
 Then run the crate-owned non-live or strict-live scripts required by the task.
 
 ## Strict-Live Notes
 
-- `agent-sdk`: caller must source `agent-sdk/strict-tests.env` before direct
+- `agents-kit`: caller must source `agents-kit/strict-tests.env` before direct
   `strict_live` runs or `verify_strict_live.sh`. The verify script is the
   canonical completion gate. Direct `strict_live` runs are for focused
   iteration after the configured Codex and OpenCode services are already
   running. For loopback endpoints, follow the selected-runtime startup commands
   and isolated configuration in the owning
-  [environment example](../../../../agent-sdk/strict-tests.env.example) and
-  [strict-testing guide](../../../../agent-sdk/docs/STRICT_TESTING.md) before
+  [environment example](../../../../agents-kit/strict-tests.env.example) and
+  [strict-testing guide](../../../../agents-kit/docs/STRICT_TESTING.md) before
   declaring strict-live unavailable. Persistence and knowledge fixtures use
   real embedded Lance. The integrated 29-case inventory retains the Lance
   foreground-conflict composition; PostgreSQL backend proof remains in Storage.
   Preserve configured models, runtime versions, authentication, and the owning
   startup policy.
-- `provider-sdk`: caller must source `provider-sdk/strict-tests.env` before
+- `providers-kit`: caller must source `providers-kit/strict-tests.env` before
   direct `strict_live` runs or `verify_strict_live.sh`. The verify script is
   the canonical completion gate. Direct `strict_live` runs are for focused
   iteration after provider credentials and local Ollama are available. If a
   configured local Ollama endpoint is unreachable, start `ollama serve` before
   declaring strict-live unavailable; missing models and malformed `/api` URLs
   remain blockers.
-- `storage-sdk`: the default verifier requires no alternative credentials or
+- `storage-kit`: the default verifier requires no alternative credentials or
   services and exercises Lance Database and StateStore. `--backend NAME`,
   `--changed-since BASE`, and `--all-backends` select additional coverage.
   Only selected alternatives require their environment/service prerequisites.
   Full migration qualification includes eight behavioral lanes and every legal
   feature subset. Never use Storage `--all-features`.
-- `tool-sdk`: caller must source `tool-sdk/strict-tests.env` before direct
-  `strict_live` runs or `tool-sdk/scripts/verify_strict_live.sh`. The verify
+- `tools-kit`: caller must source `tools-kit/strict-tests.env` before direct
+  `strict_live` runs or `tools-kit/scripts/verify_strict_live.sh`. The verify
   script is the canonical completion gate and fails fast unless its documented
   real stdio MCP program, arguments, environment, timeout, tool name, and tool
   arguments are configured. Repository-authored fixtures remain deterministic
   contract tests and never satisfy this strict-live proof.
-- `app-sdk`: caller must source `app-sdk/strict-tests.env` before direct live
-  Cargo runs. `app-sdk/scripts/verify_strict_live.sh` validates and sources the
+- `app-kit`: caller must source `app-kit/strict-tests.env` before direct live
+  Cargo runs. `app-kit/scripts/verify_strict_live.sh` validates and sources the
   file itself, runs non-live checks first, then uses separate Agent and app
   Lance StateStores for the real interaction and recovery journeys. The
   four-boundary process-crash proof retains an owned directory across child

@@ -4,8 +4,6 @@ import subprocess
 import tempfile
 import unittest
 
-from scripts.tests.test_security_dependencies import PatchFixture
-
 
 class WorkspaceWiringGuardTests(unittest.TestCase):
     def setUp(self):
@@ -51,10 +49,10 @@ class WorkspaceWiringGuardTests(unittest.TestCase):
         self.write(
             "Cargo.toml",
             '[workspace.dependencies]\n'
-            'agent-sdk = { path = "agent-sdk", version = "=0.1.0" }\n'
-            'provider-sdk = { path = "provider-sdk", version = "0.1.0" }\n'
-            'storage-sdk = { path = "storage-sdk", version = "0.1.0", default-features = false }\n'
-            'tool-sdk = { path = "tool-sdk", version = "0.1.0" }\n',
+            'agents-kit = { path = "agents-kit", version = "=0.0.1" }\n'
+            'providers-kit = { path = "providers-kit", version = "0.0.1" }\n'
+            'storage-kit = { path = "storage-kit", version = "0.0.1", default-features = false }\n'
+            'tools-kit = { path = "tools-kit", version = "0.0.1" }\n',
         )
         self.guard("check_no_path_wiring.sh", True)
 
@@ -84,50 +82,34 @@ class WorkspaceWiringGuardTests(unittest.TestCase):
         )
         self.guard("check_no_path_wiring.sh", False, "Cargo.toml:")
 
-    def test_verified_upstream_conventions_are_allowed_only_in_approved_roots(self):
-        fixture = PatchFixture(self.root)
-        path = fixture.roots[0] + "/src/lib.rs"
+    def test_security_exceptions_do_not_permit_source_wiring_or_aliases(self):
+        self.write("scripts/security_exceptions.toml", 'advisories = ["RUSTSEC-2026-0001"]\n')
+        path = "third-party/security/fixture/src/lib.rs"
         self.write(path, '#[path = "native.rs"]\nmod native;\npub type Upstream = usize;\n')
-        fixture.refresh()
-        self.guard("check_no_path_wiring.sh", True)
-        self.guard("check_no_type_aliases.sh", True)
-        for path in ("provider-sdk/src/lib.rs", fixture.roots[0] + "-other/src/lib.rs"):
-            with self.subTest(path=path):
-                self.write(path, '#[path = "native.rs"]\nmod native;\npub type Upstream = usize;\n')
-                self.guard("check_no_path_wiring.sh", False, path)
-                self.guard("check_no_type_aliases.sh", False, path)
-                (self.root / path).unlink()
+        self.guard("check_no_path_wiring.sh", False, path)
+        self.guard("check_no_type_aliases.sh", False, path)
 
-    def test_upstream_provenance_failure_blocks_both_guards(self):
-        fixture = PatchFixture(self.root)
-        path = fixture.roots[0] + "/src/lib.rs"
-        self.write(path, "pub type Tampered = usize;\n")
-        for guard in ("check_no_path_wiring.sh", "check_no_type_aliases.sh"):
-            with self.subTest(guard=guard):
-                self.guard(guard, False, "inventory")
-
-    def test_approved_patch_path_cannot_be_reused_as_a_direct_dependency(self):
-        fixture = PatchFixture(self.root)
-        for path in ("Cargo.toml", "provider-sdk/Cargo.toml"):
+    def test_dependency_path_cannot_be_used_directly_in_root_or_crate(self):
+        for path in ("Cargo.toml", "providers-kit/Cargo.toml"):
             with self.subTest(path=path):
                 manifest = self.root / path
                 original = manifest.read_text() if manifest.exists() else ""
-                self.write(path, original + '\n[dependencies]\narrow-ipc = { path = "' + fixture.roots[0] + '" }\n')
+                self.write(path, original + '\n[dependencies]\narrow-ipc = { path = "third-party/security/arrow-ipc" }\n')
                 self.guard("check_no_path_wiring.sh", False, path + ":")
                 self.write(path, original)
 
-    def test_missing_provenance_blocks_even_empty_patch_tables(self):
-        self.write("Cargo.toml", "[patch]\n")
-        for guard in ("check_no_path_wiring.sh", "check_no_type_aliases.sh"):
-            with self.subTest(guard=guard):
-                self.guard(guard, False, "Cargo.toml:")
+    def test_empty_and_registry_only_patch_tables_are_rejected(self):
+        for contents in ("[patch]\n", '[patch.crates-io]\nfixture = "1.1.0"\n', '[replace]\n'):
+            with self.subTest(contents=contents):
+                self.write("Cargo.toml", contents)
+                self.guard("check_no_path_wiring.sh", False, "Cargo.toml:")
 
     def test_escaped_path_keys_cannot_bypass_structural_checks(self):
         self.write("Cargo.toml", '[dependencies.example]\n"pa\\u0074h" = "../outside"\n')
         self.guard("check_no_path_wiring.sh", False, "Cargo.toml:")
 
     def test_nested_manifest_path_patch_is_rejected(self):
-        path = "storage-sdk/Cargo.toml"
+        path = "storage-kit/Cargo.toml"
         self.write(path, '[patch.crates-io]\ngeo = { path = "third-party/geo-0.32.0" }\n')
         self.guard("check_no_path_wiring.sh", False, path + ":")
 
@@ -162,14 +144,14 @@ class WorkspaceWiringGuardTests(unittest.TestCase):
                 self.guard("check_no_path_wiring.sh", False, "Cargo.toml:")
 
     def test_project_and_other_dependency_rust_paths_remain_banned(self):
-        for path in ("storage-sdk/src/lib.rs", "third-party/other/src/lib.rs", "third-party/geo-0.32.0-other/src/lib.rs"):
+        for path in ("storage-kit/src/lib.rs", "third-party/other/src/lib.rs", "third-party/geo-0.32.0-other/src/lib.rs"):
             with self.subTest(path=path):
                 self.write(path, '#[path = "other.rs"]\nmod other;\n')
                 self.guard("check_no_path_wiring.sh", False, path)
                 (self.root / path).unlink()
 
     def test_project_and_other_dependency_aliases_remain_banned(self):
-        for path in ("storage-sdk/src/lib.rs", "third-party/other/src/lib.rs", "third-party/geo-0.32.0-other/src/lib.rs"):
+        for path in ("storage-kit/src/lib.rs", "third-party/other/src/lib.rs", "third-party/geo-0.32.0-other/src/lib.rs"):
             with self.subTest(path=path):
                 self.write(path, "pub(crate) type Unrelated = usize;\n")
                 self.guard("check_no_type_aliases.sh", False, path)
@@ -182,7 +164,7 @@ class WorkspaceWiringGuardTests(unittest.TestCase):
 
     def test_associated_types_remain_allowed(self):
         self.write(
-            "storage-sdk/src/lib.rs",
+            "storage-kit/src/lib.rs",
             "trait Backend {\n    type Child;\n}\n"
             "impl Backend for Concrete {\n    type Child = usize;\n}\n",
         )

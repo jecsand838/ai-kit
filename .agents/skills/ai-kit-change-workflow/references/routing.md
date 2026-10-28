@@ -34,8 +34,8 @@ TODO marker.
   or `use-rust-best-practices-dependencies-platforms` when those domains
   dominate the work.
 - Add the relevant crate `*-change-contract` skill for every crate in scope.
-  For App, read `app-sdk/AGENTS.md` and owning specs and load
-  `ai-kit-public-surface-contract`; add `app-sdk-research` when workflow,
+  For App, read `app-kit/AGENTS.md` and owning specs and load
+  `ai-kit-public-surface-contract`; add `app-kit-research` when workflow,
   graph, recovery, or lower-crate composition facts matter.
 - Add research skills only when external provider, backend, protocol, MCP,
   runtime, or strict-live facts affect the planned or implemented behavior.

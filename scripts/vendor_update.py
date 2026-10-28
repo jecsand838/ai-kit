@@ -313,7 +313,7 @@ class VendorUpdater:
             if state["version"] == 2:
                 if implementation_only == validation_only:
                     raise VendorUpdateError("coordinated resume requires exactly one of --implementation-only or --validation-only")
-                crate_state = self._load_crate_state("agent-sdk")
+                crate_state = self._load_crate_state("agents-kit")
                 self._validate_coordinated_update(crate_state, dossier_dir, state)
                 return self._execute_prepared_update(
                     crate_state, crate_state.configs["codex"], dossier_dir, state,
@@ -496,11 +496,11 @@ class VendorUpdater:
             raise VendorUpdateError("source dossier must belong to this workspace")
         state = json.loads((source / "resume.json").read_text())
         if (state["version"] != 1 or state["workspace"] != str(self.workspace_root)
-            or state["crate"] != "agent-sdk" or state["vendor"] != "codex"
+            or state["crate"] != "agents-kit" or state["vendor"] != "codex"
             or vendor_name != "opencode" or state["git_mode"] != "current-branch"
             or state["completion_policy"] != "strict" or "prerequisite_import" in state):
             raise VendorUpdateError("coordination requires an original strict current-branch Agent Codex dossier")
-        crate = self._load_crate_state("agent-sdk")
+        crate = self._load_crate_state("agents-kit")
         self._validate_prepared_update(crate, crate.configs["codex"], source, state,
                                        coordination=True)
         if self._sha256(crate.vendor_root / "vendor-lock.toml") != state["original_lock_sha256"]:
@@ -524,9 +524,9 @@ class VendorUpdater:
         candidate = self._parse_vendor_locks(source / "candidate-vendor-lock.toml",
                                              self._read_toml(source / "candidate-vendor-lock.toml"))
         target_name = f"{config.archive_prefix}-{config.archive_version(target_tag)}"
-        destination = self.workspace_root / "target/vendor-updates/agent-sdk/coordinated" / (
+        destination = self.workspace_root / "target/vendor-updates/agents-kit/coordinated" / (
             state["target"]["tag"] + "_" + target_tag)
-        target_leaf = self.workspace_root / "target/vendor-updates/agent-sdk/opencode" / target_tag
+        target_leaf = self.workspace_root / "target/vendor-updates/agents-kit/opencode" / target_tag
         if destination.exists() or target_leaf.exists():
             raise VendorUpdateError("coordinated or target dossier already exists; inspect and resume it")
         archive = crate.vendor_root / f"{target_name}.zip"
@@ -573,7 +573,7 @@ class VendorUpdater:
             imports[name] = {"path": str(leaf), "files": files}
             vendors[name] = {"current": vars(original[name]), "target": vars(candidate[name])}
         combined = {
-            "version": 2, "workspace": str(self.workspace_root), "crate": "agent-sdk",
+            "version": 2, "workspace": str(self.workspace_root), "crate": "agents-kit",
             "branch": state["branch"], "head": state["head"],
             "git_mode": "current-branch", "completion_policy": "strict",
             "initial_dirty": state["initial_dirty"], "vendors": vendors, "imports": imports,
@@ -604,7 +604,7 @@ class VendorUpdater:
         *, expected_resume: bytes | None = None,
     ) -> list[str]:
         if (state["version"] != 2 or state["workspace"] != str(self.workspace_root)
-            or state["crate"] != "agent-sdk" or state["git_mode"] != "current-branch"
+            or state["crate"] != "agents-kit" or state["git_mode"] != "current-branch"
             or state["completion_policy"] != "strict"
             or list(state["vendors"]) != ["codex", "opencode"]
             or set(state["imports"]) != {"codex", "opencode"}
@@ -632,7 +632,7 @@ class VendorUpdater:
                                              self._read_toml(dossier / "candidate-vendor-lock.toml"))
         if set(original) != set(candidate) or set(original) != set(state["vendors"]):
             raise VendorUpdateError("coordinated inventory changed")
-        vendor_paths = {"agent-sdk/vendor/vendor-lock.toml"}
+        vendor_paths = {"agents-kit/vendor/vendor-lock.toml"}
         for name, vendor in state["vendors"].items():
             imported = state["imports"][name]
             source = Path(imported["path"])
@@ -672,7 +672,7 @@ class VendorUpdater:
                 archive = crate.vendor_root / locked.archive
                 if not archive.is_file() or self._sha256(archive) != locked.sha256:
                     raise VendorUpdateError("coordinated archive changed or missing")
-                vendor_paths.add(f"agent-sdk/vendor/{locked.archive}")
+                vendor_paths.add(f"agents-kit/vendor/{locked.archive}")
         lock = crate.vendor_root / "vendor-lock.toml"
         if lock.is_symlink() or self._sha256(lock) not in {
             state["original_lock_sha256"], state["candidate_lock_sha256"]}:
@@ -684,7 +684,7 @@ class VendorUpdater:
             if (not any(path == scope or path.startswith(scope + "/") for scope in state["permitted_scope"])
                 or not any((self.workspace_root / path).resolve().is_relative_to(self.workspace_root / scope)
                            for scope in state["permitted_scope"])
-                or (path.startswith("agent-sdk/vendor/") and path not in vendor_paths)):
+                or (path.startswith("agents-kit/vendor/") and path not in vendor_paths)):
                 raise VendorUpdateError(f"dirty path outside coordinated scope: {path}")
         return sorted(changed)
 

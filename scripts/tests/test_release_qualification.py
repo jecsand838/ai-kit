@@ -135,7 +135,7 @@ class ReleaseQualificationTests(unittest.TestCase):
     def test_no_partial_provider_scope_or_storage_all_features(self):
         commands = ReleaseQualification.commands()
         self.assertEqual(commands[0][0], 'release-runner-contracts')
-        self.assertEqual(commands[1][1], ['bash', 'storage-sdk/scripts/check.sh', '--all-backends'])
+        self.assertEqual(commands[1][1], ['bash', 'storage-kit/scripts/check.sh', '--all-backends'])
         self.assertEqual(commands[2][1], ['bash', 'scripts/verify_workspace_strict.sh'])
 
     def storage_certificate(self):
@@ -177,17 +177,7 @@ class ReleaseQualificationTests(unittest.TestCase):
             self.spec['stages'][ident] = definition
             nested[ident] = {'definition': definition, 'receipt': reference(path)}
         checks = []
-        for features in negative:
-            log = evidence / ('negative-' + features + '.log')
-            diagnostic = 'sqlite and qdrant are incompatible'
-            log.write_text(diagnostic + '\n')
-            data = {'schema': 1, 'features': features, 'status': 'PASS', 'returncode': 101,
-                    'command': ['cargo', 'check', '--locked', '-p', 'storage-sdk', '--lib', '--no-default-features', '--features', features],
-                    'expected_diagnostic': diagnostic, 'log': reference(log)}
-            path = evidence / ('negative-' + features + '.json')
-            JsonFile.write(path, data)
-            checks.append({'receipt': reference(path), 'log': reference(log)})
-        command = ['bash', 'storage-sdk/scripts/check.sh', '--all-backends']
+        command = ['bash', 'storage-kit/scripts/check.sh', '--all-backends']
         owner_path, owner = receipt('storage.owner.local_matrix', command)
         owner_log = Path(owner['log']['path'])
         owner_log.write_text(''.join('STORAGE_NEGATIVE_FEATURE_GRADE=' + json.dumps(JsonFile.read(item['receipt']['path'])) + '\n' for item in checks))
@@ -210,12 +200,12 @@ class ReleaseQualificationTests(unittest.TestCase):
     def save_owner(self, path, owner):
         JsonFile.write(path, owner)
         self.spec['stages']['storage.owner.local_matrix'] = {
-            'command': ['bash', 'storage-sdk/scripts/check.sh', '--all-backends'],
+            'command': ['bash', 'storage-kit/scripts/check.sh', '--all-backends'],
             'reuse': {'receipt': str(path), 'sha256': JsonFile.digest(path)}}
         JsonFile.write(self.bundle, self.spec)
 
     def test_storage_owner_inventory_matches_existing_feature_policy(self):
-        path = SCRIPTS.parent / 'storage-sdk/scripts/feature_policy.py'
+        path = SCRIPTS.parent / 'storage-kit/scripts/feature_policy.py'
         spec = importlib.util.spec_from_file_location('storage_policy', path)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
@@ -226,7 +216,7 @@ class ReleaseQualificationTests(unittest.TestCase):
         self.assertEqual(lanes, render(policy.result(True)['lanes']))
         self.assertEqual(legal, render(policy.matrix(True)))
         self.assertEqual(negative, render(policy.matrix(False)))
-        self.assertEqual((len(lanes), len(legal), len(negative), len(stages)), (8, 24, 8, 155))
+        self.assertEqual((len(lanes), len(legal), len(negative), len(stages)), (6, 16, 0, 113))
 
     def test_complete_storage_owner_reuses_only_after_fresh_bootstrap(self):
         owner_path, _ = self.storage_certificate()
@@ -239,8 +229,8 @@ class ReleaseQualificationTests(unittest.TestCase):
         self.assertEqual(entries[0]['execution'], 'EXECUTED')
         self.assertEqual(entries[1]['execution'], 'REUSED')
         self.assertEqual(entries[1]['reused_from']['path'], str(owner_path))
-        self.assertEqual(entries[1]['completion']['negative_feature_checks'], 8)
-        self.assertEqual(entries[1]['completion']['nested_stages'], 155)
+        self.assertEqual(entries[1]['completion']['negative_feature_checks'], 0)
+        self.assertEqual(entries[1]['completion']['nested_stages'], 113)
 
     def test_bootstrap_failure_prevents_storage_certificate_admission(self):
         self.storage_certificate()
@@ -250,9 +240,8 @@ class ReleaseQualificationTests(unittest.TestCase):
         admission.assert_not_called()
 
     def test_declared_invalid_storage_owner_is_incomplete_without_silent_rerun(self):
-        variants = ('missing_negative', 'incomplete_lanes', 'incomplete_legal', 'wrong_owner', 'malformed_proof',
-                    'failed_nested', 'source_mismatch', 'tampered_log', 'missing_nested', 'negative_success',
-                    'unbound_negative_grade', 'missing_negative_diagnostic', 'changed_original_source')
+        variants = ('obsolete_negative', 'incomplete_lanes', 'incomplete_legal', 'wrong_owner', 'malformed_proof',
+                    'failed_nested', 'source_mismatch', 'tampered_log', 'missing_nested', 'changed_original_source')
         for variant in variants:
             with self.subTest(variant=variant):
                 # Each scenario has independent receipt paths and cannot retry a failed run.
@@ -264,8 +253,8 @@ class ReleaseQualificationTests(unittest.TestCase):
                     try:
                         path, owner = self.storage_certificate()
                         proof = owner['owner_proof']
-                        if variant == 'missing_negative':
-                            proof['negative'].pop()
+                        if variant == 'obsolete_negative':
+                            proof['negative'].append({'obsolete': True})
                         elif variant == 'incomplete_lanes':
                             proof['lanes'].pop()
                         elif variant == 'incomplete_legal':
@@ -286,18 +275,6 @@ class ReleaseQualificationTests(unittest.TestCase):
                             JsonFile.write(proof['original_run_report']['path'], original_report)
                             proof['original_run_report']['sha256'] = JsonFile.digest(proof['original_run_report']['path'])
                             owner['origin']['cleanup_evidence']['artifacts'][0] = proof['original_run_report']
-                        elif variant in ('negative_success', 'missing_negative_diagnostic'):
-                            item = proof['negative'][0]
-                            bad = JsonFile.read(item['receipt']['path'])
-                            if variant == 'negative_success':
-                                bad['returncode'] = 0
-                            else:
-                                bad['expected_diagnostic'] = 'unrelated compiler failure'
-                            JsonFile.write(item['receipt']['path'], bad)
-                            item['receipt']['sha256'] = JsonFile.digest(item['receipt']['path'])
-                        elif variant == 'unbound_negative_grade':
-                            owner_log = Path(owner['log']['path'])
-                            owner_log.write_text(owner_log.read_text().replace('STORAGE_NEGATIVE_FEATURE_GRADE=', 'unrelated=', 1))
                         else:
                             item = proof['nested_stages']['storage.test.lance.public_api']
                             bad = JsonFile.read(item['receipt']['path'])
@@ -305,16 +282,6 @@ class ReleaseQualificationTests(unittest.TestCase):
                             JsonFile.write(item['receipt']['path'], bad)
                             item['receipt']['sha256'] = JsonFile.digest(item['receipt']['path'])
                             item['definition']['reuse']['sha256'] = item['receipt']['sha256']
-                        if variant in ('negative_success', 'missing_negative_diagnostic', 'unbound_negative_grade'):
-                            owner_log = Path(owner['log']['path'])
-                            if variant != 'unbound_negative_grade':
-                                owner_log.write_text(''.join('STORAGE_NEGATIVE_FEATURE_GRADE=' + json.dumps(JsonFile.read(item['receipt']['path'])) + '\n' for item in proof['negative']))
-                            owner['log']['sha256'] = JsonFile.digest(owner_log)
-                            original_report = JsonFile.read(proof['original_run_report']['path'])
-                            original_report['commands'][0]['log'] = owner['log']
-                            JsonFile.write(proof['original_run_report']['path'], original_report)
-                            proof['original_run_report']['sha256'] = JsonFile.digest(proof['original_run_report']['path'])
-                            owner['origin']['cleanup_evidence']['artifacts'][0] = proof['original_run_report']
                         self.save_owner(path, owner)
                         runner = ReleaseQualification(self.root, self.bundle)
                         with contextlib.chdir(self.root), patch('release_qualification.OwnedProcess.run', return_value=0) as execute:

@@ -1,0 +1,11 @@
+{
+  "schema": "app-kit.workflow/v2",
+  "id": "input",
+  "revision": "r1",
+  "state": {"answer": ""},
+  "required": ["answer"],
+  "reducers": {"answer": "reject_concurrent"},
+  "entry": "ask",
+  "nodes": [{"id": "ask", "step": {"kind": "input", "message": [{"kind": "text", "text": "What should the next workflow review?"}], "schema": {"type": "string", "minLength": 1}, "target": "answer"}}],
+  "routes": {}
+}

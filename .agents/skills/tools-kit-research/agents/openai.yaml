@@ -1,0 +1,6 @@
+interface:
+  display_name: "tools-kit Research"
+  short_description: "Local/MCP execution and independent MCP server facts."
+  default_prompt: "Use $tools-kit-research to ground tools-kit changes in MCP, Local tool, schema, lifecycle, and Rust runtime facts."
+policy:
+  allow_implicit_invocation: true

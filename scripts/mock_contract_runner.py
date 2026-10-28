@@ -15,17 +15,17 @@ import time
 import uuid
 
 if __package__:
-    from .security_dependencies import SecurityPatches
+    from .security_dependencies import SecurityPolicy
 else:
-    from security_dependencies import SecurityPatches
+    from security_dependencies import SecurityPolicy
 
 
 TARGETS = {
-    "provider-sdk": ("mock_contracts",),
-    "storage-sdk": ("mock_contracts",),
-    "tool-sdk": ("mock_contracts",),
-    "agent-sdk": ("mock_contracts", "custom_mock_composition"),
-    "app-sdk": ("mock_contracts", "workflow_mock_composition"),
+    "providers-kit": ("mock_contracts",),
+    "storage-kit": ("mock_contracts",),
+    "tools-kit": ("mock_contracts",),
+    "agents-kit": ("mock_contracts", "custom_mock_composition"),
+    "app-kit": ("mock_contracts", "workflow_mock_composition"),
 }
 CI_MODES = ("ci", "ci-tests", "ci-lint")
 SUMMARY = re.compile(
@@ -91,7 +91,7 @@ class Runner:
 
     @staticmethod
     def features(crate):
-        return ["--no-default-features"] if crate == "storage-sdk" else []
+        return ["--no-default-features"] if crate == "storage-kit" else []
 
     @classmethod
     def cargo(cls, operation, crate, *args):
@@ -110,7 +110,7 @@ class Runner:
 
     def fingerprint(self):
         files = set()
-        files.update(self.root / relative for relative in SecurityPatches(self.root).inputs())
+        files.update(self.root / relative for relative in SecurityPolicy(self.root).inputs())
         for folder in (*TARGETS, "scripts", "docs", ".cargo"):
             directory = self.root / folder
             if directory.is_dir():
@@ -234,7 +234,7 @@ class Runner:
                 artifacts.append(artifact)
         executables = {}
         required = [(crate, target) for crate, targets in TARGETS.items() for target in targets]
-        for crate, target in [*required, ("app-sdk", "compile_contract")]:
+        for crate, target in [*required, ("app-kit", "compile_contract")]:
             source = self.root / crate / "tests" / (target + ".rs")
             manifest = self.root / crate / "Cargo.toml"
             proof = {"name": crate + "-" + target + "-compile", "kind": "compile-only",
@@ -270,7 +270,7 @@ class Runner:
     def ci(self):
         if self.mode != "ci-lint":
             gates = [
-                ("security-provenance", [sys.executable, "scripts/security_dependencies.py", "verify", "--root", str(self.root)]),
+                ("security-policy", [sys.executable, "scripts/security_dependencies.py", "verify", "--root", str(self.root)]),
                 ("no-path-wiring", ["bash", "scripts/check_no_path_wiring.sh"]),
                 ("no-type-aliases", ["bash", "scripts/check_no_type_aliases.sh"]),
                 ("runner-contracts", [sys.executable, "-m", "unittest", "discover", "-s", "scripts/tests", "-p", "test_mock_contract_runner.py", "-v"]),

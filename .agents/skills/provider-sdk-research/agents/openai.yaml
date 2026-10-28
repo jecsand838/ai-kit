@@ -1,6 +1,0 @@
-interface:
-  display_name: "provider-sdk Research"
-  short_description: "Provider, model, continuation, and strict-live facts."
-  default_prompt: "Use $provider-sdk-research to ground Provider, Model, Session, function continuation, hosted tools, and strict-live changes in current provider behavior."
-policy:
-  allow_implicit_invocation: true

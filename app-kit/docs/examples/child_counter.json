@@ -1,0 +1,11 @@
+{
+  "schema": "app-kit.workflow/v2",
+  "id": "child_counter",
+  "revision": "r1",
+  "state": {"value": 0},
+  "required": ["value"],
+  "reducers": {"value": "reject_concurrent"},
+  "entry": "increment",
+  "nodes": [{"id": "increment", "step": {"kind": "state", "mutations": [{"kind": "increment", "target": "value", "value": {"kind": "literal", "value": 1}}]}}],
+  "routes": {}
+}

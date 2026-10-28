@@ -18,40 +18,40 @@ for later worktree or change-workflow execution.
 
 ## Crate Profiles
 
-### `agent-sdk`
+### `agents-kit`
 
-- Root: `agent-sdk/`
-- Always read: root `AGENTS.md`, `agent-sdk/AGENTS.md`
-- Usually relevant skills: `agent-sdk-change-contract`,
-  `agent-sdk-research`, Rust best-practice skills as needed
+- Root: `agents-kit/`
+- Always read: root `AGENTS.md`, `agents-kit/AGENTS.md`
+- Usually relevant skills: `agents-kit-change-contract`,
+  `agents-kit-research`, Rust best-practice skills as needed
 
-### `provider-sdk`
+### `providers-kit`
 
-- Root: `provider-sdk/`
-- Always read: root `AGENTS.md`, `provider-sdk/AGENTS.md`
-- Usually relevant skills: `provider-sdk-change-contract`,
-  `provider-sdk-research`, Rust best-practice skills as needed
+- Root: `providers-kit/`
+- Always read: root `AGENTS.md`, `providers-kit/AGENTS.md`
+- Usually relevant skills: `providers-kit-change-contract`,
+  `providers-kit-research`, Rust best-practice skills as needed
 
-### `storage-sdk`
+### `storage-kit`
 
-- Root: `storage-sdk/`
-- Always read: root `AGENTS.md`, `storage-sdk/AGENTS.md`
-- Usually relevant skills: `storage-sdk-change-contract`,
-  `storage-sdk-research`, Rust best-practice skills as needed
+- Root: `storage-kit/`
+- Always read: root `AGENTS.md`, `storage-kit/AGENTS.md`
+- Usually relevant skills: `storage-kit-change-contract`,
+  `storage-kit-research`, Rust best-practice skills as needed
 
-### `tool-sdk`
+### `tools-kit`
 
-- Root: `tool-sdk/`
-- Always read: root `AGENTS.md`, `tool-sdk/AGENTS.md`
-- Usually relevant skills: `tool-sdk-change-contract`,
-  `tool-sdk-research`, Rust best-practice skills as needed
+- Root: `tools-kit/`
+- Always read: root `AGENTS.md`, `tools-kit/AGENTS.md`
+- Usually relevant skills: `tools-kit-change-contract`,
+  `tools-kit-research`, Rust best-practice skills as needed
 
-### `app-sdk`
+### `app-kit`
 
-- Root: `app-sdk/`
-- Required instructions: root `AGENTS.md`, `app-sdk/AGENTS.md`, and owning specs
+- Root: `app-kit/`
+- Required instructions: root `AGENTS.md`, `app-kit/AGENTS.md`, and owning specs
 - Usually relevant skills: `ai-kit-public-surface-contract`,
-  `app-sdk-research`, Rust best-practice skills as needed
+  `app-kit-research`, Rust best-practice skills as needed
 
 ## Audit Topic Routing
 

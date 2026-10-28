@@ -15,11 +15,11 @@ body:
       label: Affected area
       multiple: true
       options:
-        - provider-sdk
-        - storage-sdk
-        - tool-sdk
-        - agent-sdk
-        - app-sdk
+        - providers-kit
+        - storage-kit
+        - tools-kit
+        - agents-kit
+        - app-kit
         - Workspace / tooling
     validations:
       required: true

@@ -40,7 +40,7 @@ generics, lifetimes, error types, panic policy, or duplicated domain logic.
 4. For `ai-kit` reductive refactors, do not replace duplication with
    `macro_rules!`, proc-macro indirection, generated dispatch, generated
    tables, or codegen-style hidden abstraction.
-   The single exception is `tool-sdk::tool!`, which is a public typed-tool
+   The single exception is `tools-kit::tool!`, which is a public typed-tool
    ergonomic helper and not a reductive-refactor abstraction.
 5. For `ai-kit` enum dispatch over agent, provider, provider-model, database,
    tool-runtime, or tool-source implementation families, keep one hand-written
@@ -105,7 +105,7 @@ generics, lifetimes, error types, panic policy, or duplicated domain logic.
   owner; payload dispatch arms retain receiver-method calls.
 - Keep concrete enum-dispatch impls in the owning backend, provider, model,
   database, runtime, or source subtree instead of the shared contract module.
-- Treat `tool-sdk::tool!` as the only macro exception; do not generalize it
+- Treat `tools-kit::tool!` as the only macro exception; do not generalize it
   into dispatch, routing, source, schema, test, or docs-contract patterns.
 - In `ai-kit`, reject `unsafe` entirely. Outside repositories with that ban,
   keep unavoidable `unsafe` small and wrap it behind safe APIs.

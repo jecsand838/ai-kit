@@ -29,7 +29,7 @@ worktrees.
 Use $orchestrate-workflow.
 
 Selected findings:
-<paste findings that may overlap in `provider-sdk/src/core/tools/**`>
+<paste findings that may overlap in `providers-kit/src/core/tools/**`>
 
 Workflow skill: `ai-kit-change-workflow`
 Worker phase: `IMPLEMENTATION`

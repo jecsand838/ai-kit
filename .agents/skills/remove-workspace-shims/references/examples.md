@@ -8,38 +8,38 @@ invent a fresh audit.
 
 Use these prompts in a Plan-Mode-capable Codex client.
 
-### Provider-SDK Planning Prompt
+### providers-kit Planning Prompt
 
 ```text
-Use $remove-workspace-shims in Plan Mode to remove accepted provider-sdk shim
-audit findings. Start from the existing DELETE(provider-sdk shim audit)
+Use $remove-workspace-shims in Plan Mode to remove accepted providers-kit shim
+audit findings. Start from the existing DELETE(providers-kit shim audit)
 markers, produce the decision-complete delete-first plan, and do not execute
 the edits until the thread leaves Plan Mode.
 ```
 
-### Agent-SDK Planning Prompt
+### agents-kit Planning Prompt
 
 ```text
-Use $remove-workspace-shims in Plan Mode to remove accepted agent-sdk shim
-audit findings. Start from the existing DELETE(agent-sdk shim audit) markers,
+Use $remove-workspace-shims in Plan Mode to remove accepted agents-kit shim
+audit findings. Start from the existing DELETE(agents-kit shim audit) markers,
 produce the decision-complete delete-first plan, and do not execute the edits
 until the thread leaves Plan Mode.
 ```
 
-### Storage-SDK Planning Prompt
+### storage-kit Planning Prompt
 
 ```text
-Use $remove-workspace-shims in Plan Mode to remove accepted storage-sdk shim
-audit findings. Start from the existing DELETE(storage-sdk shim audit) markers,
+Use $remove-workspace-shims in Plan Mode to remove accepted storage-kit shim
+audit findings. Start from the existing DELETE(storage-kit shim audit) markers,
 produce the decision-complete delete-first plan, and do not execute the edits
 until the thread leaves Plan Mode.
 ```
 
-### Tool-SDK Planning Prompt
+### tools-kit Planning Prompt
 
 ```text
-Use $remove-workspace-shims in Plan Mode to remove accepted tool-sdk shim audit
-findings. Start from the existing DELETE(tool-sdk shim audit) markers, produce
+Use $remove-workspace-shims in Plan Mode to remove accepted tools-kit shim audit
+findings. Start from the existing DELETE(tools-kit shim audit) markers, produce
 the decision-complete delete-first plan, and do not execute the edits until the
 thread leaves Plan Mode.
 ```
@@ -56,9 +56,9 @@ Use this in the same thread after the Plan Mode phase has ended:
 
 ```text
 Use $remove-workspace-shims to execute the accepted shim-removal plan for
-provider-sdk from the existing DELETE(provider-sdk shim audit) markers. Delete
+providers-kit from the existing DELETE(providers-kit shim audit) markers. Delete
 the marked shims first, repair the strict-live failures honestly, and run the
-exact provider-sdk completion gate.
+exact providers-kit completion gate.
 ```
 
 Expected checks:
@@ -69,7 +69,7 @@ Expected checks:
 ## Missing-Findings Boundary
 
 ```text
-Use $remove-workspace-shims to clean up provider-sdk shims. I do not have any
+Use $remove-workspace-shims to clean up providers-kit shims. I do not have any
 existing shim audit markers or accepted findings. Just figure it out and fix
 everything.
 ```
@@ -90,7 +90,7 @@ mkdir -p /tmp/codex-skill-forwardtest
 CODEX_HOME=/tmp/codex-skill-forwardtest codex exec --ephemeral --sandbox read-only \
   -C /Users/connorsanders/scratch/ai-kit \
   -o /tmp/remove-workspace-shims-boundary.txt \
-  $'Use $remove-workspace-shims to clean up provider-sdk shims without any prior audit findings.'
+  $'Use $remove-workspace-shims to clean up providers-kit shims without any prior audit findings.'
 ```
 
 Expected checks:

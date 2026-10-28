@@ -1,6 +1,6 @@
 ---
 name: audit-workspace-for-shims
-description: "Audit one target ai-kit crate for hacks, shims, synthetic behavior, strict-live output shaping, and non-live expectations that lack strict-live or official-doc proof. Use when the user asks for a shim audit, synthetic fallback review, strict-live shaping review, or unproven test-assumption audit for `agent-sdk`, `provider-sdk`, `storage-sdk`, `tool-sdk`, or `app-sdk`, not when they already want the follow-up removal pass."
+description: "Audit one target ai-kit crate for hacks, shims, synthetic behavior, strict-live output shaping, and non-live expectations that lack strict-live or official-doc proof. Use when the user asks for a shim audit, synthetic fallback review, strict-live shaping review, or unproven test-assumption audit for `agents-kit`, `providers-kit`, `storage-kit`, `tools-kit`, or `app-kit`, not when they already want the follow-up removal pass."
 ---
 
 # Audit Workspace For Shims
@@ -13,8 +13,8 @@ issues for deletion when edits are allowed.
 ## Trigger Boundary
 
 Use this skill for explicit shim, hack, synthetic-behavior, or strict-live
-output-shaping audits of `agent-sdk`, `provider-sdk`, `storage-sdk`,
-`tool-sdk`, or `app-sdk`.
+output-shaping audits of `agents-kit`, `providers-kit`, `storage-kit`,
+`tools-kit`, or `app-kit`.
 Do not use it for the follow-up removal pass. Redirect follow-up cleanup to
 `remove-workspace-shims`.
 If the target crate is missing or unknown, ask for the missing target crate

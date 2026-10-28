@@ -1,0 +1,42 @@
+name: Documentation issue
+description: Report missing, confusing, or incorrect documentation.
+title: "[Docs]: "
+labels: [documentation]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Search [existing issues](https://github.com/jecsand838/ai-kit/issues) before filing a duplicate.
+        The [contribution guide](https://github.com/jecsand838/ai-kit/blob/main/CONTRIBUTING.md) explains documentation ownership and useful skills.
+        Remove API keys, credentials, private prompts/data, and populated env files from examples and attachments.
+  - type: input
+    id: location
+    attributes:
+      label: Document location
+      description: Link the page, rustdoc item, or repository file and section. For missing documentation, name the topic and expected location.
+      placeholder: "Repository path or URL, plus section/item name"
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Missing or incorrect information
+      description: Explain the gap or ambiguity. Include any relevant version or command that did not work.
+      placeholder: "The current instructions say ..., but ..."
+    validations:
+      required: true
+  - type: textarea
+    id: correction
+    attributes:
+      label: Suggested correction
+      description: Describe a possible correction, or explain what needs investigation if the answer is unknown.
+      placeholder: "Clarify ..., add an example of ..., or verify ..."
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Expected reader outcome
+      placeholder: "After reading this, a contributor or caller should be able to ..."
+    validations:
+      required: true

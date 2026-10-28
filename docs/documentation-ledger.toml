@@ -1,6 +1,6 @@
-version = 8
+version = 9
 scope_date = "2026-10-27"
-scope_source = "User-approved PR #22 documentation refresh on codex/public-trait-mock-ci, starting from d3b763e7; user-authorized release continuation from 9d99ddda with verified unchanged receipts; current owning specifications and explicit workspace contracts; user-approved PR #2 security remediation with seven verified upstream patches"
+scope_source = "User-approved PR #22 documentation refresh on codex/public-trait-mock-ci, starting from d3b763e7; user-authorized release continuation from 9d99ddda with verified unchanged receipts; current owning specifications and explicit workspace contracts; user-approved PR #2 security remediation with seven verified upstream patches; user-approved contribution guide and GitHub templates"
 notes = [
   "This ledger covers the five compiled SDK crates and their active repository-owned guidance.",
   "Generated rustdoc and immutable tmp artifacts are not authority. Historical documents and vendored material confer no authority merely by existing or being linked; owning specifications may explicitly adopt bounded requirements or pinned source semantics.",
@@ -16,7 +16,7 @@ notes = [
 ]
 
 [canonical_owners]
-workspace = ["README.md", "ARCHITECTURE.md", "AGENTS.md", "SKILLS.md", "docs/mock-testing.md", "docs/mock-testing-production-bugs.md", "docs/release-qualification.md", "docs/security-dependencies.md"]
+workspace = ["README.md", "CONTRIBUTING.md", "ARCHITECTURE.md", "AGENTS.md", "SKILLS.md", "docs/mock-testing.md", "docs/mock-testing-production-bugs.md", "docs/release-qualification.md", "docs/security-dependencies.md"]
 provider = [
   "provider-sdk/README.md",
   "provider-sdk/ARCHITECTURE.md",
@@ -100,7 +100,7 @@ active = [
   "agent-sdk/.codex/development/dispatch/*.md",
 ]
 historical = ["app-sdk/audits/**/*.md", "app-sdk/plans/**/*.md", "docs/refactors/**/*.md", "docs/pr20-pr21-integration.md", "docs/pr22-validation.md", "app-sdk/tests/fixtures/app-v6/README.md", "storage-sdk/tests/fixtures/README.md"]
-templates = ["agent-sdk/.codex/development/templates/**/*.md", ".agents/skills/*/assets/**"]
+templates = ["agent-sdk/.codex/development/templates/**/*.md", ".agents/skills/*/assets/**", ".github/ISSUE_TEMPLATE/*.yml", ".github/pull_request_template.md"]
 excluded = ["tmp/**", "target/**", "**/vendor/**", "agent-sdk/.codex/development/execution/**"]
 policy = "Historical records retain their original evidence; templates are examples, not active runs. Explicit adopted_requirements records preserve only the incorporated scope, not old phase instructions, draft signatures, commands, or completion claims. Ordinary links do not propagate adoption. Excluded artifacts are never traversed by documentation checks; pinned oracle authority comes only from the owning specification's explicit adoption. Selecting a workflow is explicit; its presence or adoption of frozen requirements does not activate an old campaign."
 

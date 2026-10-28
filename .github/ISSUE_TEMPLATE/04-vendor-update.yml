@@ -1,0 +1,65 @@
+name: Vendor update
+description: Propose an upstream vendor, protocol, or dependency update.
+title: "[Vendor update]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Search [existing issues](https://github.com/jecsand838/ai-kit/issues) before filing a duplicate.
+        See the [contribution guide](https://github.com/jecsand838/ai-kit/blob/main/CONTRIBUTING.md) for vendor research and update workflows.
+        An update request does not authorize unrelated dependency changes or new source patches.
+        Remove API keys, credentials, private prompts/data, and populated env files from examples and attachments.
+  - type: input
+    id: vendor
+    attributes:
+      label: Crate and vendor
+      description: Name the owning crate and upstream project. For manifest-managed vendors, include the manifest vendor key.
+      placeholder: "agent-sdk / opencode"
+    validations:
+      required: true
+  - type: input
+    id: current
+    attributes:
+      label: Current version or revision
+      description: Include the manifest, lockfile, or specification location that records it; write unknown if it needs investigation.
+      placeholder: "Current tag/commit/version and owning file"
+    validations:
+      required: true
+  - type: input
+    id: target
+    attributes:
+      label: Proposed version or revision
+      placeholder: "Exact target tag/commit/version, or the release to investigate"
+    validations:
+      required: true
+  - type: textarea
+    id: sources
+    attributes:
+      label: Official upstream references
+      description: Link official releases, changelogs, protocol docs, or advisories that motivate the update.
+      placeholder: "Official release URL and relevant changes"
+    validations:
+      required: true
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Motivation and expected outcome
+      placeholder: "This update fixes/enables ..., and completion should demonstrate ..."
+    validations:
+      required: true
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Compatibility and affected areas
+      description: Identify known API/protocol changes, affected crates/features, persistence or migration concerns, and dependency-policy implications. Unknowns are useful to record.
+      placeholder: "Known breaking changes, affected adapters, and questions for research"
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Proposed validation
+      description: Name relevant regression tests, strict-live suites/backend lanes, docs updates, and prerequisites to investigate. Test execution is not required to file this request.
+      placeholder: "Verify ... using ...; prerequisites or unknowns: ..."
+    validations:
+      required: true

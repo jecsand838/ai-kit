@@ -1,0 +1,72 @@
+name: Bug report
+description: Report incorrect behavior with enough detail to reproduce it.
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Search [existing issues](https://github.com/jecsand838/ai-kit/issues) before filing a duplicate.
+        See the [contribution guide](https://github.com/jecsand838/ai-kit/blob/main/CONTRIBUTING.md) for setup and testing guidance.
+        You do not need paid provider access or a strict-live run to report a bug.
+        Remove API keys, tokens, credentials, private prompts/data, and populated env files from examples and logs.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      multiple: true
+      options:
+        - provider-sdk
+        - storage-sdk
+        - tool-sdk
+        - agent-sdk
+        - app-sdk
+        - Workspace / tooling
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: Include the ai-kit commit or crate version where the problem occurs.
+      placeholder: "Commit SHA or crate version"
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment and backend
+      description: Include OS/architecture, rustc version, enabled Cargo features, and relevant provider/backend/runtime/model versions. Write unknown where needed; omit credentials.
+      placeholder: "OS, rustc --version, Cargo features, backend, runtime/model versions"
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Give the smallest code example or exact command and steps that demonstrate the problem.
+      placeholder: |
+        1. Configure ...
+        2. Run ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      placeholder: "What should happen? Link the relevant documented contract if known."
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      placeholder: "What happened instead? Include the exact error when available."
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs or additional context
+      description: Optional. Include relevant output, frequency, a known working version, or a workaround. Redact secrets and private data before attaching files.

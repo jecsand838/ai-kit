@@ -1,0 +1,56 @@
+name: Feature request
+description: Propose a capability and describe the outcome it should enable.
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Search [existing issues](https://github.com/jecsand838/ai-kit/issues) before filing a duplicate.
+        Read the [contribution guide](https://github.com/jecsand838/ai-kit/blob/main/CONTRIBUTING.md) and relevant crate contracts before proposing an API change.
+        Keep examples free of API keys, credentials, private prompts/data, and populated env files.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      multiple: true
+      options:
+        - provider-sdk
+        - storage-sdk
+        - tool-sdk
+        - agent-sdk
+        - app-sdk
+        - Workspace / tooling
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem and use case
+      description: Explain who needs this and what they cannot accomplish today.
+      placeholder: "When I try to ..., the current API/workflow ..."
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed capability
+      description: Describe the desired behavior and any public API or portability implications. A complete implementation design is not required.
+      placeholder: "The caller should be able to ..."
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: List observable outcomes that would demonstrate the feature works.
+      placeholder: |
+        - A caller can ...
+        - Invalid or unsupported input ...
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives and references
+      description: Optional. Describe existing workarounds, other approaches, or authoritative upstream documentation.

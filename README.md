@@ -175,6 +175,9 @@ protocols, or storage records.
 
 ## Contributing
 
+Start with the [contributor guide](CONTRIBUTING.md) for development setup,
+local test environments, useful skills, and issue/PR expectations.
+
 The [operating contract](AGENTS.md) contains mandatory Rust, dependency,
 public-boundary, lifecycle, and testing rules, including their narrowly
 approved exceptions. Read it together with the owning crate's `AGENTS.md`

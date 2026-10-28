@@ -362,6 +362,7 @@ lanes, service prerequisites or separate locked clean-checkout proof.
 ## Documentation Ownership
 
 - Root `README.md`: orientation/entrypoints.
+- Root `CONTRIBUTING.md`: contributor onboarding, local test setup, and issue/PR workflow.
 - Root `ARCHITECTURE.md`: hierarchy, ownership, public modules, crate boundaries.
 - Root `AGENTS.md`: operating rules/validation baseline.
 - Root `SKILLS.md`: compact skill catalog.

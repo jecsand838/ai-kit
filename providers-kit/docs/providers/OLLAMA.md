@@ -19,6 +19,9 @@ declarations without a forced-choice field. Strict-live coverage requires an
 actual automatic function call and result continuation, and separately verifies
 that forced selection returns `Unsupported`, following the documented
 [tool-calling flow](https://docs.ollama.com/capabilities/tool-calling).
+The strict continuation scenario supplies its literal-result system instruction
+before both requests; its unchanged sampling and exact-output requirements
+belong to the [strict-testing guide](../STRICT_TESTING.md).
 
 When Ollama supplies a call `id`, generation and streaming retain it in
 `FunctionCall`; assistant replay returns that `id`, and the corresponding
@@ -41,6 +44,36 @@ also preserve the forced-choice and unavailable file/batch negative checks.
 The target is not ignored and does not fall back to another model. Missing
 Ollama reachability or an exact installed model fails the verifier prerequisite
 check rather than substituting deterministic output or skipping this provider.
+
+### Model artifacts after an Ollama upgrade
+
+An unchanged tag does not prove unchanged model bytes or correct tokenizer
+initialization. Preserve the selected manifest, artifact hashes, server version,
+and failed evidence before repairing a local installation.
+
+For `ministral-3:8b-instruct-2512-q4_K_M` on Ollama 0.40.12, a converted local
+artifact was observed with `tokenizer.ggml.pre=default` after its legacy
+compatibility markers had been removed. The runtime therefore did not apply
+the model's Tekken correction. The pinned
+[conversion owner](https://github.com/ollama/ollama/blob/v0.40.12/compatmigrate/mistral_pixtral.go)
+copies tokenizer metadata while converting those markers; the
+[loader correction](https://github.com/ollama/ollama/blob/v0.40.12/llama/compat/llama-ollama-compat.cpp)
+depends on detecting them.
+
+After preserving the old artifacts, the supported repair was:
+
+```bash
+ollama pull ministral-3:8b-instruct-2512-q4_K_M
+```
+
+Verify that the next load selects the refreshed artifact and that the native
+loader reports the Mistral compatibility correction and
+`tokenizer.ggml.pre = tekken`. `/api/show` can still report the original disk
+metadata `default`; that field alone does not establish the effective tokenizer.
+Do not edit model files or normalize model output to make a test pass. The
+[repair record](../../../docs/strict-live-ollama-repair-2026-10-29.md) identifies
+the observed artifacts, bounded confirmation results, and remaining evidence
+limits. Future registry or runtime versions need their own verification.
 
 ### Terminal reason and function calls
 

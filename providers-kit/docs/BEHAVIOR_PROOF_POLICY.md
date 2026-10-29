@@ -94,6 +94,9 @@ as `completed_without_rejection`, preserving `marker_returned: false`,
 or duplicate secret tokens do not qualify code. The
 exact grammar, eligibility, reporting and retained checks belong to
 [strict testing](STRICT_TESTING.md#qualified-gemini-file-search-streaming-coverage).
+The current `models/gemini-3.8-flash` File Search role and all six live cases
+retain the ordinary exclusive-family assertions; none exercises or inherits
+this 2.5-only qualification.
 
 Native fixture exceptions are limited to OpenAI batch-purpose input upload,
 metadata reads identifying exact owned hidden cleanup artifacts, a single

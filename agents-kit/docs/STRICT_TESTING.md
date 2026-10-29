@@ -41,9 +41,9 @@ The verifier runs the complete `AgentKitProtocolAuthorityTests` Python class
 against the committed vendor ZIP archives, verifying each archive's checksum
 against `vendor-lock.toml` before reading uniquely matched members. These cases
 check the protocol source coordinates, wire facts, native deletion ordering,
-OpenAPI shapes and routes, and inventory/terminal facts. They require no ignored
-vendor extraction. Rust source contracts retain selected-release metadata,
-protocol privacy, and public-surface checks.
+OpenAPI shapes and routes, configured variants, sharing, and inventory/terminal
+facts. They require no ignored vendor extraction. Rust source contracts retain
+selected-release metadata, protocol privacy, and public-surface checks.
 
 ### Downstream compile contract
 
@@ -94,8 +94,11 @@ personality inventories and rejection before native session or prompt mutation;
 native variants and agent names do not become portable selectors. These are
 deterministic adapter contracts, not native model qualification.
 
-The current-model compatibility addition retains the existing 24 live cases and
-adds exactly four cases through the existing scenario owners:
+The earlier current-model compatibility addition retained 24 live cases and
+added the four cases below through the existing scenario owners. The subsequent
+repaired-abort case brought the integrated inventory to 29; the
+[current inventory](#current-integrated-inventory) below is authoritative for a
+new run. Historical 28-case receipts describe their recorded candidates only.
 
 | Case | Fixed calls and assertions | Existing finite bounds |
 | --- | --- | --- |
@@ -584,6 +587,20 @@ The complete live suite retains:
   The existing 240-second body, 120-second lifecycle/prompt/native request,
   30-second startup/idle/event-entry, 15-second StateStore operation, and
   150-second cleanup-observation bounds remain unchanged.
+  Before native startup, the case fixes a fresh opaque marker and instructions
+  to copy every character without tools, tags, markup, quotes, whitespace or
+  other surrounding text. It uses the configured model and inherited sampling
+  settings; the test does not override temperature. The already-fetched native
+  history independently checks the exact configured provider/model, original
+  user, terminal assistant and unmodified text against the portable result.
+  Its bounded private receipt explicitly records
+  `foreground_http_body_observed: false`: persisted history does not prove
+  the foreground HTTP body. Capture failures preserve the original exact-output
+  assertion as the primary failure; successful output still requires complete
+  native evidence and exact native/portable parity. Every overlap, conflict,
+  single-generation, request-part, streaming and cleanup assertion remains
+  blocking. This case has no Question-copy exception. Bounded prompt trials
+  do not establish statistical reliability or the cause of an earlier failure.
 
 The Codex release request cases live in `strict_live_suite::delivery_and_events`:
 
@@ -660,6 +677,8 @@ rejection. A `thread/resume` control checks private shutdown reason metadata and
 one rejected resume without replay; it does not qualify `turn/start` rejection
 reconciliation. Optional read/list receipt fields do not become Kit state. These fixtures
 do not prove native read-receipt emission or cold-resume permission restoration.
+
+### Current integrated inventory
 
 The integrated selected-release inventory contains exactly 29 Agent strict-live cases,
 with the recorded models, prompts, generation counts, settings roles, assertions,

@@ -268,10 +268,11 @@ class FreshFixture extends CaptureFixture {
   static EXPECTED = "PRIVATE_FRESH_TOKEN";
   static PROMPT = "Do not call any tool. Reply with exactly PRIVATE_FRESH_TOKEN and nothing else.";
 
-  async install() {
+  async install(options = {}) {
     this.hooks = await plugin({}, {
       outputDirectory: this.directory, expectedModelName: "Expected Model",
       freshOutput: { prompt: FreshFixture.PROMPT, expected: FreshFixture.EXPECTED },
+      ...options,
     });
     await this.hooks.config(this.config);
     return this.config.provider.ollama.options.fetch;
@@ -293,7 +294,7 @@ class FreshFixture extends CaptureFixture {
   async root(id = "PRIVATE_USER") {
     const input = { sessionID: "PRIVATE_SESSION", messageID: id, model: { providerID: "ollama", modelID: this.nativeModel ?? "PRIVATE_MODEL" } };
     const output = {
-      message: { id, sessionID: "PRIVATE_SESSION", role: "user", model: { ...input.model } },
+      message: { id, sessionID: "PRIVATE_SESSION", role: "user", agent: "build", model: { ...input.model } },
       parts: [{ id: "PRIVATE_USER_PART", sessionID: "PRIVATE_SESSION", messageID: id, type: "text", text: FreshFixture.PROMPT }],
     };
     const before = JSON.stringify({ input, output });
@@ -327,6 +328,38 @@ class FreshFixture extends CaptureFixture {
     return { body, response: new Response(CaptureFixture.stream(new TextEncoder().encode(body), 3), { headers: { "content-type": "text/event-stream" } }) };
   }
 }
+
+test("upfront temperature receipts detect missing, wrong and malformed values without changing requests", async () => {
+  for (const value of [0, 1, "0", null, undefined]) {
+    let request;
+    let original;
+    const fixture = new FreshFixture((_url, init) => {
+      assert.equal(init, request);
+      assert.equal(init.body, original);
+      return new Response(JSON.stringify({ choices: [{ message: { role: "assistant", content: FreshFixture.EXPECTED }, finish_reason: "stop" }] }), {
+        headers: { "content-type": "application/json" },
+      });
+    });
+    try {
+      const fetch = await fixture.install({ expectedTemperature: 0, expectedRole: "opencode_default" });
+      await fixture.root();
+      request = fixture.request();
+      const body = JSON.parse(request.body);
+      if (value !== undefined) body.temperature = value;
+      request.body = JSON.stringify(body);
+      original = request.body;
+      const response = await fetch("http://127.0.0.1:11434/v1/chat/completions", request);
+      await response.text();
+      assert.equal(request.body, original);
+      const fact = fixture.facts().find((item) => item.event === "fresh_request");
+      assert.equal(fact.capture, "complete");
+      assert.equal(fact.temperature_present, value !== undefined);
+      assert.equal(fact.temperature_numeric, typeof value === "number");
+      assert.equal(fact.temperature_value, typeof value === "number" ? value : null);
+      assert.equal(fact.temperature_matches_scenario, value === 0);
+    } finally { fixture.close(); }
+  }
+});
 
 test("fresh provenance distinguishes provider formatting from later native alteration without revealing text", async () => {
   for (const [provider, native] of [

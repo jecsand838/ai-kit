@@ -117,6 +117,24 @@ fi
 if [[ -n "${VERIFIER_CARGO_OUTPUT-}" ]]; then
     cat "${VERIFIER_CARGO_OUTPUT}"
 fi
+if [[ -n "${VERIFIER_EVIDENCE_METADATA-}" ]]; then
+    python3 - "${VERIFIER_EVIDENCE_METADATA}" <<'PY'
+import json, os, pathlib, stat, sys
+
+configured = os.environ.get("PROVIDERS_KIT_EVIDENCE_DIR")
+directory = pathlib.Path(configured) if configured else None
+metadata = {"configured": configured, "exists": directory is not None and directory.is_dir()}
+if metadata["exists"]:
+    metadata["directory_mode"] = stat.S_IMODE(directory.stat().st_mode)
+    evidence = directory / "fixture-case.json"
+    descriptor = os.open(evidence, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(descriptor, "w") as output:
+        json.dump({"fixture": "command orchestration only, not a provider response"}, output)
+    metadata["evidence"] = str(evidence)
+    metadata["file_mode"] = stat.S_IMODE(evidence.stat().st_mode)
+pathlib.Path(sys.argv[1]).write_text(json.dumps(metadata))
+PY
+fi
 exit "${VERIFIER_CARGO_EXIT}"
 "#,
         );
@@ -956,6 +974,136 @@ exec /usr/bin/tee "$@"
             fs::read(fixture.directory.path().join("cargo-output")).unwrap()
         );
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn strict_live_verifier_defaults_to_fresh_private_evidence_for_every_run() {
+    let fixture = VerifierFixture::new();
+    let metadata = fixture.directory.path().join("evidence-metadata");
+    let mut previous_directory = None;
+    for cargo_exit in [0, 23] {
+        let output = fixture
+            .command(None, cargo_exit)
+            .env("VERIFIER_EVIDENCE_METADATA", &metadata)
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(i32::from(cargo_exit)));
+        let captured: serde_json::Value =
+            serde_json::from_slice(&fs::read(&metadata).unwrap()).unwrap();
+        assert_eq!(
+            captured["exists"], true,
+            "the live command must receive an existing evidence directory even when none was configured"
+        );
+        assert_eq!(captured["directory_mode"], 0o700);
+        assert_eq!(captured["file_mode"], 0o600);
+        let directory = PathBuf::from(captured["configured"].as_str().unwrap());
+        assert!(directory.starts_with(fixture.directory.path().join("target")));
+        assert!(directory.is_absolute());
+        assert_ne!(previous_directory.as_ref(), Some(&directory));
+        let evidence = PathBuf::from(captured["evidence"].as_str().unwrap());
+        assert!(
+            evidence.is_file(),
+            "child evidence survives both success and failure"
+        );
+        assert_eq!(evidence.parent(), Some(directory.as_path()));
+        let contents: serde_json::Value =
+            serde_json::from_slice(&fs::read(evidence).unwrap()).unwrap();
+        assert_eq!(
+            contents["fixture"],
+            "command orchestration only, not a provider response"
+        );
+        if let Some(previous) = previous_directory {
+            assert!(previous.join("fixture-case.json").is_file());
+        }
+        previous_directory = Some(directory);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn strict_live_verifier_preserves_explicit_private_evidence_directory() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let fixture = VerifierFixture::new();
+    let directory = fixture.directory.path().join("caller-evidence");
+    fs::create_dir(&directory).unwrap();
+    fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
+    let previous = directory.join("previous.json");
+    fs::write(&previous, "previous evidence must survive").unwrap();
+    let metadata = fixture.directory.path().join("evidence-metadata");
+    let output = fixture
+        .command(None, 23)
+        .env("PROVIDERS_KIT_EVIDENCE_DIR", &directory)
+        .env("VERIFIER_EVIDENCE_METADATA", &metadata)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(23));
+    fixture.assert_prerequisites_and_single_cargo();
+    let captured: serde_json::Value = serde_json::from_slice(&fs::read(metadata).unwrap()).unwrap();
+    assert_eq!(captured["configured"], directory.to_str().unwrap());
+    assert_eq!(captured["directory_mode"], 0o700);
+    assert_eq!(captured["file_mode"], 0o600);
+    assert!(directory.join("fixture-case.json").is_file());
+    assert_eq!(
+        fs::read_to_string(previous).unwrap(),
+        "previous evidence must survive"
+    );
+}
+
+#[test]
+fn strict_live_verifier_rejects_invalid_evidence_directory_before_live_launch() {
+    for kind in ["empty", "missing", "file"] {
+        let fixture = VerifierFixture::new();
+        let invalid = fixture.directory.path().join("private-invalid-evidence");
+        if kind == "file" {
+            fs::write(&invalid, "preserve the existing file").unwrap();
+        }
+        let value = if kind == "empty" {
+            ""
+        } else {
+            invalid.to_str().unwrap()
+        };
+        let output = fixture
+            .command(None, 0)
+            .env("PROVIDERS_KIT_EVIDENCE_DIR", value)
+            .output()
+            .unwrap();
+        assert!(
+            !output.status.success(),
+            "invalid {kind} configuration must fail"
+        );
+        assert!(
+            !fixture.directory.path().join("cargo-args").exists(),
+            "invalid evidence configuration must fail before the live command starts"
+        );
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        assert!(stderr.contains("PROVIDERS_KIT_EVIDENCE_DIR"));
+        assert!(!stderr.contains("private-invalid-evidence"));
+        if kind == "file" {
+            assert_eq!(
+                fs::read_to_string(invalid).unwrap(),
+                "preserve the existing file"
+            );
+        }
+    }
+}
+
+#[test]
+fn strict_live_verifier_evidence_initialization_failure_prevents_live_launch() {
+    let fixture = VerifierFixture::new();
+    fixture.write_executable("bin/mktemp", "#!/usr/bin/env bash\nexit 29\n");
+    let output = fixture.run(None, 0);
+    assert_eq!(output.status.code(), Some(29));
+    assert!(
+        !fixture.directory.path().join("cargo-args").exists(),
+        "failed private directory creation must prevent the live command from starting"
+    );
+    assert!(
+        !String::from_utf8(output.stdout)
+            .unwrap()
+            .contains("strict-live selection passed")
+    );
 }
 
 #[test]

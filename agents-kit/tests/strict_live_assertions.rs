@@ -2267,6 +2267,87 @@ struct ReadbackProbe {
     task: tokio::task::JoinHandle<std::io::Result<()>>,
 }
 
+#[test]
+fn captured_history_preserves_wrapped_native_text_and_detects_portable_repair() {
+    let prompt =
+        "Do not call any tool. Reply with exactly PRIVATE_RECOVERED_TOKEN and nothing else.";
+    for native in [
+        "<execute>PRIVATE_RECOVERED_TOKEN</execute>",
+        " PRIVATE_RECOVERED_TOKEN\n",
+    ] {
+        let fixture = EvidenceFixture::recovered_prompt(native);
+        let expectation = QuestionExpectation::new("ses_001", prompt, "model");
+        let before = fixture.completed.clone();
+        let (context, retained) = expectation
+            .prompt_output(
+                &fixture.completed,
+                "provider",
+                "PRIVATE_RECOVERED_TOKEN",
+                native,
+            )
+            .unwrap();
+        assert_eq!(retained, native);
+        assert_eq!(context["native_equals_portable"], true);
+        assert_eq!(context["native_equals_expected"], false);
+        assert_eq!(context["portable_equals_expected"], false);
+        assert_eq!(context["foreground_http_body_observed"], false);
+        assert_eq!(fixture.completed, before);
+        assert!(!context.to_string().contains("PRIVATE"));
+        let (context, retained) = expectation
+            .prompt_output(
+                &fixture.completed,
+                "provider",
+                "PRIVATE_RECOVERED_TOKEN",
+                "PRIVATE_RECOVERED_TOKEN",
+            )
+            .unwrap();
+        assert_eq!(retained, native);
+        assert_eq!(context["native_equals_portable"], false);
+        assert_eq!(context["native_equals_expected"], false);
+        assert_eq!(context["portable_equals_expected"], true);
+    }
+}
+
+#[tokio::test]
+async fn captured_history_failure_keeps_original_assertion_and_cleanup() {
+    let cleanup_ran = Arc::new(AtomicBool::new(false));
+    let observed = NativeCleanup::observe(Instant::now() + Duration::from_secs(2), async {
+        let primary = std::panic::catch_unwind(|| {
+            assert_eq!(
+                "<execute>TOKEN</execute>", "TOKEN",
+                "original Lance exact-output failure"
+            );
+        });
+        let capture = QuestionExpectation::new("ses_001", "prompt", "model").prompt_output(
+            &json!({"malformed":"history"}),
+            "provider",
+            "TOKEN",
+            "<execute>TOKEN</execute>",
+        );
+        assert_eq!(capture.unwrap_err(), "messages_shape");
+        if let Err(primary) = primary {
+            std::panic::resume_unwind(primary);
+        }
+    })
+    .await;
+    let mut cleanup = NativeCleanup::new(Duration::from_secs(2));
+    cleanup
+        .settle(async {
+            cleanup_ran.store(true, Ordering::SeqCst);
+            Ok::<(), std::io::Error>(())
+        })
+        .await;
+    let panic =
+        std::panic::catch_unwind(AssertUnwindSafe(|| cleanup.finish(observed))).unwrap_err();
+    assert!(cleanup_ran.load(Ordering::SeqCst));
+    assert!(
+        panic
+            .downcast_ref::<String>()
+            .unwrap()
+            .contains("original Lance exact-output failure")
+    );
+}
+
 #[tokio::test]
 async fn recovery_output_readback_distinguishes_native_parity_from_exact_copy() {
     for (native, portable, equal) in [

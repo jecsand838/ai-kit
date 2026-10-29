@@ -135,9 +135,18 @@ The verifier runs the independent cases for all four providers in one target:
 cargo test --locked -p providers-kit --test strict_live --all-features -- --nocapture --test-threads=1
 ```
 
-Setting `PROVIDERS_KIT_EVIDENCE_DIR` to an existing private directory also records
-usable public generation and batch results before assertion checks can discard
-them. These diagnostic sidecars retain text, hosted outcomes and row correlation
+Before launching strict-live tests, the canonical verifier defaults
+`PROVIDERS_KIT_EVIDENCE_DIR` to its fresh private log directory, created with
+owner-only permissions. It preserves an explicitly configured directory; that
+directory must already exist and be writable and searchable. Empty, missing,
+non-directory, or inaccessible configuration fails before live execution. The
+verifier retains this directory after both success and failure. Direct Cargo
+invocations must set `PROVIDERS_KIT_EVIDENCE_DIR` to an existing private directory
+to enable the same exports.
+
+The configured directory records failed-case evidence after cleanup and usable
+public generation and batch results before assertion checks can discard them.
+These diagnostic sidecars retain text, hosted outcomes and row correlation
 without serializing opaque continuation contents. They redact configured API
 keys, use new files with private permissions, and cap each observation at 1 MiB
 with an explicit truncation marker. Export failures are reported alongside the
@@ -373,6 +382,9 @@ The user-approved qualification applies only to `HostedProvider::Gemini`,
 preflight and post-deletion observation. Eligibility uses the selected model
 identity; response aliases, prefix rewriting, other models, unary generation,
 and other providers cannot enable the exception.
+The current required File Search role is exact `models/gemini-3.8-flash`, so
+neither named streaming case currently exercises this retained qualification.
+All six live File Search cases retain ordinary exclusive-family assertions.
 
 Alongside genuine FileSearch evidence, at most one extra CodeExecution output
 may contain exactly one PYTHON declaration of the complete form
@@ -931,6 +943,18 @@ The Ollama suite requires an automatic function call with exact arguments and
 a continuation reporting the caller's result; forced selection must separately
 return `Unsupported` because native chat has no forced-choice control.
 
+`ollama_function_continuation` declares a literal-result system instruction
+before its first request and preserves it unchanged in the continuation.
+The existing user instruction, tool declaration, exact configured model and
+4096-token budget remain unchanged. Both requests inherit native sampling
+settings; this scenario sets no temperature or seed. The nonce is generated
+only after validating the first call, and the complete returned assistant
+message precedes the exactly correlated JSON tool result. The final answer
+must equal the complete nonce without trimming, unwrapping or repair.
+An incorrect native answer remains a blocking failure even when Kit preserves
+it exactly. Input comparisons and fixed confirmation samples retain every
+outcome and do not establish statistical reliability.
+
 The ordinary Ollama streaming case uses the approved literal-token clarification
 after complete native capture established exact Kit fidelity for an incorrect
 native answer. Its token grammar, selected model, omitted sampling overrides,
@@ -956,8 +980,10 @@ arbitrary native strings and bodies remain redacted in ordinary logs. Missing re
 leave dependent checks not evaluated; independent failures on a usable response
 are collected before cleanup and shutdown. Operation failures do not by
 themselves establish Kit defects.
-Set `PROVIDERS_KIT_EVIDENCE_DIR` to an existing private run directory to explicitly
-export failed-case evidence after cleanup and shutdown. Batch cases also export
+The configured `PROVIDERS_KIT_EVIDENCE_DIR` retains failed-case evidence after
+cleanup and shutdown, including native error bodies redacted from ordinary logs.
+The canonical verifier supplies a fresh private default; explicit directories
+remain caller-owned. Batch cases also export
 a mandatory immutable ownership checkpoint after each accepted submission and
 before polling, plus a final inventory after cleanup. These retain exact job/input
 identities, source bindings, successful terminal jobs retained by the provider,
@@ -1040,9 +1066,11 @@ generalize to older aliases. Gemini's portable response retains the selected
 `models/...` identity; that observation does not establish its separate native
 `modelVersion`, and the campaign makes no such claim.
 
-The current-model campaign requires `TEST_GEMINI_MODEL_FILE_SEARCH`. The Gemini File Search role remains exactly
-`models/gemini-2.5-flash` for its existing restricted exception. Current Gemini
-3.8 retrieval has separate blocking evidence; no exception transfers to it.
+The current-model campaign requires `TEST_GEMINI_MODEL_FILE_SEARCH` to be exact
+`models/gemini-3.8-flash`. Four configured-role retrieval and deleted-store
+consistency cases and two directly selected current-model retrieval cases all
+retain blocking evidence and ordinary exclusive-family assertions. The
+2.5-only qualification remains isolated and is not exercised by this live lane.
 The Ollama verifier also checks both exact local boolean-thinking tags before
 execution. Ollama Cloud execution is excluded by explicit user scope; only
 local Ollama is qualified. Deterministic origin validation is not cloud evidence.

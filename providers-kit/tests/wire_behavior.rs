@@ -15,8 +15,9 @@ use providers_kit::embedding::EmbedRequest;
 use providers_kit::files::{FileListRequest, FileUploadRequest};
 use providers_kit::generation::{
     Citation, ContentPart, FileReference, FinishReason, FunctionCall, FunctionResult,
-    GenerateEvent, GenerateRequest, GenerationConfig, GenerationContinuation, Message,
-    ProviderToolSpec, ReasoningConfig, ReasoningEffort, ReasoningSummaryMode, Usage,
+    GenerateEvent, GenerateRequest, GenerationConfig, GenerationContinuation, JsonSchema, Message,
+    ProviderFunctionTool, ProviderToolSpec, ReasoningConfig, ReasoningEffort, ReasoningSummaryMode,
+    Usage,
 };
 use providers_kit::hosted::{HostedTool, HostedToolOutput};
 use providers_kit::models::ModelListRequest;
@@ -64,7 +65,13 @@ async fn scripted_http_drop_rejects_late_requests() {
     let observed = tokio::time::timeout(Duration::from_secs(2), async {
         let mut stream = match TcpStream::connect(address).await {
             Ok(stream) => stream,
-            Err(error) if error.kind() == std::io::ErrorKind::ConnectionRefused => {
+            // Listener teardown can reset the handshake before a request stream exists.
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::ConnectionReset
+                ) =>
+            {
                 return Ok(Vec::new());
             }
             Err(error) => return Err(error),
@@ -101,6 +108,8 @@ async fn scripted_http_drop_rejects_late_requests() {
                 Err(error) if error.kind() == std::io::ErrorKind::ConnectionRefused => {
                     return Ok(());
                 }
+                // A reset rejects this handshake, but does not prove the listener is gone.
+                Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => {}
                 Err(error) => return Err(error),
             }
             tokio::task::yield_now().await;
@@ -2431,6 +2440,109 @@ async fn anthropic_stream_continuation_uses_selected_model_and_requires_stop_rea
 }
 
 #[tokio::test]
+async fn anthropic_stream_usage_replaces_reported_totals_and_retains_omitted_fields() {
+    let mut server = spawn_scripted_http_server(vec![ScriptedResponse::sse(concat!(
+        "event: message_start\n",
+        "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_usage_updates\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude-wire\",\"stop_reason\":null,\"usage\":{\"input_tokens\":1299,\"output_tokens\":1,\"cache_creation_input_tokens\":2,\"cache_read_input_tokens\":3,\"output_tokens_details\":{\"thinking_tokens\":1}}}}\n\n",
+        "event: content_block_start\n",
+        "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+        "event: content_block_delta\n",
+        "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"done\"}}\n\n",
+        "event: content_block_stop\n",
+        "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+        "event: message_delta\n",
+        "data: {\"type\":\"message_delta\",\"delta\":{},\"usage\":{\"input_tokens\":2722,\"output_tokens\":11,\"cache_creation_input_tokens\":7,\"cache_read_input_tokens\":9,\"output_tokens_details\":{\"thinking_tokens\":4}}}\n\n",
+        "event: message_delta\n",
+        "data: {\"type\":\"message_delta\",\"delta\":{},\"usage\":{\"output_tokens\":13}}\n\n",
+        "event: message_delta\n",
+        "data: {\"type\":\"message_delta\",\"delta\":{},\"usage\":{\"input_tokens\":0,\"output_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens_details\":{\"thinking_tokens\":0}}}\n\n",
+        "event: message_delta\n",
+        "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":2}}\n\n",
+        "event: message_stop\n",
+        "data: {\"type\":\"message_stop\"}\n\n",
+    ))])
+    .await;
+    let provider = WireProvider::Anthropic.build(server.base_url());
+    let model = WireProvider::Anthropic.model(&provider, "claude-wire");
+    let request = WireRequest::user("Report the native usage totals.");
+    let observed = tokio::time::timeout(Duration::from_secs(10), async {
+        let mut stream = model.generate_stream(&request).await?;
+        let events = stream.by_ref().collect::<Vec<_>>().await;
+        let eof = stream.next().await.is_none();
+        Ok::<_, KitError>((events, eof))
+    })
+    .await;
+    let shutdown = tokio::time::timeout(Duration::from_secs(10), provider.shutdown()).await;
+    let settled = server.finish(Duration::from_secs(2)).await;
+    assert!(
+        matches!(&observed, Ok(Ok(_))),
+        "stream={observed:?}; provider cleanup={shutdown:?}; server cleanup={settled:?}"
+    );
+    assert!(
+        matches!(shutdown, Ok(Ok(()))),
+        "provider cleanup: {shutdown:?}"
+    );
+    assert_eq!(settled, Ok(()));
+    let (observed, eof) = observed.unwrap().unwrap();
+    assert!(eof, "the completed stream must remain at EOF");
+    let events = observed
+        .into_iter()
+        .collect::<Result<Vec<_>, _>>()
+        .expect("native usage updates should normalize");
+    let usage_events = events
+        .iter()
+        .filter_map(|event| match event {
+            GenerateEvent::Usage(usage) => Some(usage.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let expected = [
+        Usage {
+            input_tokens: Some(2722),
+            output_tokens: Some(11),
+            cached_input_tokens: Some(9),
+            reasoning_tokens: Some(4),
+            total_tokens: None,
+        },
+        Usage {
+            input_tokens: Some(2722),
+            output_tokens: Some(13),
+            cached_input_tokens: Some(9),
+            reasoning_tokens: Some(4),
+            total_tokens: None,
+        },
+        Usage {
+            input_tokens: Some(0),
+            output_tokens: Some(0),
+            cached_input_tokens: Some(0),
+            reasoning_tokens: Some(0),
+            total_tokens: None,
+        },
+        Usage {
+            input_tokens: Some(0),
+            output_tokens: Some(2),
+            cached_input_tokens: Some(0),
+            reasoning_tokens: Some(0),
+            total_tokens: None,
+        },
+    ];
+    assert_eq!(usage_events, expected);
+    let Some(GenerateEvent::Completed(response)) = events.last() else {
+        panic!("the stream must end with its completed response");
+    };
+    assert_eq!(response.usage, expected[3]);
+    assert_eq!(response.model.as_str(), "claude-wire");
+    assert_eq!(response.finish_reason, Some(FinishReason::Stop));
+    assert_eq!(
+        response.message.content(),
+        &[ContentPart::Text {
+            text: "done".to_owned()
+        }]
+    );
+    assert_eq!(server.requests().len(), 1);
+}
+
+#[tokio::test]
 async fn anthropic_stream_citation_delta_completes_with_citation() {
     let server = spawn_scripted_http_server(vec![ScriptedResponse::sse(concat!(
         "event: message_start\n",
@@ -4060,6 +4172,250 @@ async fn ollama_preserves_optional_call_ids_in_generation_streams_and_results() 
                 id.map(|id| json!(id)).as_ref()
             );
             assert_eq!(messages[1]["content"], "strict-live-result-17");
+        }
+    }
+}
+
+#[tokio::test]
+async fn ollama_json_function_continuation_preserves_history_and_native_text() {
+    let expected_token = "strict-e73ef453fa024c4abd83d86a7a730b7b";
+    let incorrect_token = "strict-73ef453fa024c4abd83d86a7a730b7b";
+    let instruction = "Call strict_lookup once with value providers-kit, then copy its verification_token exactly.";
+    let schema = json!({
+        "type": "object",
+        "properties": {"value": {"type": "string"}},
+        "required": ["value"],
+        "additionalProperties": false
+    });
+    let tool = ProviderToolSpec::Function(
+        ProviderFunctionTool::new(
+            "strict_lookup",
+            Some("Returns the requested verification token.".to_owned()),
+            JsonSchema::new(schema.clone()).expect("tool schema should validate"),
+        )
+        .expect("function tool should validate"),
+    );
+    let relay_instruction = "You are a tool-result relay. After the requested tool call, return exactly the verification_token string supplied by the tool, preserving every character, and nothing else. Never invent a token.";
+    for (system_instruction, temperature) in [
+        (None, None),
+        (Some(relay_instruction), None),
+        (None, Some(0.0)),
+        (Some(relay_instruction), Some(0.0)),
+    ] {
+        let generation = GenerationConfig::default()
+            .with_max_output_tokens(NonZeroU32::new(4096).expect("fixed output budget is nonzero"));
+        let generation = match temperature {
+            Some(value) => generation
+                .with_temperature(value)
+                .expect("temperature should validate"),
+            None => generation,
+        };
+        let initial_generation = generation
+            .clone()
+            .with_tool_choice(providers_kit::generation::ToolChoice::Auto);
+        let user = Message::user_text(instruction).expect("user message should validate");
+        let prefix = match system_instruction {
+            Some(text) => vec![
+                Message::system(vec![ContentPart::Text {
+                    text: text.to_owned(),
+                }])
+                .expect("system instruction should validate"),
+                user,
+            ],
+            None => vec![user],
+        };
+        let expected_prefix = match system_instruction {
+            Some(text) => json!([
+                {"role": "system", "content": text},
+                {"role": "user", "content": instruction}
+            ]),
+            None => json!([{"role": "user", "content": instruction}]),
+        };
+        let mut expected_options = json!({"num_predict": 4096});
+        if let Some(value) = temperature {
+            expected_options["temperature"] = json!(value);
+        }
+        for id in [Some("call_native_json"), None] {
+            for streaming in [false, true] {
+                for native_text in [expected_token, incorrect_token] {
+                    let mut native_call = json!({
+                        "function": {
+                            "index": 0,
+                            "name": "strict_lookup",
+                            "arguments": {"value": "providers-kit"}
+                        }
+                    });
+                    if let Some(id) = id {
+                        native_call["id"] = json!(id);
+                    }
+                    let first_native = json!({
+                        "model": "ollama-wire",
+                        "message": {
+                            "role": "assistant",
+                            "content": "Checking the verification token.",
+                            "thinking": "The tool result supplies the exact token.",
+                            "tool_calls": [native_call]
+                        },
+                        "done": true,
+                        "done_reason": "stop"
+                    });
+                    let final_native = json!({
+                        "model": "ollama-wire",
+                        "message": {"role": "assistant", "content": native_text},
+                        "done": true,
+                        "done_reason": "stop"
+                    });
+                    let replies = [first_native, final_native]
+                        .into_iter()
+                        .map(|response| {
+                            if streaming {
+                                ScriptedResponse::chunks(
+                                    200,
+                                    "application/x-ndjson",
+                                    vec![format!("{response}\n").into_bytes()],
+                                )
+                            } else {
+                                ScriptedResponse::json(&response.to_string())
+                            }
+                        })
+                        .collect();
+                    let mut server = spawn_scripted_http_server(replies).await;
+                    let mut base_url = server.base_url();
+                    base_url.set_path("/api");
+                    let provider = WireProvider::Ollama.build(base_url);
+                    let model = WireProvider::Ollama.model(&provider, "ollama-wire");
+                    let request = WireRequest::messages(prefix.clone())
+                        .with_tools(vec![tool.clone()])
+                        .expect("request tools should validate")
+                        .with_generation(initial_generation.clone())
+                        .expect("initial generation should validate");
+                    let first = if streaming {
+                        let mut events = model
+                            .generate_stream(&request)
+                            .await
+                            .expect("function-call stream should open")
+                            .try_collect::<Vec<_>>()
+                            .await
+                            .expect("function-call stream should terminate");
+                        let Some(GenerateEvent::Completed(response)) = events.pop() else {
+                            panic!("function-call stream should complete");
+                        };
+                        *response
+                    } else {
+                        model
+                            .generate(&request)
+                            .await
+                            .expect("function call should normalize")
+                    };
+                    let [call] = first.message.function_calls() else {
+                        panic!("response should contain exactly one function call");
+                    };
+                    let result = FunctionResult::new(
+                        call.id().map(str::to_owned),
+                        call.name().to_owned(),
+                        vec![ContentPart::Json {
+                            value: json!({"verification_token": expected_token}),
+                        }],
+                        false,
+                    )
+                    .expect("JSON function result should validate");
+                    let mut messages = prefix.clone();
+                    messages.extend([
+                        first.message,
+                        Message::tool(vec![result]).expect("tool message should validate"),
+                    ]);
+                    let continuation = WireRequest::messages(messages)
+                        .with_tools(vec![tool.clone()])
+                        .expect("continuation tools should validate")
+                        .with_generation(generation.clone())
+                        .expect("continuation generation should validate");
+                    let observed = if streaming {
+                        let mut events = model
+                            .generate_stream(&continuation)
+                            .await
+                            .expect("continuation stream should open")
+                            .try_collect::<Vec<_>>()
+                            .await
+                            .expect("continuation stream should terminate");
+                        let Some(GenerateEvent::Completed(response)) = events.pop() else {
+                            panic!("continuation stream should complete");
+                        };
+                        *response
+                    } else {
+                        model
+                            .generate(&continuation)
+                            .await
+                            .expect("continuation should normalize")
+                    };
+                    let shutdown = provider.shutdown().await;
+                    let settled = server.finish(Duration::from_secs(1)).await;
+                    shutdown.expect("provider should shut down");
+                    settled.expect("scripted server should join");
+
+                    assert_eq!(observed.finish_reason, Some(FinishReason::Stop));
+                    assert_eq!(
+                        observed.message.content(),
+                        &[ContentPart::Text {
+                            text: native_text.to_owned()
+                        }]
+                    );
+                    assert_eq!(
+                        observed.message.content()
+                            == [ContentPart::Text {
+                                text: expected_token.to_owned()
+                            }],
+                        native_text == expected_token,
+                        "normalization must not repair an incorrect native token"
+                    );
+                    let requests = server.requests();
+                    assert_eq!(requests.len(), 2);
+                    let initial: Value = serde_json::from_slice(&requests[0].body).unwrap();
+                    let replay: Value = serde_json::from_slice(&requests[1].body).unwrap();
+                    assert_eq!(initial["model"], "ollama-wire");
+                    assert_eq!(replay["model"], "ollama-wire");
+                    assert_eq!(initial["stream"], streaming);
+                    assert_eq!(replay["stream"], streaming);
+                    assert_eq!(initial["messages"], expected_prefix);
+                    assert_eq!(initial["options"], expected_options);
+                    assert_eq!(replay["options"], expected_options);
+                    assert_eq!(
+                        initial["tools"],
+                        json!([{
+                            "type": "function",
+                            "function": {
+                                "name": "strict_lookup",
+                                "description": "Returns the requested verification token.",
+                                "parameters": schema
+                            }
+                        }])
+                    );
+                    assert_eq!(replay["tools"], initial["tools"]);
+                    let mut replay_call = json!({
+                        "type": "function",
+                        "function": {"name": "strict_lookup", "arguments": {"value": "providers-kit"}}
+                    });
+                    let mut replay_result = json!({
+                        "role": "tool",
+                        "tool_name": "strict_lookup",
+                        "content": json!({"verification_token": expected_token}).to_string()
+                    });
+                    if let Some(id) = id {
+                        replay_call["id"] = json!(id);
+                        replay_result["tool_call_id"] = json!(id);
+                    }
+                    let mut expected_replay = expected_prefix.as_array().unwrap().clone();
+                    expected_replay.extend([
+                        json!({
+                            "role": "assistant",
+                            "content": "Checking the verification token.",
+                            "thinking": "The tool result supplies the exact token.",
+                            "tool_calls": [replay_call]
+                        }),
+                        replay_result,
+                    ]);
+                    assert_eq!(replay["messages"], json!(expected_replay));
+                }
+            }
         }
     }
 }

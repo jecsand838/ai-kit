@@ -108,10 +108,13 @@ They neither retry model output nor qualify every feature on both models.
 
 Four existing File Search cases (retrieval and deleted-store consistency,
 each unary and streaming) explicitly select `TEST_GEMINI_MODEL_FILE_SEARCH`,
-which must be `models/gemini-2.5-flash`. Their source-bound compatibility
-exception remains attached only to that model. Two additional retrieval
-cases select exact `models/gemini-3.8-flash`, one unary and one streaming,
-with the ordinary strict File Search evidence and no inherited exception.
+which must be `models/gemini-3.8-flash`. Two additional retrieval cases select
+that same exact model directly, one unary and one streaming. All six retain
+the ordinary strict File Search evidence and exclusive-family assertions.
+Google lists [Gemini 3.8 Flash](https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash)
+as supporting File Search and continues serving 2.5 to
+[eligible prior users](https://ai.google.dev/gemini-api/docs/deprecations).
+The retained 2.5-only qualification is not exercised by these current live cases.
 All stored-marker, native citation, deletion observation and cleanup
 assertions are retained. A current default model cannot silently move the
 legacy exception to a different model.
@@ -214,7 +217,7 @@ insufficient; a Code Execution live case needs successful result evidence. Missi
 URIs in File Search must not be replaced with store names or guessed ids to
 satisfy assertions.
 
-Two File Search streaming cases have a user-approved test-coverage
+Two File Search streaming scenarios retain a user-approved test-coverage
 qualification only for the exact selected `models/gemini-2.5-flash`. Genuine
 retrieval with the correct marker, successful finish and valid complete stream
 may coexist with one CodeExecution output containing one PYTHON
@@ -225,7 +228,8 @@ relabeled, and production normalization is unchanged. Required private reports
 retain the complete portable code/response and visibly distinguish qualified
 retrieval from unmet strict family exclusion. They do not imply raw wire
 capture, execution, or retrieval erasure. Unary and other selected models keep
-the original exclusive-family rule. See the exact
+the original exclusive-family rule. The current 3.8 live role does not exercise
+or inherit this qualification. See the exact
 [qualification contract](../STRICT_TESTING.md#qualified-gemini-file-search-streaming-coverage).
 
 Strict-live deleted-store fixtures retain server-issued names. Each unary or

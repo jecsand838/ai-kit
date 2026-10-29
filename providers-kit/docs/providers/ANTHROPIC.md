@@ -40,8 +40,14 @@ No restricted-access Mythos profile receives a new qualification claim.
 Tool-use blocks normalize to `FunctionCall`. Tool-result blocks are rendered
 from validated `FunctionResult` values while preserving extended-thinking
 blocks in the opaque continuation attached to the assistant Message.
-Streaming usage preserves input and cache counts from `message_start`, then
-merges cumulative output and nested thinking tokens from `message_delta`.
+Streaming usage starts with `message_start` and applies the cumulative counts
+reported by each `message_delta`. Supplied input, cache, output, and nested
+thinking counts replace their previous values, including explicit zero;
+omitted counts preserve the latest reported value. Both portable usage events
+and the completed response reflect these updates. No aggregate token total is
+synthesized. Anthropic's [delta usage schema](https://raw.githubusercontent.com/anthropics/anthropic-sdk-python/main/src/anthropic/types/message_delta_usage.py)
+and [stream accumulator](https://raw.githubusercontent.com/anthropics/anthropic-sdk-python/main/src/anthropic/lib/streaming/_messages.py)
+define the cumulative replacement and optional-field behavior.
 
 Streaming [citation deltas](https://platform.claude.com/docs/en/build-with-claude/citations#streaming-support)
 append to their indexed text block. Portable citations and the original native

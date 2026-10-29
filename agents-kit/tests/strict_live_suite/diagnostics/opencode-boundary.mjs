@@ -99,7 +99,8 @@ class BoundaryCapture {
         return;
       }
       this.fresh.root = { session: input.sessionID, user: message.id };
-      this.emit({ event: "fresh_user", capture: "complete", prompt_matches_expected: true });
+      this.emit({ event: "fresh_user", capture: "complete", prompt_matches_expected: true,
+        agent_matches_build: message.agent === "build" });
     } catch {
       this.freshIncomplete("user_observer_error");
     }
@@ -212,8 +213,16 @@ class BoundaryCapture {
     const modelMatches = request.model === this.expectedModel;
     const sessionMatches = this.fresh.root !== undefined
       && new Headers(init?.headers).get("x-opencode-session-id") === this.fresh.root.session;
+    const temperaturePresent = Object.hasOwn(request, "temperature");
+    const temperatureNumeric = typeof request.temperature === "number" && Number.isFinite(request.temperature);
+    // Observe the serialized request only. Settings are scenario inputs fixed
+    // before startup; this observer never assigns or repairs request parameters.
+    const temperatureExpected = Object.hasOwn(this.options, "expectedTemperature");
     this.emit({ event: "fresh_request", flow, capture: matches === 1 && modelMatches && sessionMatches ? "complete" : "incomplete",
-      model_matches_configured: modelMatches, session_matches_fresh_user: sessionMatches, exact_prompt_parts: matches });
+      model_matches_configured: modelMatches, session_matches_fresh_user: sessionMatches, exact_prompt_parts: matches,
+      temperature_present: temperaturePresent, temperature_numeric: temperatureNumeric,
+      temperature_value: temperatureNumeric ? request.temperature : null,
+      temperature_matches_scenario: temperatureExpected ? temperatureNumeric && request.temperature === this.options.expectedTemperature : null });
     if (matches !== 1 || !modelMatches || !sessionMatches) {
       this.freshIncomplete("request_correlation");
       return false;
@@ -321,7 +330,7 @@ class BoundaryCapture {
     provider.options.fetch = function (...args) {
       return owner.fetch(delegate, this, args);
     };
-    this.emit({ event: "installed", boundary: "serialized_provider_http", expected_role: "opencode_shell", flow_limit: BoundaryCapture.FLOW_LIMIT });
+    this.emit({ event: "installed", boundary: "serialized_provider_http", expected_role: this.options.expectedRole === "opencode_default" ? "opencode_default" : "opencode_shell", flow_limit: BoundaryCapture.FLOW_LIMIT });
   }
 
   async fetch(delegate, receiver, args) {

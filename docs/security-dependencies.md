@@ -23,7 +23,7 @@ a particular native build. Conversely, a passing build does not prove an
 advisory unreachable.
 
 The current registry lockfile was scanned using cargo-audit 0.22.2 and RustSec
-commit `99670cfc0bc574433034b75876a4b791ccaa2efb`. It contains seven vulnerability
+commit `ee1a49a2769a24a596afc1c20cb33748d2769586`. It contains seven vulnerability
 findings and ten unsoundness findings covered by **17 exact exceptions**:
 
 | Locked package | Accepted advisory IDs | Upstream removal condition |
@@ -45,6 +45,38 @@ Review this list and the dependency paths on every dependency update and before
 each release. Remove stale exceptions immediately when an upstream fix lands,
 then run the raw audit and affected compatibility, deterministic and strict-live
 gates. A new or broadened exception needs explicit maintainer review.
+
+## Remediated build dependency
+
+The lockfile selects `libz-sys 1.1.31`, which fixes
+[RUSTSEC-2026-0418](https://rustsec.org/advisories/RUSTSEC-2026-0418.html).
+The affected `1.1.28` arrived through Storage's optional SurrealDB/RocksDB
+dependency chain. The [upstream fix](https://github.com/rust-lang/libz-sys/pull/280)
+removes compiler-command logging that can expose build environment values.
+The update changes only that package's version and checksum; no dependency
+patch, new direct dependency, feature change, or advisory exception is needed.
+
+PR #28's original failed audit remains historical evidence: its raw report
+contained eight vulnerability and ten unsoundness findings, and its qualified
+report retained only this new advisory. A fresh audit of the fixed graph passed
+the same two-scan gate with the existing 17 exceptions: this advisory was absent
+from the raw report, and the qualified scan had no blocking findings. The result
+is `PASS_WITH_EXCEPTIONS`; all raw accepted findings remain visible.
+
+The recorded graph uses `cc 1.2.59`, below the advisory's `cc >=1.6.0` trigger,
+and the supported RocksDB path enables static zlib, which skips the affected
+probe unless overridden. These facts do not establish the safety of arbitrary
+historical environments or caches; no secret exposure was confirmed during
+this investigation. Updating a dependency does not delete existing build output.
+Downstream applications with their own lockfiles must update their resolved
+`libz-sys` separately.
+
+For this targeted update, the maintainer explicitly accepts the existing
+strict-live qualification without rerunning live suites. Original receipts,
+failed attempts, accepted historical passes, and the separately accepted Gemini
+cleanup exception retain their recorded source and execution identities. Fresh
+dependency-audit and deterministic results remain distinct from that reused
+live evidence; this decision adds no advisory exception.
 
 ## Audit evidence and CI
 

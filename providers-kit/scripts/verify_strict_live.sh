@@ -130,7 +130,18 @@ mkdir -p "${WORKSPACE_DIR}/target/providers-kit-strict-live"
 STRICT_LOG_DIR="$(umask 077; mktemp -d "${WORKSPACE_DIR}/target/providers-kit-strict-live/realtime-grades-XXXXXXXX")"
 STRICT_LOG="${STRICT_LOG_DIR}/strict-live.log"
 (umask 077; : > "${STRICT_LOG}")
+if [[ "${PROVIDERS_KIT_EVIDENCE_DIR+configured}" == configured ]]; then
+    if [[ -z "${PROVIDERS_KIT_EVIDENCE_DIR}" || ! -d "${PROVIDERS_KIT_EVIDENCE_DIR}" \
+        || ! -w "${PROVIDERS_KIT_EVIDENCE_DIR}" || ! -x "${PROVIDERS_KIT_EVIDENCE_DIR}" ]]; then
+        printf 'invalid strict-live setting: PROVIDERS_KIT_EVIDENCE_DIR must name an existing writable directory\n' >&2
+        exit 1
+    fi
+else
+    PROVIDERS_KIT_EVIDENCE_DIR="${STRICT_LOG_DIR}"
+fi
+export PROVIDERS_KIT_EVIDENCE_DIR
 printf 'Private strict-live log: %s\n' "${STRICT_LOG}"
+printf 'Private strict-live evidence: %s\n' "${PROVIDERS_KIT_EVIDENCE_DIR}"
 set +e
 release_stage provider.live.strict_live cargo test --locked -p providers-kit --test strict_live --all-features -- "${STRICT_LIVE_ARGS[@]}" 2>&1 | tee "${STRICT_LOG}"
 STRICT_PIPE_STATUS=("${PIPESTATUS[@]}")

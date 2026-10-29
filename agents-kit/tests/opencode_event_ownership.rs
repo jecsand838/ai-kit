@@ -262,6 +262,7 @@ struct OpenCodeEventStats {
     invalid_stream_response: AtomicBool,
     malformed_stream_response: AtomicBool,
     terminal_error: Mutex<Option<serde_json::Value>>,
+    terminal_text: Mutex<String>,
     provider_status: AtomicUsize,
     release: Mutex<opencode_release::ReleaseFixture>,
     tool_models: Mutex<Vec<(String, String)>>,
@@ -4827,6 +4828,7 @@ impl OpenCodeEventProbe {
             invalid_stream_response: AtomicBool::new(false),
             malformed_stream_response: AtomicBool::new(false),
             terminal_error: Mutex::new(None),
+            terminal_text: Mutex::new("authoritative HTTP answer".to_owned()),
             provider_status: AtomicUsize::new(200),
             release: Mutex::new(opencode_release::ReleaseFixture::default()),
             tool_models: Mutex::new(Vec::new()),
@@ -5267,7 +5269,7 @@ impl OpenCodeEventProbe {
                             "parts": [{
                                 "id": "prt_stream_text", "sessionID": "ses_probe",
                                 "messageID": OpenCodeStreamCase::ASSISTANT, "type": "text",
-                                "text": "authoritative HTTP answer"
+                                "text": stats.terminal_text.lock().unwrap().clone()
                             }]
                         });
                         if let Some(error) = stats.terminal_error.lock().unwrap().clone() {
@@ -8725,6 +8727,70 @@ async fn opencode_http_authentication_preserves_safe_classification() {
         assert_eq!(error.context().phase, ErrorPhase::ResponseRead);
         let rendered = format!("{error:?} {error}");
         assert!(!rendered.contains("WIRE_SECRET") && !rendered.contains("PRIVATE_PROVIDER"));
+    }
+}
+
+#[tokio::test]
+async fn opencode_literal_tags_and_whitespace_survive_unary_and_streaming() {
+    for native in [
+        "<execute>LANCE_CONFLICT_fixture</execute>",
+        " \tLANCE_CONFLICT_fixture\n",
+    ] {
+        for streamed in [false, true] {
+            let case = OpenCodeStreamCase::start().await;
+            *case.probe.stats.terminal_text.lock().unwrap() = native.to_owned();
+            let output = if streamed {
+                let mut stream = case.stream().await;
+                case.begin_text();
+                case.delta(
+                    "evt_literal_text",
+                    OpenCodeStreamCase::ASSISTANT,
+                    "prt_stream_text",
+                    "text",
+                    native,
+                );
+                let delta = OpenCodeStreamCase::next(&mut stream).await.unwrap();
+                case.release();
+                let terminal = OpenCodeStreamCase::next(&mut stream).await.unwrap();
+                let fused = stream.recv().await.is_none();
+                case.settled().await;
+                case.shutdown().await;
+                assert_eq!(
+                    delta,
+                    PromptEvent::OutputDelta {
+                        text: native.to_owned()
+                    }
+                );
+                assert!(fused, "one terminal must finish the observation");
+                let PromptEvent::Completed(response) = terminal else {
+                    panic!("native HTTP terminal must complete the public stream")
+                };
+                response.output().to_owned()
+            } else {
+                let conversation = Arc::clone(&case.conversation);
+                let task = tokio::spawn(async move {
+                    conversation.prompt(OpenCodeStreamCase::request()).await
+                });
+                case.probe.wait_for_messages(1).await;
+                case.release();
+                let response = tokio::time::timeout(Duration::from_secs(5), task)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .unwrap();
+                case.settled().await;
+                case.shutdown().await;
+                response.output().to_owned()
+            };
+            assert_eq!(
+                output, native,
+                "native text must never be stripped or repaired"
+            );
+            assert_ne!(
+                output, "LANCE_CONFLICT_fixture",
+                "an incorrect native literal stays incorrect"
+            );
+        }
     }
 }
 

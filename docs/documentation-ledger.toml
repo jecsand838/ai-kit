@@ -1,5 +1,5 @@
-version = 13
-scope_date = "2026-10-27"
+version = 19
+scope_date = "2026-10-29"
 scope_source = "User-approved PR #22 documentation refresh on codex/public-trait-mock-ci, starting from d3b763e7; user-authorized release continuation from 9d99ddda with verified unchanged receipts; current owning specifications and explicit workspace contracts; prior user-approved PR #2 security remediation; user-approved contribution guide and GitHub templates; user-authorized initial 0.0.1 version alignment and pre-1.0 compatibility policy; user-authorized removal of source patches and temporary Qdrant removal, with explicit advisory risk acceptance; user-authorized crate and directory rename to agents-kit, providers-kit, app-kit, tools-kit and storage-kit; user-authorized manual main-only publishing with a one-time 0.0.1 qualification override; user-authorized removal of frozen v6 datasets and dependent tests"
 notes = [
   "This ledger covers the five compiled Kit crates and their active repository-owned guidance.",
@@ -15,6 +15,10 @@ notes = [
   "The qualification report, prototype/capacity records and migration-fixture provenance retain their recorded source and results. Documentation edits do not relabel qualification; new integration results are recorded separately.",
   "External Rust dependencies resolve from crates.io without source patches or guard exemptions. Temporary advisory exceptions are individually enumerated; raw findings remain visible and new vulnerabilities or unsoundness remain blocking.",
   "Qdrant is temporarily absent from current features, public configuration and validation lanes. Historical backend results and security evidence retain their original source scope and authorize no current feature, patch or gate waiver.",
+  "The 2026-10-29 Ollama repair records a supported same-ID artifact refresh, verified effective Tekken initialization, and ten passing confirmations of each of the two previously failing cases. Original failures remain immutable; unchanged historical long tests are reused under the maintainer's rule. This bounded affected-case pass does not claim a newly executed full Provider command or workspace wrapper.",
+  "The 2026-10-29 delivery acceptance qualifies the retained Gemini generated output under an explicit maintainer-accepted upstream exception and authorizes pushing the reviewed changes. It preserves both Ollama failures, unchanged historical batch acceptance and raw receipts; it does not establish a passing Provider aggregate or workspace release qualification.",
+  "The 2026-10-29 Provider follow-up records fixed Gemini and Ollama diagnostics, canonical private evidence retention, rejected scenario changes, and separately identified accepted historical long-test coverage. It preserves earlier receipts and does not convert native model failures into passing assertions.",
+  "The 2026-10-28 strict-live repair reports preserve the original campaign and separately record affected-crate fixes, native comparisons, remaining failures and cleanup. The native follow-up records the user's acceptance of seven unchanged historical long-test passes; it does not relabel failed executions or establish workspace release qualification.",
 ]
 
 [canonical_owners]
@@ -101,7 +105,7 @@ active = [
   "agents-kit/.codex/development/PROCESS.md",
   "agents-kit/.codex/development/dispatch/*.md",
 ]
-historical = ["app-kit/audits/**/*.md", "app-kit/plans/**/*.md", "docs/refactors/**/*.md", "docs/security-evidence/**", "docs/pr20-pr21-integration.md", "docs/pr22-validation.md", "storage-kit/tests/fixtures/README.md", "storage-kit/docs/feature-split-qualification.md", "storage-kit/docs/lancedb-state-store-capacity.md", "storage-kit/docs/lancedb-state-store-prototype.md"]
+historical = ["app-kit/audits/**/*.md", "app-kit/plans/**/*.md", "docs/refactors/**/*.md", "docs/security-evidence/**", "docs/pr20-pr21-integration.md", "docs/pr22-validation.md", "docs/strict-live-2026-10-28.md", "docs/strict-live-followup-2026-10-28.md", "docs/strict-live-native-repairs-2026-10-28.md", "docs/strict-live-provider-followup-2026-10-29.md", "docs/strict-live-delivery-2026-10-29.md", "docs/strict-live-ollama-repair-2026-10-29.md", "storage-kit/tests/fixtures/README.md", "storage-kit/docs/feature-split-qualification.md", "storage-kit/docs/lancedb-state-store-capacity.md", "storage-kit/docs/lancedb-state-store-prototype.md"]
 templates = ["agents-kit/.codex/development/templates/**/*.md", ".agents/skills/*/assets/**", ".github/ISSUE_TEMPLATE/*.yml", ".github/pull_request_template.md"]
 excluded = ["tmp/**", "target/**", "**/vendor/**", "agents-kit/.codex/development/execution/**"]
 policy = "Historical records retain their original evidence; templates are examples, not active runs. Explicit adopted_requirements records preserve only the incorporated scope, not old phase instructions, draft signatures, commands, or completion claims. Ordinary links do not propagate adoption. Excluded artifacts are never traversed by documentation checks; pinned oracle authority comes only from the owning specification's explicit adoption. Selecting a workflow is explicit; its presence or adoption of frozen requirements does not activate an old campaign."

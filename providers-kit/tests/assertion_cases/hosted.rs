@@ -857,6 +857,7 @@ fn gemini_streaming_file_search_scope_requires_provider_operation_and_exact_sele
     for selected in [
         "",
         "gemini-2.5-flash",
+        "models/gemini-3.8-flash",
         "models/gemini-2.5-pro",
         "models/gemini-2.5-flash-lite",
         "models/gemini-2.5-flash-preview",
@@ -3616,6 +3617,11 @@ fn qualified_capture_uses_private_fallback_without_optional_evidence_configurati
 fn qualified_capture_does_not_expand_unqualified_stream_acceptance() {
     for (contract, selected_model) in [
         (FileSearchContract::Exclusive, "models/gemini-2.5-flash"),
+        (FileSearchContract::Exclusive, "models/gemini-3.8-flash"),
+        (
+            FileSearchContract::GeminiStreaming,
+            "models/gemini-3.8-flash",
+        ),
         (
             FileSearchContract::GeminiStreaming,
             "models/different-model",

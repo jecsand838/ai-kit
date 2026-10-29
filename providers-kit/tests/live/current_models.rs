@@ -87,6 +87,8 @@ impl LiveProvider {
                 effort: Some(ReasoningEffort::High),
                 ..ReasoningConfig::default()
             }),
+            Self::generation_config(),
+            None,
         )
         .await
     }

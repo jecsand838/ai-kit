@@ -48,10 +48,9 @@ impl HostedCase {
                 HostedScenario::FileSearch { current: false }
                 | HostedScenario::DeletedStoreConsistency => {
                     let model = LiveProvider::required("TEST_GEMINI_MODEL_FILE_SEARCH")?;
-                    if model != "models/gemini-2.5-flash" {
+                    if model != "models/gemini-3.8-flash" {
                         return Err(
-                            "legacy File Search qualification requires models/gemini-2.5-flash"
-                                .into(),
+                            "File Search qualification requires models/gemini-3.8-flash".into()
                         );
                     }
                     Some(model)

@@ -18,6 +18,7 @@ use tokio::sync::Semaphore;
 
 use super::fixture::StrictFixture;
 use crate::native_cleanup::NativeCleanup;
+use crate::opencode_question_evidence::QuestionExpectation;
 
 const PROMPTS: &str = "agents_kit_opencode_prompts_v1";
 const EVENTS: &str = "agents_kit_opencode_event_progress_v1";
@@ -188,6 +189,10 @@ impl StateTransactionBackend for OverlappingTransaction {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn opencode_lance_foreground_conflict_recomputes_after_native_event_commit() {
+    let marker = format!("LANCE_CONFLICT_{}", uuid::Uuid::new_v4().simple());
+    let prompt_text = format!(
+        "This is a literal text copy check. Do not call any tools. Return only this opaque token, preserving every character exactly: {marker}. Do not add tags, markup, quotes, whitespace, explanations, or any other prefix or suffix."
+    );
     super::StrictLiveEnvironment::require_all();
     let fixture = StrictFixture::new().await;
     let overlap = Arc::new(LanceOverlap::new());
@@ -214,8 +219,6 @@ async fn opencode_lance_foreground_conflict_recomputes_after_native_event_commit
         workspace = Some(agent.new_workspace(StrictFixture::workspace("lance overlap")).await.unwrap());
         conversation = Some(workspace.as_ref().unwrap().new_conversation(StrictFixture::conversation("native Lance overlap")).await.unwrap());
         let conversation = conversation.as_ref().unwrap();
-        let marker = format!("LANCE_CONFLICT_{}", uuid::Uuid::new_v4().simple());
-        let prompt_text = format!("Return exactly {marker}. Do not invoke any tools.");
         overlap.armed.store(true, Ordering::SeqCst);
         let prompt_deadline = tokio::time::Instant::now() + Duration::from_secs(120);
         // Native HTTP completion waits for inference. Reserve one configured
@@ -256,7 +259,30 @@ async fn opencode_lance_foreground_conflict_recomputes_after_native_event_commit
         let prepared_attempts = overlap.prepared_attempts.lock().unwrap().clone();
         let prepared_commits: Vec<_> = overlap.prepared_commits.lock().unwrap().iter().cloned().collect();
         eprintln!("native generation evidence: prepared_attempts={prepared_attempts:?}, committed_generation_parts={prepared_commits:?}, native_user_ids={native_user_ids:?}, native_part_ids={native_part_ids:?}, exact_marker={}, fused={fused}, event_commits={}, first_foreground_conflicts={}", completed.output() == marker, overlap.event_commits.load(Ordering::SeqCst), overlap.foreground_conflicts.load(Ordering::SeqCst));
-        assert_eq!(completed.output(), marker);
+        // The already-fetched history supplies independent persisted native
+        // evidence. Capture failure cannot replace the original exact assertion.
+        let primary = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            assert_eq!(completed.output(), marker);
+        }));
+        let capture = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            QuestionExpectation::new(session, &prompt_text, &configured)
+                .prompt_output(&messages, "ollama", &marker, completed.output())
+        }));
+        let context = match capture {
+            Ok(Ok((mut context, native))) => {
+                let bounded: String = native.chars().take(4096).collect();
+                context["native_text"] = serde_json::json!(bounded);
+                context["native_text_truncated"] = serde_json::json!(native.chars().count() > 4096);
+                context
+            }
+            Ok(Err(reason)) => serde_json::json!({"capture":"incomplete","reason":reason,
+                "foreground_http_body_observed":false}),
+            Err(_) => serde_json::json!({"capture":"incomplete","reason":"analysis_panic",
+                "foreground_http_body_observed":false}),
+        };
+        eprintln!("AGENTS_KIT_LANCE_NATIVE_EVIDENCE={context}");
+        if let Err(primary) = primary { std::panic::resume_unwind(primary); }
+
         assert!(fused);
         assert_eq!(overlap.event_commits.load(Ordering::SeqCst), 1);
         assert_eq!(overlap.foreground_conflicts.load(Ordering::SeqCst), 1, "the staged foreground commit must report a real native transaction conflict");
@@ -271,6 +297,8 @@ async fn opencode_lance_foreground_conflict_recomputes_after_native_event_commit
         assert_eq!(matching_parts[0]["type"].as_str(), Some("text"));
         assert_ne!(matching_parts[0]["synthetic"].as_bool(), Some(true));
         assert_eq!(matching_parts[0]["text"].as_str(), Some(prompt_text.as_str()));
+        assert_eq!(context["capture"], "complete", "native evidence must be complete");
+        assert_eq!(context["native_equals_portable"], true, "native terminal text must be preserved");
     }).await;
     if !matches!(&observed, Ok(Ok(()))) {
         eprintln!(

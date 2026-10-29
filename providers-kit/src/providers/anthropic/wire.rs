@@ -79,8 +79,15 @@ pub(crate) struct AnthropicUsage {
 }
 
 impl AnthropicUsage {
-    pub(crate) fn update_output(&mut self, newer: Self) {
+    pub(crate) fn update_totals(&mut self, newer: Self) {
+        self.input_tokens = newer.input_tokens.or(self.input_tokens);
         self.output_tokens = newer.output_tokens.or(self.output_tokens);
+        self.cache_creation_input_tokens = newer
+            .cache_creation_input_tokens
+            .or(self.cache_creation_input_tokens);
+        self.cache_read_input_tokens = newer
+            .cache_read_input_tokens
+            .or(self.cache_read_input_tokens);
         if let Some(newer) = newer.output_tokens_details {
             let current = self.output_tokens_details.get_or_insert_default();
             current.thinking_tokens = newer.thinking_tokens.or(current.thinking_tokens);

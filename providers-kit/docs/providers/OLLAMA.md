@@ -19,6 +19,9 @@ declarations without a forced-choice field. Strict-live coverage requires an
 actual automatic function call and result continuation, and separately verifies
 that forced selection returns `Unsupported`, following the documented
 [tool-calling flow](https://docs.ollama.com/capabilities/tool-calling).
+The strict continuation scenario supplies its literal-result system instruction
+before both requests; its unchanged sampling and exact-output requirements
+belong to the [strict-testing guide](../STRICT_TESTING.md).
 
 When Ollama supplies a call `id`, generation and streaming retain it in
 `FunctionCall`; assistant replay returns that `id`, and the corresponding

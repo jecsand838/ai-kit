@@ -91,6 +91,9 @@ class AgentKitProtocolAuthorityTests(unittest.TestCase):
                 ("app-server-transport/src/transport/stdio.rs", [
                     "std::io::stdin().lock().lines()",
                 ]),
+                ("app-server-transport/src/transport/websocket.rs", [
+                    "IncomingWebSocketMessage::Text(text)",
+                ]),
                 ("app-server-client/src/remote.rs", ["Message::Text(payload.into())"]),
                 ("app-server-protocol/src/protocol/v1.rs", [
                     "pub experimental_api: bool",
@@ -99,7 +102,9 @@ class AgentKitProtocolAuthorityTests(unittest.TestCase):
                 ("app-server-protocol/src/protocol/v2/thread.rs", [
                     "pub dynamic_tools: Option<Vec<DynamicToolSpec>>",
                 ]),
-                ("protocol/src/dynamic_tools.rs", ["pub input_schema: JsonValue"]),
+                ("protocol/src/dynamic_tools.rs", [
+                    "pub enum DynamicToolSpec", "pub input_schema: JsonValue",
+                ]),
                 ("app-server-protocol/src/protocol/v2/item.rs", [
                     "pub struct DynamicToolCallParams", "pub call_id: String",
                     "pub content_items: Vec<DynamicToolCallOutputContentItem>",
@@ -159,6 +164,122 @@ class AgentKitProtocolAuthorityTests(unittest.TestCase):
                 contract in protocol or contract in backend,
                 f"OpenCode protocol contract lost `{contract}`",
             )
+
+    def test_selected_generated_opencode_schema_keeps_foreground_and_interaction_envelopes(self) -> None:
+        with self._verified_archive("opencode") as archive:
+            schema = self._decode_openapi(self._archive_source(archive, "packages/sdk/openapi.json"))
+
+        model_config = schema["components"]["schemas"]["ProviderConfig"]["properties"][
+            "models"
+        ]["additionalProperties"]
+        self.assertNotIn("reasoning_options", model_config.get("required", []))
+        options = model_config["properties"]["reasoning_options"]
+        self.assertEqual(options["type"], "array")
+        alternatives = options["items"]["anyOf"]
+        self.assertEqual(len(alternatives), 3)
+        for alternative, kind, required in zip(
+            alternatives,
+            ["effort", "toggle", "budget_tokens"],
+            [["type", "values"], ["type"], ["type"]],
+            strict=True,
+        ):
+            with self.subTest(reasoning_option=kind):
+                self.assertEqual(alternative["type"], "object")
+                self.assertEqual(alternative["properties"]["type"]["enum"], [kind])
+                self.assertEqual(alternative["required"], required)
+                self.assertIs(alternative["additionalProperties"], False)
+        self.assertEqual(
+            json.dumps(alternatives[0]["properties"]["values"], sort_keys=True),
+            json.dumps({"type": "array", "items": {"type": "string"}}, sort_keys=True),
+            "generated HTTP efforts remain string-valued despite nullable config-source values",
+        )
+        for bound in ["min", "max"]:
+            self.assertEqual(
+                json.dumps(alternatives[2]["properties"][bound], sort_keys=True),
+                json.dumps({"type": "number"}, sort_keys=True),
+            )
+        self.assertNotIn(
+            "reasoning_options", schema["components"]["schemas"]["Model"]["properties"],
+            "configuration does not widen model inventory responses",
+        )
+
+        for path, method, info in [
+            ("/session/{sessionID}/message", "post", "AssistantMessage"),
+            ("/session/{sessionID}/message/{messageID}", "get", "Message"),
+        ]:
+            response = schema["paths"][path][method]["responses"]["200"]["content"][
+                "application/json"
+            ]["schema"]
+            self.assertEqual(response["required"], ["info", "parts"])
+            self.assertEqual(response["properties"]["info"]["$ref"], f"#/components/schemas/{info}")
+            self.assertEqual(response["properties"]["parts"]["items"]["$ref"], "#/components/schemas/Part")
+        create = schema["paths"]["/session"]["post"]
+        self.assertEqual(
+            create["responses"]["200"]["content"]["application/json"]["schema"]["$ref"],
+            "#/components/schemas/Session",
+        )
+        properties = create["requestBody"]["content"]["application/json"]["schema"]["properties"]
+        self.assertIn("metadata", properties)
+        self.assertIn("permission", properties)
+        for path in [
+            "/session/{sessionID}/abort",
+            "/permission/{requestID}/reply",
+            "/question/{requestID}/reply",
+        ]:
+            self.assertEqual(
+                schema["paths"][path]["post"]["responses"]["200"]["content"]["application/json"][
+                    "schema"
+                ]["type"],
+                "boolean",
+            )
+        reply = schema["paths"]["/permission/{requestID}/reply"]["post"]["requestBody"][
+            "content"
+        ]["application/json"]["schema"]
+        self.assertEqual(reply["properties"]["reply"]["enum"], ["once", "always", "reject"])
+        question = schema["paths"]["/question/{requestID}/reply"]["post"]["requestBody"][
+            "content"
+        ]["application/json"]["schema"]
+        self.assertEqual(question["required"], ["answers"])
+        self.assertEqual(question["properties"]["answers"]["items"]["$ref"], "#/components/schemas/QuestionAnswer")
+
+    def test_selected_opencode_configured_variants_and_discontinued_sharing_are_sourced(self) -> None:
+        with self._verified_archive("opencode") as archive:
+            for path, anchors in [
+                ("packages/core/src/v1/config/provider.ts", [
+                    "reasoning_options: Schema.optional(",
+                    "Schema.Array(ReasoningOption)",
+                    "values: Schema.Array(Schema.NullOr(Schema.String))",
+                ]),
+                ("packages/opencode/src/provider/provider.ts", [
+                    "model.reasoning_options !== undefined",
+                    "ProviderTransform.reasoningVariants(model, parsedModel) ?? ProviderTransform.variants(parsedModel)",
+                    "mergeDeep(variants, model.variants ?? {})",
+                    "pickBy(merged, (v) => !v.disabled)",
+                    '(v) => omit(v, ["disabled"])',
+                ]),
+                ("packages/opencode/src/provider/transform.ts", [
+                    "const options = model.reasoning_options",
+                    "if (options === undefined) return",
+                    "if (options.length === 0) return {}",
+                ]),
+                ("packages/opencode/src/share/session.ts", [
+                    "SessionShare.create",
+                    "return yield* session.create(input)",
+                    "SessionShare.share",
+                    'Effect.fail(new Error("Session sharing has been discontinued"))',
+                    "SessionShare.unshare",
+                    "session.setShare({ sessionID, share: undefined })",
+                ]),
+                ("packages/opencode/src/config/v2-compat.ts", [
+                    'Object.hasOwn(parsed.value, "permissions")',
+                    '["agents", "agent", "mode"]',
+                    "V2 permissions are not supported by OpenCode V1",
+                ]),
+                ("packages/opencode/src/permission/index.ts", ["findLast", "export function merge"]),
+            ]:
+                source = self._archive_source(archive, path)
+                for anchor in anchors:
+                    self.assertIn(anchor, source, f"selected {path} lost upstream fact `{anchor}`")
 
     def test_selected_opencode_inventory_and_terminal_changes_match_native_authority(self) -> None:
         with self._verified_archive("opencode") as archive:

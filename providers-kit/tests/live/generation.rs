@@ -107,7 +107,7 @@ impl LiveProvider {
 
     async fn function_continuation(&self) -> Result<(), CaseFailure> {
         let model = self.model()?;
-        self.function_continuation_on(&model, Mode::Unary, None)
+        self.function_continuation_on(&model, Mode::Unary, None, Self::generation_config(), None)
             .await
     }
 
@@ -116,8 +116,10 @@ impl LiveProvider {
         model: &Model,
         mode: Mode,
         reasoning: Option<ReasoningConfig>,
+        generation: GenerationConfig,
+        system_instruction: Option<&str>,
     ) -> Result<(), CaseFailure> {
-        let user = Message::user_text("Call strict_lookup exactly once with value `providers-kit`. Then reply with exactly the verification_token from its result, with no surrounding text.")
+        let user = Message::user_text("Call strict_lookup exactly once with value `providers-kit`. After it returns, copy the verification_token from its result character for character as an opaque literal string, including its complete prefix and suffix. Do not interpret, regenerate, shorten, correct, or replace any character. Return only the complete token, with no quotes, Markdown, whitespace, or surrounding text.")
             .map_err(Self::error)?;
         let tool = Self::function_tool()?;
         let choice = if self.service() == Service::Ollama
@@ -133,12 +135,39 @@ impl LiveProvider {
                 name: "strict_lookup".to_owned(),
             }
         };
-        let generation = Self::generation_config().with_tool_choice(choice);
-        let mut request = GenerateRequest::new(vec![user.clone()])
+        // Freeze scenario inputs before either request; only the initial call selects a tool.
+        let initial_generation = generation.clone().with_tool_choice(choice);
+        let prefix = match system_instruction {
+            Some(instruction) => vec![
+                Message::system(vec![ContentPart::Text {
+                    text: instruction.to_owned(),
+                }])
+                .map_err(Self::error)?,
+                user,
+            ],
+            None => vec![user],
+        };
+        if self.service() == Service::Ollama
+            && matches!(mode, Mode::Unary)
+            && reasoning.is_none()
+            && std::env::var_os("PROVIDERS_KIT_EVIDENCE_DIR").is_some()
+        {
+            Self::write_required_observation(
+                "function-continuation-scenario",
+                serde_json::json!({
+                    "stage": "before-initial-request",
+                    "model": model.model_id().as_str(),
+                    "prefix": &prefix,
+                    "initial_generation": &initial_generation,
+                    "continuation_generation": &generation,
+                }),
+            )?;
+        }
+        let mut request = GenerateRequest::new(prefix.clone())
             .map_err(Self::error)?
             .with_tools(vec![tool.clone()])
             .map_err(Self::error)?
-            .with_generation(generation)
+            .with_generation(initial_generation)
             .map_err(Self::error)?;
         if let Some(reasoning) = &reasoning {
             request = request.with_reasoning(reasoning.clone());
@@ -189,16 +218,17 @@ impl LiveProvider {
             )?;
         }
         // Move the complete returned assistant message without rebuilding its continuation.
-        let mut continuation = GenerateRequest::new(vec![
-            user,
+        let mut messages = prefix;
+        messages.extend([
             first.message,
             Message::tool(vec![result]).map_err(Self::error)?,
-        ])
-        .map_err(Self::error)?
-        .with_tools(vec![tool])
-        .map_err(Self::error)?
-        .with_generation(Self::generation_config())
-        .map_err(Self::error)?;
+        ]);
+        let mut continuation = GenerateRequest::new(messages)
+            .map_err(Self::error)?
+            .with_tools(vec![tool])
+            .map_err(Self::error)?
+            .with_generation(generation)
+            .map_err(Self::error)?;
         if let Some(reasoning) = reasoning {
             continuation = continuation.with_reasoning(reasoning);
         }
@@ -388,11 +418,21 @@ async fn gemini_function_continuation() -> Result<(), CaseFailure> {
 }
 #[tokio::test]
 async fn ollama_function_continuation() -> Result<(), CaseFailure> {
+    let generation = LiveProvider::generation_config();
+    let system_instruction = Some(
+        "You are a tool-result relay. After the requested tool call, return exactly the verification_token string supplied by the tool, preserving every character, and nothing else. Never invent a token.",
+    );
     let live = LiveProvider::new(Service::Ollama)?;
-    let result = live.function_continuation().await;
+    let result = async {
+        let model = live.model()?;
+        live.function_continuation_on(&model, Mode::Unary, None, generation, system_instruction)
+            .await
+    }
+    .await;
     live.finish(result).await;
     Ok(())
 }
+
 #[tokio::test]
 async fn ollama_forced_function_generation_unsupported() -> Result<(), CaseFailure> {
     let live = LiveProvider::new(Service::Ollama)?;

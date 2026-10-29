@@ -731,7 +731,7 @@ impl AnthropicStreamingAccumulator {
                         .at_phase(ErrorPhase::Decode)
                     })?;
                     match &mut self.raw_usage {
-                        Some(current) => current.update_output(usage),
+                        Some(current) => current.update_totals(usage),
                         None => self.raw_usage = Some(usage),
                     }
                     let usage = usage_from_anthropic(self.raw_usage.as_ref());

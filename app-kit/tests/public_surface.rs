@@ -1133,7 +1133,6 @@ fn production_and_manifest_keep_the_reduced_boundary() {
     let manifest = Repository::read(&repository.root.join("Cargo.toml"));
     for forbidden in [
         "[features]",
-        "[package.metadata.docs.rs]",
         "build =",
         "[build-dependencies]",
         "[dev-dependencies]",
@@ -1144,6 +1143,32 @@ fn production_and_manifest_keep_the_reduced_boundary() {
             "forbidden manifest entry: {forbidden}"
         );
     }
+    // Documentation targets do not introduce runtime features or dependencies.
+    // Keep their allowlist closed so docs.rs cannot enable a different build lane.
+    let mut docs_settings = manifest
+        .split_once("[package.metadata.docs.rs]")
+        .expect("the manifest must declare its docs.rs targets")
+        .1
+        .lines()
+        .map(str::trim)
+        .take_while(|line| !line.starts_with('['))
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(|line| {
+            let (key, value) = line
+                .split_once('=')
+                .expect("docs.rs settings must be explicit key/value entries");
+            (key.trim(), value.trim())
+        })
+        .collect::<Vec<_>>();
+    docs_settings.sort_unstable();
+    assert_eq!(
+        docs_settings,
+        vec![
+            ("default-target", "\"x86_64-unknown-linux-gnu\""),
+            ("targets", "[\"x86_64-unknown-linux-gnu\"]"),
+        ],
+        "docs.rs metadata may only select the approved documentation targets"
+    );
     assert_eq!(
         Repository::manifest_keys(&manifest),
         "agents-kit futures-util jsonschema serde serde_json sha2 storage-kit tokio tracing uuid"

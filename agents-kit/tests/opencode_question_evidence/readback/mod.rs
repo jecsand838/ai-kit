@@ -4,7 +4,7 @@ use std::time::Duration;
 use serde::Deserialize;
 use tokio::time::Instant;
 
-use super::{MessageInfo, NativeMessage, QuestionEvidence, QuestionExpectation, QuestionGrade};
+use super::{QuestionEvidence, QuestionExpectation, QuestionGrade};
 
 pub struct FreshOutputExpectation {
     prompt: String,
@@ -114,117 +114,12 @@ impl NativeQuestionReadback {
         let messages = self
             .read_result(&["session", &session.id, "message"])
             .await?;
-        let messages: Vec<NativeMessage> =
+        let messages: serde_json::Value =
             serde_json::from_slice(&messages).map_err(|_| "messages_shape")?;
-        let mut ids = BTreeSet::new();
-        let mut part_ids = BTreeSet::new();
-        for message in &messages {
-            message.validate_parts().map_err(|_| "part_ownership")?;
-            if message.info.session() != session.id || !ids.insert(message.info.id()) {
-                return Err("message_ownership");
-            }
-            for part in &message.parts {
-                if !part_ids.insert(&part.id) {
-                    return Err("part_ownership");
-                }
-            }
-        }
-        let users: Vec<_> = messages
-            .iter()
-            .filter(|message| {
-                matches!(&message.info, MessageInfo::User { .. }) && message.text() == prompt
-            })
-            .collect();
-        let [user] = users.as_slice() else {
-            return Err("root_correlation");
-        };
-        let MessageInfo::User {
-            id,
-            model,
-            attributes,
-            ..
-        } = &user.info
-        else {
-            unreachable!("only User messages were selected")
-        };
-        if attributes.contains_key("parentID")
-            || model.provider_id != configured_provider
-            || model.model_id != configured_model
-        {
-            return Err("root_model");
-        }
-        let root_created = attributes
-            .get("time")
-            .and_then(|time| time.get("created"))
-            .and_then(serde_json::Value::as_u64)
-            .ok_or("root_time")?;
-        let mut terminal = None;
-        let mut terminal_order = None;
-        let mut latest_order: Option<(u64, &str)> = None;
-        for message in &messages {
-            let MessageInfo::Assistant {
-                parent_id,
-                model: actual,
-                time,
-                finish,
-                attributes,
-                ..
-            } = &message.info
-            else {
-                continue;
-            };
-            if parent_id != id {
-                continue;
-            }
-            if actual != model
-                || attributes.contains_key("error")
-                || time
-                    .completed
-                    .is_none_or(|completed| completed < time.created)
-            {
-                return Err("assistant_terminal");
-            }
-            // Pinned native ordering uses creation time, then ID as tie-breaker;
-            // lexical IDs or response-array position alone do not prove order.
-            let order = (time.created, message.info.id());
-            if order <= (root_created, id.as_str()) {
-                return Err("assistant_order");
-            }
-            latest_order = Some(latest_order.map_or(order, |previous| previous.max(order)));
-            match finish.as_deref() {
-                Some("stop") if terminal.is_none() => {
-                    terminal = Some(message);
-                    terminal_order = Some(order);
-                }
-                Some("tool-calls") => {}
-                _ => return Err("terminal_correlation"),
-            }
-        }
-        let terminal = terminal.ok_or("terminal_missing")?;
-        if terminal_order != latest_order {
-            return Err("terminal_order");
-        }
-        let native = terminal.text();
-        // Fingerprints are bounded correlation facts, not cryptographic claims.
-        // Exact comparisons below operate on the original in-memory strings.
-        use std::hash::{Hash, Hasher};
-        let fingerprint = |text: &str| {
-            let mut hash = std::collections::hash_map::DefaultHasher::new();
-            text.hash(&mut hash);
-            format!("{:016x}", hash.finish())
-        };
-        Ok(serde_json::json!({
-            "capture":"complete","kind":"native_terminal_snapshot","native_version":self.version,
-            "foreground_http_body_observed":false,
-            "session":fingerprint(&session.id),"user":fingerprint(id),"assistant":fingerprint(terminal.info.id()),
-            "matching_users":1,"terminal_count":1,"model_matches_configured":true,
-            "finish":"stop","completed":true,"native_error":false,
-            "expected":{"bytes":expected.len(),"fingerprint":fingerprint(expected)},
-            "portable":{"bytes":portable.len(),"fingerprint":fingerprint(portable)},
-            "native":{"bytes":native.len(),"fingerprint":fingerprint(&native)},
-            "native_equals_portable":native == portable,"native_equals_expected":native == expected,
-            "portable_equals_expected":portable == expected,
-        }))
+        let (mut context, _) = QuestionExpectation::new(&session.id, prompt, configured_model)
+            .prompt_output(&messages, configured_provider, expected, portable)?;
+        context["native_version"] = serde_json::json!(self.version);
+        Ok(context)
     }
 
     pub async fn sessions(&self) -> BTreeSet<String> {

@@ -207,6 +207,9 @@ wrong, embedded or duplicate secret tokens never qualify code. This changes
 coverage acceptance, not production behavior or historical failed outcomes.
 Unary calls, other models/providers, unmatched activity, malformed streams,
 cleanup/shutdown failures and export failures remain fatal.
+The current File Search role is exact `models/gemini-3.8-flash`; all six live
+File Search cases use the ordinary exclusive-family contract. They do not
+exercise or inherit this retained 2.5-only qualification.
 
 Fresh batch and ordinary file fixtures are owned by their cases; configured
 positive File Search stores remain borrowed. The owned Gemini consistency

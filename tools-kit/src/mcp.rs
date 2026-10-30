@@ -43,6 +43,9 @@
 //!     Ok::<(), ToolError>(())
 //! }.await;
 //! let cleanup = tools.shutdown().await;
+//! if let Err(error) = &cleanup {
+//!     eprintln!("Cleanup failed: {error}");
+//! }
 //! work?;
 //! cleanup?;
 //! # Ok(())
@@ -124,7 +127,10 @@ impl fmt::Debug for McpConnectionConfig {
 ///
 /// ```
 /// use tools_kit::mcp::{McpClientConfig, McpConnectionConfig};
-/// let connection = McpConnectionConfig::StreamableHttp { endpoint: "http://127.0.0.1:8000/mcp".parse().unwrap(), headers: Default::default() };
+/// let connection = McpConnectionConfig::StreamableHttp {
+///     endpoint: "http://127.0.0.1:8000/mcp".parse().unwrap(),
+///     headers: Default::default(),
+/// };
 /// let config = McpClientConfig::new(connection);
 /// let value = serde_json::to_value(&config).unwrap();
 /// assert_eq!(value["request_timeout_secs"], 30);
@@ -144,16 +150,7 @@ pub struct McpClientConfig {
 impl McpClientConfig {
     /// Creates a client configuration with a 30-second request timeout.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use tools_kit::mcp::{McpClientConfig, McpConnectionConfig};
-    /// let connection = McpConnectionConfig::StreamableHttp { endpoint: "http://127.0.0.1:8000/mcp".parse().unwrap(), headers: Default::default() };
-    /// let config = McpClientConfig::new(connection);
-    /// let value = serde_json::to_value(&config).unwrap();
-    /// assert_eq!(value["request_timeout_secs"], 30);
-    /// assert_eq!(value["form_interactions"], false);
-    /// ```
+    /// See [`crate::mcp::McpClientConfig`] for a complete example.
     ///
     #[must_use]
     pub fn new(connection: McpConnectionConfig) -> Self {
@@ -176,7 +173,10 @@ impl McpClientConfig {
     ///
     /// ```
     /// use tools_kit::mcp::{McpClientConfig, McpConnectionConfig};
-    /// let connection = McpConnectionConfig::StreamableHttp { endpoint: "http://127.0.0.1:8000/mcp".parse().unwrap(), headers: Default::default() };
+    /// let connection = McpConnectionConfig::StreamableHttp {
+    ///     endpoint: "http://127.0.0.1:8000/mcp".parse().unwrap(),
+    ///     headers: Default::default(),
+    /// };
     /// let config = McpClientConfig::new(connection);
     /// let config = config.with_namespace("search")?;
     /// assert_eq!(serde_json::to_value(config).unwrap()["namespace"], "search");
@@ -210,7 +210,10 @@ impl McpClientConfig {
     ///
     /// ```
     /// use tools_kit::mcp::{McpClientConfig, McpConnectionConfig};
-    /// let connection = McpConnectionConfig::StreamableHttp { endpoint: "http://127.0.0.1:8000/mcp".parse().unwrap(), headers: Default::default() };
+    /// let connection = McpConnectionConfig::StreamableHttp {
+    ///     endpoint: "http://127.0.0.1:8000/mcp".parse().unwrap(),
+    ///     headers: Default::default(),
+    /// };
     /// let config = McpClientConfig::new(connection);
     /// assert!(config.clone().with_request_timeout(std::time::Duration::ZERO).is_err());
     /// let config = config.with_request_timeout(std::time::Duration::from_secs(5))?;
@@ -237,7 +240,10 @@ impl McpClientConfig {
     ///
     /// ```
     /// use tools_kit::mcp::{McpClientConfig, McpConnectionConfig};
-    /// let connection = McpConnectionConfig::StreamableHttp { endpoint: "http://127.0.0.1:8000/mcp".parse().unwrap(), headers: Default::default() };
+    /// let connection = McpConnectionConfig::StreamableHttp {
+    ///     endpoint: "http://127.0.0.1:8000/mcp".parse().unwrap(),
+    ///     headers: Default::default(),
+    /// };
     /// let config = McpClientConfig::new(connection);
     /// let config = config.with_form_validation(false);
     /// let value = serde_json::to_value(config).unwrap();
@@ -352,7 +358,9 @@ impl McpServerConfig {
     /// ```
     /// use tools_kit::mcp::McpServerConfig;
     /// let config = McpServerConfig::new("127.0.0.1:8000".parse().unwrap(), "/mcp", "page")?;
-    /// let config = config.with_interaction_policy(tools_kit::mcp::McpServerInteractionPolicy::ElicitFormIfClientSupports);
+    /// let config = config.with_interaction_policy(
+    ///     tools_kit::mcp::McpServerInteractionPolicy::ElicitFormIfClientSupports,
+    /// );
     /// let value = serde_json::to_value(&config).unwrap();
     /// assert_eq!(value["shutdown_timeout_secs"], 5);
     /// assert_eq!(value["interaction_policy"], "elicit_form_if_client_supports");

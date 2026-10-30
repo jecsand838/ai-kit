@@ -15,11 +15,11 @@
 //!
 //! # Choose a workflow
 //!
-//! - Application builders: [collection writes, filtered/vector retrieval and
-//!   index cleanup](database), then [transactions and durable reopen](state).
+//! - Application builders: [collection writes and filtered retrieval](database),
+//!   then [transactions and durable reopen](state).
 //! - Custom implementers: [concrete Database composition](DatabaseBackend) and
 //!   [associated StateStore/Transaction composition](StateStoreBackend).
-//!   These examples delegate real storage semantics without an erased ingress.
+//!   Caller implementations retain concrete types without an erased ingress.
 //!
 //! # Transactional state
 //!

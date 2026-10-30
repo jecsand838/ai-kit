@@ -92,24 +92,7 @@ impl<S: StateStoreBackend> AgentStorage<S> {
     ///
     /// Construction retains the supplied store; it neither creates an Agent nor requires `S: Clone`.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use agents_kit::AgentStorage;
-    /// use storage_kit::{StateStore, state::config::{StateStoreConfig, LanceStateStoreConfig}};
-    /// let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-    /// runtime.block_on(async {
-    ///     let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-    ///     let storage = AgentStorage::new(store);
-    ///     assert!(storage.list_agents().await?.is_empty());
-    ///     let id = "agent_00000000000000000000000000000000".parse()?;
-    ///     let error = storage.agent_info(id).await.unwrap_err();
-    ///     assert_eq!(error.kind(), agents_kit::error::ErrorKind::NotFound);
-    ///     drop(storage);
-    ///     Ok::<(), Box<dyn std::error::Error>>(())
-    /// })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See [`AgentStorage`] for a complete example.
     pub fn new(store: S) -> Self {
         Self {
             inner: Arc::new(AgentStorageInner {
@@ -127,24 +110,7 @@ impl<S: StateStoreBackend> AgentStorage<S> {
     ///
     /// Returns a typed storage failure or `InvalidState` for malformed records or an inventory that exceeds the bounded traversal.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use agents_kit::AgentStorage;
-    /// use storage_kit::{StateStore, state::config::{StateStoreConfig, LanceStateStoreConfig}};
-    /// let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-    /// runtime.block_on(async {
-    ///     let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-    ///     let storage = AgentStorage::new(store);
-    ///     assert!(storage.list_agents().await?.is_empty());
-    ///     let id = "agent_00000000000000000000000000000000".parse()?;
-    ///     let error = storage.agent_info(id).await.unwrap_err();
-    ///     assert_eq!(error.kind(), agents_kit::error::ErrorKind::NotFound);
-    ///     drop(storage);
-    ///     Ok::<(), Box<dyn std::error::Error>>(())
-    /// })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See [`AgentStorage`] for a complete example.
     pub async fn list_agents(&self) -> Result<Vec<AgentInfo>, KitError> {
         async {
             let mut records = Vec::new();
@@ -212,24 +178,7 @@ impl<S: StateStoreBackend> AgentStorage<S> {
     ///
     /// Returns `NotFound` for an absent identity, `InvalidState` for malformed records, or a typed storage access failure.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use agents_kit::AgentStorage;
-    /// use storage_kit::{StateStore, state::config::{StateStoreConfig, LanceStateStoreConfig}};
-    /// let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-    /// runtime.block_on(async {
-    ///     let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-    ///     let storage = AgentStorage::new(store);
-    ///     assert!(storage.list_agents().await?.is_empty());
-    ///     let id = "agent_00000000000000000000000000000000".parse()?;
-    ///     let error = storage.agent_info(id).await.unwrap_err();
-    ///     assert_eq!(error.kind(), agents_kit::error::ErrorKind::NotFound);
-    ///     drop(storage);
-    ///     Ok::<(), Box<dyn std::error::Error>>(())
-    /// })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See [`AgentStorage`] for a complete example.
     pub async fn agent_info(&self, id: AgentId) -> Result<AgentInfo, KitError> {
         async { self.load_record(&id).await?.into_info() }
             .await

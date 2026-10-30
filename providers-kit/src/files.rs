@@ -24,7 +24,13 @@
 //!     ProviderKind::OpenAi(OpenAiConfig::new(ApiKey::new("replace-with-your-key")?)),
 //!     TransportConfig::default(),
 //! ))?;
-//! let uploaded = provider.upload_file(FileUploadRequest::new("note.txt", "text/plain", b"owned note".to_vec())?).await;
+//! let uploaded = provider
+//!     .upload_file(FileUploadRequest::new(
+//!         "note.txt",
+//!         "text/plain",
+//!         b"owned note".to_vec(),
+//!     )?)
+//!     .await;
 //! let work = async {
 //!     let file = uploaded.as_ref().map_err(Clone::clone)?;
 //!     let info = provider.file_info(file.id.clone()).await?;
@@ -96,17 +102,7 @@ impl FileUploadRequest {
     ///
     /// Returns an input error for an empty, padded, or control-containing file name; malformed or padded MIME type/parameters; or empty file bytes.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::files::FileUploadRequest;
-    /// let request = FileUploadRequest::new("notes.txt", "text/plain", b"notes".to_vec())?;
-    /// assert_eq!(request.file_name(), "notes.txt");
-    /// assert_eq!(request.media_type(), "text/plain");
-    /// assert_eq!(request.data(), b"notes");
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::files::FileUploadRequest`] for a complete example.
     ///
     pub fn new(
         file_name: impl Into<String>,
@@ -162,17 +158,7 @@ impl FileUploadRequest {
     #[must_use]
     /// Returns the file name presented to the provider.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::files::FileUploadRequest;
-    /// let request = FileUploadRequest::new("notes.txt", "text/plain", b"notes".to_vec())?;
-    /// assert_eq!(request.file_name(), "notes.txt");
-    /// assert_eq!(request.media_type(), "text/plain");
-    /// assert_eq!(request.data(), b"notes");
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::files::FileUploadRequest`] for a complete example.
     ///
     pub fn file_name(&self) -> &str {
         &self.file_name
@@ -181,17 +167,7 @@ impl FileUploadRequest {
     #[must_use]
     /// Returns the declared media type.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::files::FileUploadRequest;
-    /// let request = FileUploadRequest::new("notes.txt", "text/plain", b"notes".to_vec())?;
-    /// assert_eq!(request.file_name(), "notes.txt");
-    /// assert_eq!(request.media_type(), "text/plain");
-    /// assert_eq!(request.data(), b"notes");
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::files::FileUploadRequest`] for a complete example.
     ///
     pub fn media_type(&self) -> &str {
         &self.media_type
@@ -200,17 +176,7 @@ impl FileUploadRequest {
     #[must_use]
     /// Returns the raw file bytes.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::files::FileUploadRequest;
-    /// let request = FileUploadRequest::new("notes.txt", "text/plain", b"notes".to_vec())?;
-    /// assert_eq!(request.file_name(), "notes.txt");
-    /// assert_eq!(request.media_type(), "text/plain");
-    /// assert_eq!(request.data(), b"notes");
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::files::FileUploadRequest`] for a complete example.
     ///
     pub fn data(&self) -> &[u8] {
         &self.data
@@ -264,7 +230,9 @@ impl<'de> Deserialize<'de> for FileUploadRequest {
 ///
 /// ```
 /// use providers_kit::files::FileListRequest;
-/// let request = FileListRequest::default().with_limit(std::num::NonZeroUsize::new(10).unwrap()).with_cursor("opaque-next")?;
+/// let request = FileListRequest::default()
+///     .with_limit(std::num::NonZeroUsize::new(10).unwrap())
+///     .with_cursor("opaque-next")?;
 /// assert_eq!(request.limit().unwrap().get(), 10);
 /// assert_eq!(request.cursor(), Some("opaque-next"));
 ///
@@ -280,16 +248,7 @@ pub struct FileListRequest {
 impl FileListRequest {
     /// Sets a non-zero result limit.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::files::FileListRequest;
-    /// let request = FileListRequest::default().with_limit(std::num::NonZeroUsize::new(10).unwrap()).with_cursor("opaque-next")?;
-    /// assert_eq!(request.limit().unwrap().get(), 10);
-    /// assert_eq!(request.cursor(), Some("opaque-next"));
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::files::FileListRequest`] for a complete example.
     ///
     #[must_use]
     pub fn with_limit(mut self, limit: NonZeroUsize) -> Self {
@@ -303,16 +262,7 @@ impl FileListRequest {
     ///
     /// Returns an input error when the cursor is empty or whitespace-only. Nonblank cursor bytes are retained exactly; use only a cursor returned by the same provider operation.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::files::FileListRequest;
-    /// let request = FileListRequest::default().with_limit(std::num::NonZeroUsize::new(10).unwrap()).with_cursor("opaque-next")?;
-    /// assert_eq!(request.limit().unwrap().get(), 10);
-    /// assert_eq!(request.cursor(), Some("opaque-next"));
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::files::FileListRequest`] for a complete example.
     ///
     pub fn with_cursor(mut self, cursor: impl Into<String>) -> Result<Self, KitError> {
         let cursor = cursor.into();
@@ -330,16 +280,7 @@ impl FileListRequest {
 
     /// Returns the requested result limit.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::files::FileListRequest;
-    /// let request = FileListRequest::default().with_limit(std::num::NonZeroUsize::new(10).unwrap()).with_cursor("opaque-next")?;
-    /// assert_eq!(request.limit().unwrap().get(), 10);
-    /// assert_eq!(request.cursor(), Some("opaque-next"));
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::files::FileListRequest`] for a complete example.
     ///
     #[must_use]
     pub const fn limit(&self) -> Option<NonZeroUsize> {
@@ -348,16 +289,7 @@ impl FileListRequest {
 
     /// Returns the provider-native continuation cursor.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::files::FileListRequest;
-    /// let request = FileListRequest::default().with_limit(std::num::NonZeroUsize::new(10).unwrap()).with_cursor("opaque-next")?;
-    /// assert_eq!(request.limit().unwrap().get(), 10);
-    /// assert_eq!(request.cursor(), Some("opaque-next"));
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::files::FileListRequest`] for a complete example.
     ///
     #[must_use]
     pub fn cursor(&self) -> Option<&str> {
@@ -370,7 +302,9 @@ impl FileListRequest {
     ///
     /// ```
     /// use providers_kit::files::FileListRequest;
-    /// let request = FileListRequest::default().with_limit(std::num::NonZeroUsize::new(10).unwrap()).with_cursor("opaque-next")?;
+    /// let request = FileListRequest::default()
+    ///     .with_limit(std::num::NonZeroUsize::new(10).unwrap())
+    ///     .with_cursor("opaque-next")?;
     /// let (limit, cursor) = request.into_parts();
     /// assert_eq!(limit.unwrap().get(), 10);
     /// assert_eq!(cursor.as_deref(), Some("opaque-next"));
@@ -418,7 +352,15 @@ impl<'de> Deserialize<'de> for FileListRequest {
 ///
 /// ```
 /// use providers_kit::files::{FileObject, FileState};
-/// let file = FileObject { id: "owned-file".into(), file_name: Some("notes.txt".into()), size_bytes: Some(5), media_type: Some("text/plain".into()), created_at: None, state: Some(FileState::Processing), input_reference: None };
+/// let file = FileObject {
+///     id: "owned-file".into(),
+///     file_name: Some("notes.txt".into()),
+///     size_bytes: Some(5),
+///     media_type: Some("text/plain".into()),
+///     created_at: None,
+///     state: Some(FileState::Processing),
+///     input_reference: None,
+/// };
 /// assert!(matches!(file.state, Some(FileState::Processing)));
 /// ```
 ///

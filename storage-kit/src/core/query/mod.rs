@@ -57,13 +57,7 @@ impl PageToken {
 
     /// Borrows the continuation value.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use storage_kit::database::data::PageToken;
-    /// let token = PageToken::new("opaque-cursor");
-    /// assert_eq!(token.as_str(), "opaque-cursor");
-    /// ```
+    /// See [`Self::new`] for an executable example.
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0

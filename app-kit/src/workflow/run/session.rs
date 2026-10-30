@@ -44,48 +44,7 @@ use crate::workflow::{
 /// This does not undo caller Action I/O. Prefer explicit finish/abort while the
 /// runtime is driven; ordinary run and history observers never own cancellation.
 ///
-/// # Example
-///
-/// ```
-/// # use agents_kit::Agent;
-/// # use app_kit::{App, AppConfig, Shutdown, WorkspaceConfig};
-/// # use app_kit::workflow::{CheckpointSelector, ExecutionEvent, ExecutionOptions, RunSelector,
-/// #     RunStatus, WorkflowDefinition, WorkflowState};
-/// # use storage_kit::StateStore;
-/// # use storage_kit::state::config::{LanceStateStoreConfig, StateStoreConfig};
-/// #
-/// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-/// # runtime.block_on(async {
-/// # let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-/// # let definition = WorkflowDefinition::parse(r#"{
-/// #     "schema":"app-kit.workflow/v2", "id":"counter", "revision":"r1",
-/// #     "state":{"count":0}, "required":["count"],
-/// #     "reducers":{"count":"reject_concurrent"}, "entry":"increment",
-/// #     "nodes":[{"id":"increment","step":{"kind":"state","mutations":[
-/// #         {"kind":"increment","target":"count","value":{"kind":"literal","value":1}}
-/// #     ]}}], "routes":{}
-/// # }"#)?;
-/// # let config = AppConfig::<_, Agent>::new(store, Vec::new(), vec![definition]);
-/// # let mut app = App::open(config).await?;
-/// # let mut workspace = app.create_workspace(WorkspaceConfig {
-/// #     name: Some("local counter".into()), root: std::env::current_dir()?,
-/// # }).await?;
-/// # let workflow = workspace.workflow("counter".parse()?).await?;
-/// # let mut run = workflow.prepare(WorkflowState::default()).await?;
-/// let mut execution = run.execution(ExecutionOptions::default()).await?;
-/// while let Some(event) = execution.next().await? {
-///     if let ExecutionEvent::Committed { outcomes, .. } = event {
-///         assert_eq!(outcomes[0].node, "increment");
-///     }
-/// }
-/// let snapshot = execution.finish().await?;
-/// assert_eq!(snapshot.state.values()["count"], 1);
-/// #
-/// # app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }).await?;
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// # })?;
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// ```
+/// See [the explicit execution workflow](crate::workflow#execute-observe-restore-and-delete).
 #[must_use = "execution owns lazy advancement; finish or abort it explicitly"]
 pub struct Execution<
     'a,
@@ -122,44 +81,7 @@ pub struct Execution<
 /// driven elsewhere. Source polling and destruction remain on the caller thread;
 /// dropping this owner delegates nonblocking revocation to [`Execution`].
 ///
-/// # Example
-///
-/// ```
-/// # use agents_kit::Agent;
-/// # use app_kit::{App, AppConfig, Shutdown, WorkspaceConfig};
-/// # use app_kit::workflow::{CheckpointSelector, ExecutionEvent, ExecutionOptions, RunSelector,
-/// #     RunStatus, WorkflowDefinition, WorkflowState};
-/// # use storage_kit::StateStore;
-/// # use storage_kit::state::config::{LanceStateStoreConfig, StateStoreConfig};
-/// # use app_kit::workflow::SyncExecution;
-/// let runtime = tokio::runtime::Builder::new_multi_thread()
-///     .worker_threads(2).enable_all().build()?;
-/// # let (mut app, mut run) = runtime.block_on(async {
-/// # let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-/// # let definition = WorkflowDefinition::parse(r#"{
-/// #     "schema":"app-kit.workflow/v2", "id":"counter", "revision":"r1",
-/// #     "state":{"count":0}, "required":["count"],
-/// #     "reducers":{"count":"reject_concurrent"}, "entry":"increment",
-/// #     "nodes":[{"id":"increment","step":{"kind":"state","mutations":[
-/// #         {"kind":"increment","target":"count","value":{"kind":"literal","value":1}}
-/// #     ]}}], "routes":{}
-/// # }"#)?;
-/// # let config = AppConfig::<_, Agent>::new(store, Vec::new(), vec![definition]);
-/// # let mut app = App::open(config).await?;
-/// # let mut workspace = app.create_workspace(WorkspaceConfig {
-/// #     name: Some("local counter".into()), root: std::env::current_dir()?,
-/// # }).await?;
-/// # let workflow = workspace.workflow("counter".parse()?).await?;
-/// # let mut run = workflow.prepare(WorkflowState::default()).await?;
-/// # Ok::<_, Box<dyn std::error::Error>>((app, run))
-/// # })?;
-/// // Runtime workers stay alive; this thread is outside any entered Tokio context.
-/// let mut execution = SyncExecution::open(&mut run, ExecutionOptions::default())?;
-/// while execution.try_next()?.is_some() {}
-/// assert_eq!(execution.finish()?.state.values()["count"], 1);
-/// # runtime.block_on(app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }))?;
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// ```
+/// See [the synchronous execution workflow](SyncExecution::open).
 #[must_use = "execution owns lazy advancement; finish or abort it explicitly"]
 pub struct SyncExecution<
     'a,
@@ -217,17 +139,15 @@ impl<
     /// # Example
     ///
     /// ```
-    /// # use agents_kit::Agent;
-    /// # use app_kit::{App, AppConfig, Shutdown, WorkspaceConfig};
-    /// # use app_kit::workflow::{CheckpointSelector, ExecutionEvent, ExecutionOptions, RunSelector,
-    /// #     RunStatus, WorkflowDefinition, WorkflowState};
-    /// # use storage_kit::StateStore;
-    /// # use storage_kit::state::config::{LanceStateStoreConfig, StateStoreConfig};
-    /// # use app_kit::workflow::SyncExecution;
+    /// use agents_kit::Agent;
+    /// use app_kit::{App, AppConfig, Shutdown, WorkspaceConfig};
+    /// use app_kit::workflow::{ExecutionOptions, SyncExecution, WorkflowDefinition, WorkflowState};
+    /// use storage_kit::{StateStore, state::config::{LanceStateStoreConfig, StateStoreConfig}};
     /// let runtime = tokio::runtime::Builder::new_multi_thread()
     ///     .worker_threads(2).enable_all().build()?;
-    /// # let (mut app, mut run) = runtime.block_on(async {
-    /// # let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
+    /// # let store = runtime.block_on(StateStore::connect(
+    /// #     StateStoreConfig::lance(LanceStateStoreConfig::memory()),
+    /// # ))?;
     /// # let definition = WorkflowDefinition::parse(r#"{
     /// #     "schema":"app-kit.workflow/v2", "id":"counter", "revision":"r1",
     /// #     "state":{"count":0}, "required":["count"],
@@ -237,18 +157,27 @@ impl<
     /// #     ]}}], "routes":{}
     /// # }"#)?;
     /// # let config = AppConfig::<_, Agent>::new(store, Vec::new(), vec![definition]);
-    /// # let mut app = App::open(config).await?;
-    /// # let mut workspace = app.create_workspace(WorkspaceConfig {
-    /// #     name: Some("local counter".into()), root: std::env::current_dir()?,
-    /// # }).await?;
-    /// # let workflow = workspace.workflow("counter".parse()?).await?;
-    /// # let mut run = workflow.prepare(WorkflowState::default()).await?;
-    /// # Ok::<_, Box<dyn std::error::Error>>((app, run))
+    /// # let mut app = runtime.block_on(App::open(config))?;
+    /// # let outcome = (|| -> Result<_, Box<dyn std::error::Error>> {
+    /// # let mut run = runtime.block_on(async {
+    /// #     let workspace = app.create_workspace(WorkspaceConfig {
+    /// #         name: Some("local counter".into()), root: std::env::current_dir()?,
+    /// #     }).await?;
+    /// #     let workflow = workspace.workflow("counter".parse()?).await?;
+    /// #     Ok::<_, Box<dyn std::error::Error>>(workflow.prepare(WorkflowState::default()).await?)
     /// # })?;
-    /// // Runtime workers stay alive; this thread is outside any entered Tokio context.
+    /// // Workers keep the runtime driven while this thread stays outside Tokio.
     /// let execution = SyncExecution::open(&mut run, ExecutionOptions::default())?;
-    /// assert_eq!(execution.finish()?.state.values()["count"], 1);
-    /// # runtime.block_on(app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }))?;
+    /// let snapshot = execution.finish()?;
+    /// # Ok(snapshot)
+    /// # })();
+    /// # let cleanup = runtime.block_on(app.shutdown(Shutdown::CancelAndDrain {
+    /// #     timeout: std::time::Duration::from_secs(5),
+    /// # }));
+    /// # if let Err(error) = &cleanup { eprintln!("App shutdown: {error}"); }
+    /// # let snapshot = outcome?;
+    /// # cleanup?;
+    /// assert_eq!(snapshot.state.values()["count"], 1);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn open(
@@ -281,44 +210,7 @@ impl<
     /// stale/revoked authority, invalid options, durable failures and timeouts.
     /// The captured runtime and lower runtimes must stay alive and driven elsewhere.
     ///
-    /// # Example
-    ///
-    /// ```
-    /// # use agents_kit::Agent;
-    /// # use app_kit::{App, AppConfig, Shutdown, WorkspaceConfig};
-    /// # use app_kit::workflow::{CheckpointSelector, ExecutionEvent, ExecutionOptions, RunSelector,
-    /// #     RunStatus, WorkflowDefinition, WorkflowState};
-    /// # use storage_kit::StateStore;
-    /// # use storage_kit::state::config::{LanceStateStoreConfig, StateStoreConfig};
-    /// # use app_kit::workflow::SyncExecution;
-    /// let runtime = tokio::runtime::Builder::new_multi_thread()
-    ///     .worker_threads(2).enable_all().build()?;
-    /// # let (mut app, mut run) = runtime.block_on(async {
-    /// # let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-    /// # let definition = WorkflowDefinition::parse(r#"{
-    /// #     "schema":"app-kit.workflow/v2", "id":"counter", "revision":"r1",
-    /// #     "state":{"count":0}, "required":["count"],
-    /// #     "reducers":{"count":"reject_concurrent"}, "entry":"increment",
-    /// #     "nodes":[{"id":"increment","step":{"kind":"state","mutations":[
-    /// #         {"kind":"increment","target":"count","value":{"kind":"literal","value":1}}
-    /// #     ]}}], "routes":{}
-    /// # }"#)?;
-    /// # let config = AppConfig::<_, Agent>::new(store, Vec::new(), vec![definition]);
-    /// # let mut app = App::open(config).await?;
-    /// # let mut workspace = app.create_workspace(WorkspaceConfig {
-    /// #     name: Some("local counter".into()), root: std::env::current_dir()?,
-    /// # }).await?;
-    /// # let workflow = workspace.workflow("counter".parse()?).await?;
-    /// # let mut run = workflow.prepare(WorkflowState::default()).await?;
-    /// # Ok::<_, Box<dyn std::error::Error>>((app, run))
-    /// # })?;
-    /// // Runtime workers stay alive; this thread is outside any entered Tokio context.
-    /// let mut execution = SyncExecution::open(&mut run, ExecutionOptions::default())?;
-    /// assert!(matches!(execution.try_next()?, Some(ExecutionEvent::Committed { .. })));
-    /// execution.finish()?;
-    /// # runtime.block_on(app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }))?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See [the synchronous execution workflow](SyncExecution::open).
     pub fn try_next(&mut self) -> Result<Option<ExecutionEvent>, AppError> {
         Self::ensure_blocking()?;
         self.runtime.block_on(self.execution.next())
@@ -335,44 +227,7 @@ impl<
     /// stale/revoked authority, invalid options, durable failures and timeouts.
     /// The captured runtime and lower runtimes must stay alive and driven elsewhere.
     ///
-    /// # Example
-    ///
-    /// ```
-    /// # use agents_kit::Agent;
-    /// # use app_kit::{App, AppConfig, Shutdown, WorkspaceConfig};
-    /// # use app_kit::workflow::{CheckpointSelector, ExecutionEvent, ExecutionOptions, RunSelector,
-    /// #     RunStatus, WorkflowDefinition, WorkflowState};
-    /// # use storage_kit::StateStore;
-    /// # use storage_kit::state::config::{LanceStateStoreConfig, StateStoreConfig};
-    /// # use app_kit::workflow::SyncExecution;
-    /// let runtime = tokio::runtime::Builder::new_multi_thread()
-    ///     .worker_threads(2).enable_all().build()?;
-    /// # let (mut app, mut run) = runtime.block_on(async {
-    /// # let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-    /// # let definition = WorkflowDefinition::parse(r#"{
-    /// #     "schema":"app-kit.workflow/v2", "id":"counter", "revision":"r1",
-    /// #     "state":{"count":0}, "required":["count"],
-    /// #     "reducers":{"count":"reject_concurrent"}, "entry":"increment",
-    /// #     "nodes":[{"id":"increment","step":{"kind":"state","mutations":[
-    /// #         {"kind":"increment","target":"count","value":{"kind":"literal","value":1}}
-    /// #     ]}}], "routes":{}
-    /// # }"#)?;
-    /// # let config = AppConfig::<_, Agent>::new(store, Vec::new(), vec![definition]);
-    /// # let mut app = App::open(config).await?;
-    /// # let mut workspace = app.create_workspace(WorkspaceConfig {
-    /// #     name: Some("local counter".into()), root: std::env::current_dir()?,
-    /// # }).await?;
-    /// # let workflow = workspace.workflow("counter".parse()?).await?;
-    /// # let mut run = workflow.prepare(WorkflowState::default()).await?;
-    /// # Ok::<_, Box<dyn std::error::Error>>((app, run))
-    /// # })?;
-    /// // Runtime workers stay alive; this thread is outside any entered Tokio context.
-    /// let mut execution = SyncExecution::open(&mut run, ExecutionOptions::default())?;
-    /// assert!(matches!(execution.step()?, Some(ExecutionEvent::Committed { .. })));
-    /// assert_eq!(execution.finish()?.state.values()["count"], 1);
-    /// # runtime.block_on(app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }))?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See [the synchronous execution workflow](SyncExecution::open).
     pub fn step(&mut self) -> Result<Option<ExecutionEvent>, AppError> {
         Self::ensure_blocking()?;
         self.runtime.block_on(self.execution.step())
@@ -390,44 +245,7 @@ impl<
     /// stale/revoked authority, invalid options, durable failures and timeouts.
     /// The captured runtime and lower runtimes must stay alive and driven elsewhere.
     ///
-    /// # Example
-    ///
-    /// ```
-    /// # use agents_kit::Agent;
-    /// # use app_kit::{App, AppConfig, Shutdown, WorkspaceConfig};
-    /// # use app_kit::workflow::{CheckpointSelector, ExecutionEvent, ExecutionOptions, RunSelector,
-    /// #     RunStatus, WorkflowDefinition, WorkflowState};
-    /// # use storage_kit::StateStore;
-    /// # use storage_kit::state::config::{LanceStateStoreConfig, StateStoreConfig};
-    /// # use app_kit::workflow::SyncExecution;
-    /// let runtime = tokio::runtime::Builder::new_multi_thread()
-    ///     .worker_threads(2).enable_all().build()?;
-    /// # let (mut app, mut run) = runtime.block_on(async {
-    /// # let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-    /// # let definition = WorkflowDefinition::parse(r#"{
-    /// #     "schema":"app-kit.workflow/v2", "id":"counter", "revision":"r1",
-    /// #     "state":{"count":0}, "required":["count"],
-    /// #     "reducers":{"count":"reject_concurrent"}, "entry":"increment",
-    /// #     "nodes":[{"id":"increment","step":{"kind":"state","mutations":[
-    /// #         {"kind":"increment","target":"count","value":{"kind":"literal","value":1}}
-    /// #     ]}}], "routes":{}
-    /// # }"#)?;
-    /// # let config = AppConfig::<_, Agent>::new(store, Vec::new(), vec![definition]);
-    /// # let mut app = App::open(config).await?;
-    /// # let mut workspace = app.create_workspace(WorkspaceConfig {
-    /// #     name: Some("local counter".into()), root: std::env::current_dir()?,
-    /// # }).await?;
-    /// # let workflow = workspace.workflow("counter".parse()?).await?;
-    /// # let mut run = workflow.prepare(WorkflowState::default()).await?;
-    /// # Ok::<_, Box<dyn std::error::Error>>((app, run))
-    /// # })?;
-    /// // Runtime workers stay alive; this thread is outside any entered Tokio context.
-    /// let execution = SyncExecution::open(&mut run, ExecutionOptions::default())?;
-    /// let snapshot = execution.finish()?;
-    /// assert!(matches!(snapshot.status, RunStatus::Succeeded));
-    /// # runtime.block_on(app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }))?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See [the synchronous execution workflow](SyncExecution::open).
     pub fn finish(self) -> Result<RunSnapshot, AppError> {
         Self::ensure_blocking()?;
         self.runtime.block_on(self.execution.finish())
@@ -445,45 +263,7 @@ impl<
     /// stale/revoked authority, invalid options, durable failures and timeouts.
     /// The captured runtime and lower runtimes must stay alive and driven elsewhere.
     ///
-    /// # Example
-    ///
-    /// ```
-    /// # use agents_kit::Agent;
-    /// # use app_kit::{App, AppConfig, Shutdown, WorkspaceConfig};
-    /// # use app_kit::workflow::{CheckpointSelector, ExecutionEvent, ExecutionOptions, RunSelector,
-    /// #     RunStatus, WorkflowDefinition, WorkflowState};
-    /// # use storage_kit::StateStore;
-    /// # use storage_kit::state::config::{LanceStateStoreConfig, StateStoreConfig};
-    /// # use app_kit::workflow::SyncExecution;
-    /// let runtime = tokio::runtime::Builder::new_multi_thread()
-    ///     .worker_threads(2).enable_all().build()?;
-    /// # let (mut app, mut run) = runtime.block_on(async {
-    /// # let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-    /// # let definition = WorkflowDefinition::parse(r#"{
-    /// #     "schema":"app-kit.workflow/v2", "id":"counter", "revision":"r1",
-    /// #     "state":{"count":0}, "required":["count"],
-    /// #     "reducers":{"count":"reject_concurrent"}, "entry":"increment",
-    /// #     "nodes":[{"id":"increment","step":{"kind":"state","mutations":[
-    /// #         {"kind":"increment","target":"count","value":{"kind":"literal","value":1}}
-    /// #     ]}}], "routes":{}
-    /// # }"#)?;
-    /// # let config = AppConfig::<_, Agent>::new(store, Vec::new(), vec![definition]);
-    /// # let mut app = App::open(config).await?;
-    /// # let mut workspace = app.create_workspace(WorkspaceConfig {
-    /// #     name: Some("local counter".into()), root: std::env::current_dir()?,
-    /// # }).await?;
-    /// # let workflow = workspace.workflow("counter".parse()?).await?;
-    /// # let mut run = workflow.prepare(WorkflowState::default()).await?;
-    /// # Ok::<_, Box<dyn std::error::Error>>((app, run))
-    /// # })?;
-    /// // Runtime workers stay alive; this thread is outside any entered Tokio context.
-    /// let execution = SyncExecution::open(&mut run, ExecutionOptions::default())?;
-    /// let parked = execution.abort()?;
-    /// assert_eq!(parked.state.values()["count"], 0);
-    /// assert_eq!(SyncExecution::open(&mut run, ExecutionOptions::default())?.finish()?.state.values()["count"], 1);
-    /// # runtime.block_on(app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }))?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See [the synchronous execution workflow](SyncExecution::open).
     pub fn abort(self) -> Result<RunSnapshot, AppError> {
         Self::ensure_blocking()?;
         self.runtime.block_on(self.execution.abort())
@@ -1281,44 +1061,7 @@ impl<
     /// failures are retained in the returned run state. Cleanup preserves primary
     /// failures and does not detach an admitted native commit.
     ///
-    /// # Example
-    ///
-    /// ```
-    /// # use agents_kit::Agent;
-    /// # use app_kit::{App, AppConfig, Shutdown, WorkspaceConfig};
-    /// # use app_kit::workflow::{CheckpointSelector, ExecutionEvent, ExecutionOptions, RunSelector,
-    /// #     RunStatus, WorkflowDefinition, WorkflowState};
-    /// # use storage_kit::StateStore;
-    /// # use storage_kit::state::config::{LanceStateStoreConfig, StateStoreConfig};
-    /// #
-    /// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-    /// # runtime.block_on(async {
-    /// # let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-    /// # let definition = WorkflowDefinition::parse(r#"{
-    /// #     "schema":"app-kit.workflow/v2", "id":"counter", "revision":"r1",
-    /// #     "state":{"count":0}, "required":["count"],
-    /// #     "reducers":{"count":"reject_concurrent"}, "entry":"increment",
-    /// #     "nodes":[{"id":"increment","step":{"kind":"state","mutations":[
-    /// #         {"kind":"increment","target":"count","value":{"kind":"literal","value":1}}
-    /// #     ]}}], "routes":{}
-    /// # }"#)?;
-    /// # let config = AppConfig::<_, Agent>::new(store, Vec::new(), vec![definition]);
-    /// # let mut app = App::open(config).await?;
-    /// # let mut workspace = app.create_workspace(WorkspaceConfig {
-    /// #     name: Some("local counter".into()), root: std::env::current_dir()?,
-    /// # }).await?;
-    /// # let workflow = workspace.workflow("counter".parse()?).await?;
-    /// # let mut run = workflow.prepare(WorkflowState::default()).await?;
-    /// let mut execution = run.execution(ExecutionOptions::default()).await?;
-    /// let event = execution.next().await?.expect("the state action commits");
-    /// assert!(matches!(event, ExecutionEvent::Committed { .. }));
-    /// execution.finish().await?;
-    /// #
-    /// # app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }).await?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// # })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See [the explicit execution workflow](crate::workflow#execute-observe-restore-and-delete).
     pub async fn next(&mut self) -> Result<Option<ExecutionEvent>, AppError> {
         let event = poll_fn(|cx| self.poll_advance(cx, false)).await;
         if (matches!(&event, Ok(Some(ExecutionEvent::Committed { .. })))
@@ -1595,44 +1338,7 @@ impl<
     /// failures are retained in the returned run state. Cleanup preserves primary
     /// failures and does not detach an admitted native commit.
     ///
-    /// # Example
-    ///
-    /// ```
-    /// # use agents_kit::Agent;
-    /// # use app_kit::{App, AppConfig, Shutdown, WorkspaceConfig};
-    /// # use app_kit::workflow::{CheckpointSelector, ExecutionEvent, ExecutionOptions, RunSelector,
-    /// #     RunStatus, WorkflowDefinition, WorkflowState};
-    /// # use storage_kit::StateStore;
-    /// # use storage_kit::state::config::{LanceStateStoreConfig, StateStoreConfig};
-    /// #
-    /// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-    /// # runtime.block_on(async {
-    /// # let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-    /// # let definition = WorkflowDefinition::parse(r#"{
-    /// #     "schema":"app-kit.workflow/v2", "id":"counter", "revision":"r1",
-    /// #     "state":{"count":0}, "required":["count"],
-    /// #     "reducers":{"count":"reject_concurrent"}, "entry":"increment",
-    /// #     "nodes":[{"id":"increment","step":{"kind":"state","mutations":[
-    /// #         {"kind":"increment","target":"count","value":{"kind":"literal","value":1}}
-    /// #     ]}}], "routes":{}
-    /// # }"#)?;
-    /// # let config = AppConfig::<_, Agent>::new(store, Vec::new(), vec![definition]);
-    /// # let mut app = App::open(config).await?;
-    /// # let mut workspace = app.create_workspace(WorkspaceConfig {
-    /// #     name: Some("local counter".into()), root: std::env::current_dir()?,
-    /// # }).await?;
-    /// # let workflow = workspace.workflow("counter".parse()?).await?;
-    /// # let mut run = workflow.prepare(WorkflowState::default()).await?;
-    /// let mut execution = run.execution(ExecutionOptions::default()).await?;
-    /// let event = execution.step().await?.expect("the state action commits");
-    /// assert!(matches!(event, ExecutionEvent::Committed { .. }));
-    /// assert_eq!(execution.finish().await?.state.values()["count"], 1);
-    /// #
-    /// # app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }).await?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// # })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See [the explicit execution workflow](crate::workflow#execute-observe-restore-and-delete).
     pub async fn step(&mut self) -> Result<Option<ExecutionEvent>, AppError> {
         loop {
             match poll_fn(|cx| self.poll_advance(cx, true)).await {
@@ -1666,43 +1372,7 @@ impl<
     /// failures are retained in the returned run state. Cleanup preserves primary
     /// failures and does not detach an admitted native commit.
     ///
-    /// # Example
-    ///
-    /// ```
-    /// # use agents_kit::Agent;
-    /// # use app_kit::{App, AppConfig, Shutdown, WorkspaceConfig};
-    /// # use app_kit::workflow::{CheckpointSelector, ExecutionEvent, ExecutionOptions, RunSelector,
-    /// #     RunStatus, WorkflowDefinition, WorkflowState};
-    /// # use storage_kit::StateStore;
-    /// # use storage_kit::state::config::{LanceStateStoreConfig, StateStoreConfig};
-    /// #
-    /// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-    /// # runtime.block_on(async {
-    /// # let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-    /// # let definition = WorkflowDefinition::parse(r#"{
-    /// #     "schema":"app-kit.workflow/v2", "id":"counter", "revision":"r1",
-    /// #     "state":{"count":0}, "required":["count"],
-    /// #     "reducers":{"count":"reject_concurrent"}, "entry":"increment",
-    /// #     "nodes":[{"id":"increment","step":{"kind":"state","mutations":[
-    /// #         {"kind":"increment","target":"count","value":{"kind":"literal","value":1}}
-    /// #     ]}}], "routes":{}
-    /// # }"#)?;
-    /// # let config = AppConfig::<_, Agent>::new(store, Vec::new(), vec![definition]);
-    /// # let mut app = App::open(config).await?;
-    /// # let mut workspace = app.create_workspace(WorkspaceConfig {
-    /// #     name: Some("local counter".into()), root: std::env::current_dir()?,
-    /// # }).await?;
-    /// # let workflow = workspace.workflow("counter".parse()?).await?;
-    /// # let mut run = workflow.prepare(WorkflowState::default()).await?;
-    /// let terminal = run.execution(ExecutionOptions::default()).await?.finish().await?;
-    /// assert!(matches!(terminal.status, RunStatus::Succeeded));
-    /// assert_eq!(terminal.state.values()["count"], 1);
-    /// #
-    /// # app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }).await?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// # })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See [the explicit execution workflow](crate::workflow#execute-observe-restore-and-delete).
     pub async fn finish(mut self) -> Result<RunSnapshot, AppError> {
         if !matches!(&self.state, SessionState::Eof) {
             while poll_fn(|cx| self.poll_advance(cx, true)).await?.is_some() {}
@@ -1747,19 +1417,25 @@ impl<
     /// # }"#)?;
     /// # let config = AppConfig::<_, Agent>::new(store, Vec::new(), vec![definition]);
     /// # let mut app = App::open(config).await?;
-    /// # let mut workspace = app.create_workspace(WorkspaceConfig {
-    /// #     name: Some("local counter".into()), root: std::env::current_dir()?,
-    /// # }).await?;
-    /// # let workflow = workspace.workflow("counter".parse()?).await?;
-    /// # let mut run = workflow.prepare(WorkflowState::default()).await?;
-    /// let execution = run.execution(ExecutionOptions::default()).await?;
-    /// let parked = execution.abort().await?;
-    /// assert_eq!(parked.state.values()["count"], 0);
-    /// assert!(parked.last_action_ordinal.is_none());
-    /// let completed = run.execution(ExecutionOptions::default()).await?.finish().await?;
-    /// assert_eq!(completed.state.values()["count"], 1);
-    /// #
-    /// # app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }).await?;
+    /// # let outcome = async {
+    /// #     let mut workspace = app.create_workspace(WorkspaceConfig {
+    /// #         name: Some("local counter".into()), root: std::env::current_dir()?,
+    /// #     }).await?;
+    /// #     let workflow = workspace.workflow("counter".parse()?).await?;
+    /// #     let mut run = workflow.prepare(WorkflowState::default()).await?;
+    ///     let execution = run.execution(ExecutionOptions::default()).await?;
+    ///     let parked = execution.abort().await?;
+    ///     assert_eq!(parked.state.values()["count"], 0);
+    ///     assert!(parked.last_action_ordinal.is_none());
+    ///     let completed = run.execution(ExecutionOptions::default()).await?.finish().await?;
+    ///     assert_eq!(completed.state.values()["count"], 1);
+    ///     #
+    /// #     Ok::<(), Box<dyn std::error::Error>>(())
+    /// # }.await;
+    /// # let cleanup = app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }).await;
+    /// # if let Err(error) = &cleanup { eprintln!("App shutdown: {error}"); }
+    /// # outcome?;
+    /// # cleanup?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// # })?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())

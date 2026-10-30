@@ -60,21 +60,34 @@
 //!         vec![WorkspaceRoot::new(cwd, WorkspaceRootAccess::ReadOnly)?],
 //!         WorkspaceExecutionPolicy::new(WorkspaceSandboxMode::ReadOnly, WorkspaceNetworkAccess::Disabled))?;
 //!     let workspace = agent.new_workspace(NewWorkspace::new("review", context, WorkspaceDefaults::empty())?).await?;
-//!     let conversation = workspace.new_conversation(NewConversation::new(None, None, vec![])?).await?;
-//!     let response = conversation.prompt(PromptRequest::new("Describe the current task without changing files.")?
-//!         .with_model(selected).with_reasoning_effort(effort)
-//!         .with_timeout(Duration::from_secs(90))?).await;
-//!     let close = conversation.close().await;
-//!     let workspace_close = workspace.close().await;
-//!     let response = response?;
-//!     close?;
-//!     workspace_close?;
-//!     assert!(!response.output().trim().is_empty()); // progress, not a prescribed wording grade
-//!     Ok::<(), Box<dyn std::error::Error>>(())
+//!     let work = async {
+//!         let request = PromptRequest::new("Describe the current task without changing files.")?
+//!             .with_model(selected).with_reasoning_effort(effort)
+//!             .with_timeout(Duration::from_secs(90))?;
+//!         let conversation = workspace.new_conversation(NewConversation::new(None, None, vec![])?).await?;
+//!         let response = conversation.prompt(request).await;
+//!         let close = conversation.close().await;
+//!         let response = match (response, close) {
+//!             (Ok(response), Ok(())) => Ok(response),
+//!             (Err(primary), Err(cleanup)) => Err(primary.with_supplementary(cleanup)),
+//!             (Err(error), _) | (_, Err(error)) => Err(error),
+//!         }?;
+//!         assert!(!response.output().trim().is_empty()); // progress, not a prescribed wording grade
+//!         Ok::<(), agents_kit::KitError>(())
+//!     }.await;
+//!     let close = workspace.close().await; // also runs if conversation creation failed
+//!     match (work, close) {
+//!         (Err(primary), Err(cleanup)) => Err(primary.with_supplementary(cleanup)),
+//!         (Err(error), _) | (_, Err(error)) => Err(error),
+//!         (Ok(()), Ok(())) => Ok(()),
+//!     }
 //! }.await;
 //! let shutdown = agent.shutdown().await;
-//! outcome?;
-//! shutdown?;
+//! match (outcome, shutdown) {
+//!     (Err(primary), Err(cleanup)) => Err(primary.with_supplementary(cleanup)),
+//!     (Err(error), _) | (_, Err(error)) => Err(error),
+//!     (Ok(()), Ok(())) => Ok(()),
+//! }?;
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! # })?;
 //! # Ok::<(), Box<dyn std::error::Error>>(())

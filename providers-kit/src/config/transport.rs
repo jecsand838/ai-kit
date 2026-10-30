@@ -47,9 +47,22 @@ impl TransportConfig {
     /// ```
     /// use providers_kit::config::{RetryPolicy, TransportConfig};
     /// use std::time::Duration;
-    /// let transport = TransportConfig::new(Duration::from_secs(60), Duration::from_secs(5), Duration::from_secs(30), RetryPolicy::default())?;
+    /// let transport = TransportConfig::new(
+    ///     Duration::from_secs(60),
+    ///     Duration::from_secs(5),
+    ///     Duration::from_secs(30),
+    ///     RetryPolicy::default(),
+    /// )?;
     /// assert_ne!(transport, TransportConfig::default());
-    /// assert!(TransportConfig::new(Duration::ZERO, Duration::from_secs(5), Duration::from_secs(30), RetryPolicy::default()).is_err());
+    /// assert!(
+    ///     TransportConfig::new(
+    ///         Duration::ZERO,
+    ///         Duration::from_secs(5),
+    ///         Duration::from_secs(30),
+    ///         RetryPolicy::default()
+    ///     )
+    ///     .is_err()
+    /// );
     ///
     /// # Ok::<(), providers_kit::KitError>(())
     /// ```

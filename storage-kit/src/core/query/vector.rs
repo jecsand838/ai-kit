@@ -9,14 +9,13 @@ use super::{ScopedQuery, VectorQueryOptions};
 /// # Examples
 ///
 /// ```
-/// let request = storage_kit::database::query::NearestRequest {
-///     query: storage_kit::database::query::ScopedQuery::new(
-///         storage_kit::database::StorageLocator::new("documents"),
-///         storage_kit::database::query::VectorQueryOptions { vector_field: Some("vector".into()), ..Default::default() },
-///     ),
-///     vector: storage_kit::database::data::DenseVector::F32(vec![0.1, 0.2, 0.3]),
-/// };
-/// assert_eq!(request.query.options.vector_field.as_deref(), Some("vector"));
+/// use storage_kit::database::StorageLocator;
+/// use storage_kit::database::query::{DenseVector, NearestRequest};
+/// let mut request = NearestRequest::new(
+///     StorageLocator::new("documents"), DenseVector::F32(vec![0.1, 0.2, 0.3]),
+/// );
+/// request.query.options.vector_field = Some("embedding".into());
+/// assert_eq!(request.query.options.vector_field.as_deref(), Some("embedding"));
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct NearestRequest {
@@ -36,18 +35,7 @@ impl ApplyDefaultLocator for NearestRequest {
 impl NearestRequest {
     /// Creates a nearest-neighbor request with default vector parameters.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// let request = storage_kit::database::query::NearestRequest::new(
-    ///     storage_kit::database::StorageLocator::new("documents"),
-    ///     storage_kit::database::data::DenseVector::F32(vec![0.1, 0.2]),
-    /// );
-    /// assert_eq!(
-    ///     request.query.options.params.limit,
-    ///     storage_kit::database::query::VectorSearchParams::default().limit
-    /// );
-    /// ```
+    /// See [`NearestRequest`] for construction and field selection.
     #[must_use]
     pub fn new(locator: StorageLocator, vector: DenseVector) -> Self {
         Self {

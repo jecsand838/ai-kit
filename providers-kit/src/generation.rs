@@ -57,6 +57,9 @@
 //!     Ok::<_, Box<dyn std::error::Error>>(response.message)
 //! }.await;
 //! let cleanup = provider.shutdown().await;
+//! if let Err(error) = &cleanup {
+//!     eprintln!("Cleanup failed: {error}");
+//! }
 //! let _unchanged_assistant = work?;
 //! cleanup?;
 //! # Ok(())
@@ -110,6 +113,9 @@
 //!     Ok::<(), Box<dyn std::error::Error>>(())
 //! }.await;
 //! let cleanup = provider.shutdown().await;
+//! if let Err(error) = &cleanup {
+//!     eprintln!("Cleanup failed: {error}");
+//! }
 //! work?;
 //! cleanup?;
 //! # Ok(())
@@ -176,6 +182,9 @@
 //!     Ok::<(), Box<dyn std::error::Error>>(())
 //! }.await;
 //! let cleanup = provider.shutdown().await;
+//! if let Err(error) = &cleanup {
+//!     eprintln!("Cleanup failed: {error}");
+//! }
 //! work?;
 //! cleanup?;
 //! # Ok(())
@@ -369,7 +378,9 @@ impl fmt::Debug for GenerationContinuation {
 /// assistant value before appending the matching function-result message:
 ///
 /// ```
-/// use providers_kit::generation::{ContentPart, FunctionCall, FunctionResult, GenerateRequest, Message};
+/// use providers_kit::generation::{
+///     ContentPart, FunctionCall, FunctionResult, GenerateRequest, Message,
+/// };
 /// let user = Message::<u32>::user_text("Look up record a")?;
 /// // Representative output constructed by a caller Model with Continuation = u32.
 /// let call = FunctionCall::new(Some("call-1".into()), "lookup", serde_json::json!({"key":"a"}))?;
@@ -388,16 +399,7 @@ impl fmt::Debug for GenerationContinuation {
 /// continuations stay opaque; caller Models use their own exact associated type.
 /// Assistant messages returned by a Model must be replayed unchanged.
 ///
-/// # Examples
-///
-/// ```
-/// use providers_kit::generation::{GenerationContinuation, Message};
-/// let message = Message::<GenerationContinuation>::assistant_text("Hello")?;
-/// assert!(message.continuation().is_none());
-/// assert!(serde_json::to_value(&message).is_ok());
-///
-/// # Ok::<(), providers_kit::KitError>(())
-/// ```
+/// See [`crate::generation::GenerationContinuation`] for a complete example.
 ///
 #[derive(Clone, PartialEq)]
 pub struct Message<C = GenerationContinuation> {
@@ -543,7 +545,14 @@ impl<C> Message<C> {
     ///
     /// ```
     /// use providers_kit::generation::{FunctionResult, ContentPart};
-    /// let result = FunctionResult::new(Some("call-1".into()), "lookup", vec![ContentPart::Json { value: serde_json::json!({"value":2}) }], false)?;
+    /// let result = FunctionResult::new(
+    ///     Some("call-1".into()),
+    ///     "lookup",
+    ///     vec![ContentPart::Json {
+    ///         value: serde_json::json!({"value":2}),
+    ///     }],
+    ///     false,
+    /// )?;
     /// use providers_kit::generation::Message;
     /// let message = Message::<()>::tool(vec![result])?;
     /// assert_eq!(message.function_results()[0].call_id(), Some("call-1"));
@@ -692,17 +701,7 @@ impl<C> Message<C> {
 
     /// Returns caller-supplied function results.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::generation::{FunctionResult, ContentPart};
-    /// let result = FunctionResult::new(Some("call-1".into()), "lookup", vec![ContentPart::Json { value: serde_json::json!({"value":2}) }], false)?;
-    /// use providers_kit::generation::Message;
-    /// let message = Message::<()>::tool(vec![result])?;
-    /// assert_eq!(message.function_results()[0].call_id(), Some("call-1"));
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::generation::Message::tool`] for a complete example.
     ///
     #[must_use]
     pub fn function_results(&self) -> &[FunctionResult] {
@@ -711,17 +710,7 @@ impl<C> Message<C> {
 
     /// Returns opaque continuation state when this is a returned assistant message.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::generation::Message;
-    /// let message = Message::assistant_text("continue")?.with_continuation(7_u32)?;
-    /// assert_eq!(message.continuation(), Some(&7));
-    /// assert!(serde_json::to_value(&message).is_err());
-    /// assert!(Message::user_text("hello")?.with_continuation(7_u32).is_err());
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::generation::Message::with_continuation`] for a complete example.
     ///
     #[must_use]
     pub const fn continuation(&self) -> Option<&C> {
@@ -994,7 +983,9 @@ impl<'de, C> Deserialize<'de> for Message<C> {
 ///
 /// ```
 /// use providers_kit::generation::JsonSchema;
-/// let schema = JsonSchema::new(serde_json::json!({"type":"object", "properties":{"answer":{"type":"string"}}}))?;
+/// let schema = JsonSchema::new(
+///     serde_json::json!({"type":"object", "properties":{"answer":{"type":"string"}}}),
+/// )?;
 /// assert_eq!(schema.schema()["type"], "object");
 ///
 /// # Ok::<(), providers_kit::KitError>(())
@@ -1010,15 +1001,7 @@ impl JsonSchema {
     ///
     /// Returns an input error unless the schema is a JSON object whose root declares `type: object`. The selected operation performs any stricter schema or provider validation.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::generation::JsonSchema;
-    /// let schema = JsonSchema::new(serde_json::json!({"type":"object", "properties":{"answer":{"type":"string"}}}))?;
-    /// assert_eq!(schema.schema()["type"], "object");
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::generation::JsonSchema`] for a complete example.
     ///
     pub fn new(schema: Value) -> Result<Self, KitError> {
         let object = schema.as_object().ok_or_else(|| {
@@ -1044,15 +1027,7 @@ impl JsonSchema {
 
     /// Borrows the validated schema document.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::generation::JsonSchema;
-    /// let schema = JsonSchema::new(serde_json::json!({"type":"object", "properties":{"answer":{"type":"string"}}}))?;
-    /// assert_eq!(schema.schema()["type"], "object");
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::generation::JsonSchema`] for a complete example.
     ///
     #[must_use]
     pub const fn schema(&self) -> &Value {
@@ -1065,7 +1040,9 @@ impl JsonSchema {
     ///
     /// ```
     /// use providers_kit::generation::JsonSchema;
-    /// let schema = JsonSchema::new(serde_json::json!({"type":"object", "properties":{"answer":{"type":"string"}}}))?;
+    /// let schema = JsonSchema::new(
+    ///     serde_json::json!({"type":"object", "properties":{"answer":{"type":"string"}}}),
+    /// )?;
     /// assert_eq!(schema.into_value()["type"], "object");
     ///
     /// # Ok::<(), providers_kit::KitError>(())
@@ -1423,7 +1400,11 @@ where
 ///
 /// ```
 /// use providers_kit::generation::{ProviderFunctionTool, JsonSchema};
-/// let tool = ProviderFunctionTool::new("lookup", Some("Find a record".into()), JsonSchema::new(serde_json::json!({"type":"object"}))?)?;
+/// let tool = ProviderFunctionTool::new(
+///     "lookup",
+///     Some("Find a record".into()),
+///     JsonSchema::new(serde_json::json!({"type":"object"}))?,
+/// )?;
 /// assert_eq!(tool.name(), "lookup");
 /// assert_eq!(tool.description(), Some("Find a record"));
 /// assert_eq!(tool.input_schema().schema()["type"], "object");
@@ -1445,17 +1426,7 @@ impl ProviderFunctionTool {
     ///
     /// Returns an input error for an invalid function name or blank description. The input schema has already been validated by [`JsonSchema::new`].
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::generation::{ProviderFunctionTool, JsonSchema};
-    /// let tool = ProviderFunctionTool::new("lookup", Some("Find a record".into()), JsonSchema::new(serde_json::json!({"type":"object"}))?)?;
-    /// assert_eq!(tool.name(), "lookup");
-    /// assert_eq!(tool.description(), Some("Find a record"));
-    /// assert_eq!(tool.input_schema().schema()["type"], "object");
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::generation::ProviderFunctionTool`] for a complete example.
     ///
     pub fn new(
         name: impl Into<String>,
@@ -1484,17 +1455,7 @@ impl ProviderFunctionTool {
 
     /// Returns the provider-visible function name.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::generation::{ProviderFunctionTool, JsonSchema};
-    /// let tool = ProviderFunctionTool::new("lookup", Some("Find a record".into()), JsonSchema::new(serde_json::json!({"type":"object"}))?)?;
-    /// assert_eq!(tool.name(), "lookup");
-    /// assert_eq!(tool.description(), Some("Find a record"));
-    /// assert_eq!(tool.input_schema().schema()["type"], "object");
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::generation::ProviderFunctionTool`] for a complete example.
     ///
     #[must_use]
     pub fn name(&self) -> &str {
@@ -1503,17 +1464,7 @@ impl ProviderFunctionTool {
 
     /// Returns the optional model-visible description.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::generation::{ProviderFunctionTool, JsonSchema};
-    /// let tool = ProviderFunctionTool::new("lookup", Some("Find a record".into()), JsonSchema::new(serde_json::json!({"type":"object"}))?)?;
-    /// assert_eq!(tool.name(), "lookup");
-    /// assert_eq!(tool.description(), Some("Find a record"));
-    /// assert_eq!(tool.input_schema().schema()["type"], "object");
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::generation::ProviderFunctionTool`] for a complete example.
     ///
     #[must_use]
     pub fn description(&self) -> Option<&str> {
@@ -1522,17 +1473,7 @@ impl ProviderFunctionTool {
 
     /// Returns the strict argument schema.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::generation::{ProviderFunctionTool, JsonSchema};
-    /// let tool = ProviderFunctionTool::new("lookup", Some("Find a record".into()), JsonSchema::new(serde_json::json!({"type":"object"}))?)?;
-    /// assert_eq!(tool.name(), "lookup");
-    /// assert_eq!(tool.description(), Some("Find a record"));
-    /// assert_eq!(tool.input_schema().schema()["type"], "object");
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::generation::ProviderFunctionTool`] for a complete example.
     ///
     #[must_use]
     pub const fn input_schema(&self) -> &JsonSchema {
@@ -1545,7 +1486,11 @@ impl ProviderFunctionTool {
     ///
     /// ```
     /// use providers_kit::generation::{ProviderFunctionTool, JsonSchema};
-    /// let tool = ProviderFunctionTool::new("lookup", Some("Find a record".into()), JsonSchema::new(serde_json::json!({"type":"object"}))?)?;
+    /// let tool = ProviderFunctionTool::new(
+    ///     "lookup",
+    ///     Some("Find a record".into()),
+    ///     JsonSchema::new(serde_json::json!({"type":"object"}))?,
+    /// )?;
     /// let (name, description, schema) = tool.into_parts();
     /// assert_eq!(name, "lookup");
     /// assert_eq!(description.as_deref(), Some("Find a record"));
@@ -1642,17 +1587,7 @@ impl FunctionCall {
     ///
     /// Returns an input error for an invalid portable function name, invalid optional call id, or arguments that are not a JSON object. Keep returned call correlation unchanged in its result.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::generation::FunctionCall;
-    /// let call = FunctionCall::new(Some("call-1".into()), "lookup", serde_json::json!({"key":"a"}))?;
-    /// assert_eq!(call.id(), Some("call-1"));
-    /// assert_eq!(call.name(), "lookup");
-    /// assert_eq!(call.arguments()["key"], "a");
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::generation::FunctionCall`] for a complete example.
     ///
     pub fn new(
         id: Option<String>,
@@ -1682,17 +1617,7 @@ impl FunctionCall {
 
     /// Returns the provider correlation id, when one was supplied.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::generation::FunctionCall;
-    /// let call = FunctionCall::new(Some("call-1".into()), "lookup", serde_json::json!({"key":"a"}))?;
-    /// assert_eq!(call.id(), Some("call-1"));
-    /// assert_eq!(call.name(), "lookup");
-    /// assert_eq!(call.arguments()["key"], "a");
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::generation::FunctionCall`] for a complete example.
     ///
     #[must_use]
     pub fn id(&self) -> Option<&str> {
@@ -1701,17 +1626,7 @@ impl FunctionCall {
 
     /// Returns the function name.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::generation::FunctionCall;
-    /// let call = FunctionCall::new(Some("call-1".into()), "lookup", serde_json::json!({"key":"a"}))?;
-    /// assert_eq!(call.id(), Some("call-1"));
-    /// assert_eq!(call.name(), "lookup");
-    /// assert_eq!(call.arguments()["key"], "a");
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::generation::FunctionCall`] for a complete example.
     ///
     #[must_use]
     pub fn name(&self) -> &str {
@@ -1720,17 +1635,7 @@ impl FunctionCall {
 
     /// Returns the validated object-shaped arguments.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::generation::FunctionCall;
-    /// let call = FunctionCall::new(Some("call-1".into()), "lookup", serde_json::json!({"key":"a"}))?;
-    /// assert_eq!(call.id(), Some("call-1"));
-    /// assert_eq!(call.name(), "lookup");
-    /// assert_eq!(call.arguments()["key"], "a");
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::generation::FunctionCall`] for a complete example.
     ///
     #[must_use]
     pub fn arguments(&self) -> &Value {
@@ -1785,7 +1690,14 @@ impl FunctionCall {
 ///
 /// ```
 /// use providers_kit::generation::{FunctionResult, ContentPart};
-/// let result = FunctionResult::new(Some("call-1".into()), "lookup", vec![ContentPart::Json { value: serde_json::json!({"value":2}) }], false)?;
+/// let result = FunctionResult::new(
+///     Some("call-1".into()),
+///     "lookup",
+///     vec![ContentPart::Json {
+///         value: serde_json::json!({"value":2}),
+///     }],
+///     false,
+/// )?;
 /// assert_eq!(result.call_id(), Some("call-1"));
 /// assert_eq!(result.name(), "lookup");
 /// assert_eq!(result.content().len(), 1);
@@ -1829,18 +1741,7 @@ impl FunctionResult {
     ///
     /// Returns an input error for an invalid name/id, empty or invalid content, or provider thinking content. Accepted function failures use `is_error = true` with nonempty model-visible content.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::generation::{FunctionResult, ContentPart};
-    /// let result = FunctionResult::new(Some("call-1".into()), "lookup", vec![ContentPart::Json { value: serde_json::json!({"value":2}) }], false)?;
-    /// assert_eq!(result.call_id(), Some("call-1"));
-    /// assert_eq!(result.name(), "lookup");
-    /// assert_eq!(result.content().len(), 1);
-    /// assert!(!result.is_error());
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::generation::FunctionResult`] for a complete example.
     ///
     pub fn new(
         call_id: Option<String>,
@@ -1886,18 +1787,7 @@ impl FunctionResult {
 
     /// Returns the originating call id, when available.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::generation::{FunctionResult, ContentPart};
-    /// let result = FunctionResult::new(Some("call-1".into()), "lookup", vec![ContentPart::Json { value: serde_json::json!({"value":2}) }], false)?;
-    /// assert_eq!(result.call_id(), Some("call-1"));
-    /// assert_eq!(result.name(), "lookup");
-    /// assert_eq!(result.content().len(), 1);
-    /// assert!(!result.is_error());
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::generation::FunctionResult`] for a complete example.
     ///
     #[must_use]
     pub fn call_id(&self) -> Option<&str> {
@@ -1906,18 +1796,7 @@ impl FunctionResult {
 
     /// Returns the function name.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::generation::{FunctionResult, ContentPart};
-    /// let result = FunctionResult::new(Some("call-1".into()), "lookup", vec![ContentPart::Json { value: serde_json::json!({"value":2}) }], false)?;
-    /// assert_eq!(result.call_id(), Some("call-1"));
-    /// assert_eq!(result.name(), "lookup");
-    /// assert_eq!(result.content().len(), 1);
-    /// assert!(!result.is_error());
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::generation::FunctionResult`] for a complete example.
     ///
     #[must_use]
     pub fn name(&self) -> &str {
@@ -1926,18 +1805,7 @@ impl FunctionResult {
 
     /// Returns ordered model-visible result content.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::generation::{FunctionResult, ContentPart};
-    /// let result = FunctionResult::new(Some("call-1".into()), "lookup", vec![ContentPart::Json { value: serde_json::json!({"value":2}) }], false)?;
-    /// assert_eq!(result.call_id(), Some("call-1"));
-    /// assert_eq!(result.name(), "lookup");
-    /// assert_eq!(result.content().len(), 1);
-    /// assert!(!result.is_error());
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::generation::FunctionResult`] for a complete example.
     ///
     #[must_use]
     pub fn content(&self) -> &[ContentPart] {
@@ -1946,18 +1814,7 @@ impl FunctionResult {
 
     /// Reports whether the completed function execution failed.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::generation::{FunctionResult, ContentPart};
-    /// let result = FunctionResult::new(Some("call-1".into()), "lookup", vec![ContentPart::Json { value: serde_json::json!({"value":2}) }], false)?;
-    /// assert_eq!(result.call_id(), Some("call-1"));
-    /// assert_eq!(result.name(), "lookup");
-    /// assert_eq!(result.content().len(), 1);
-    /// assert!(!result.is_error());
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::generation::FunctionResult`] for a complete example.
     ///
     #[must_use]
     pub const fn is_error(&self) -> bool {
@@ -2080,7 +1937,8 @@ impl GenerationConfig {
     ///
     /// ```
     /// use providers_kit::generation::GenerationConfig;
-    /// let config = GenerationConfig::default().with_max_output_tokens(std::num::NonZeroU32::new(256).unwrap());
+    /// let config =
+    ///     GenerationConfig::default().with_max_output_tokens(std::num::NonZeroU32::new(256).unwrap());
     /// assert_eq!(config.max_output_tokens(), std::num::NonZeroU32::new(256));
     ///
     /// # Ok::<(), providers_kit::KitError>(())
@@ -2212,7 +2070,8 @@ impl GenerationConfig {
     ///
     /// ```
     /// use providers_kit::generation::GenerationConfig;
-    /// let config = GenerationConfig::default().with_tool_choice(providers_kit::generation::ToolChoice::Auto);
+    /// let config =
+    ///     GenerationConfig::default().with_tool_choice(providers_kit::generation::ToolChoice::Auto);
     /// assert_eq!(config.tool_choice(), Some(&providers_kit::generation::ToolChoice::Auto));
     ///
     /// # Ok::<(), providers_kit::KitError>(())
@@ -2227,15 +2086,7 @@ impl GenerationConfig {
     #[must_use]
     /// Returns the requested sampling temperature.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::generation::GenerationConfig;
-    /// let config = GenerationConfig::default().with_temperature(0.5)?;
-    /// assert_eq!(config.temperature(), Some(0.5));
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::generation::GenerationConfig::with_temperature`] for a complete example.
     ///
     pub const fn temperature(&self) -> Option<f32> {
         self.temperature
@@ -2244,15 +2095,7 @@ impl GenerationConfig {
     #[must_use]
     /// Returns the requested nucleus-sampling probability.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::generation::GenerationConfig;
-    /// let config = GenerationConfig::default().with_top_p(0.8)?;
-    /// assert_eq!(config.top_p(), Some(0.8));
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::generation::GenerationConfig::with_top_p`] for a complete example.
     ///
     pub const fn top_p(&self) -> Option<f32> {
         self.top_p
@@ -2261,15 +2104,7 @@ impl GenerationConfig {
     #[must_use]
     /// Returns the requested top-k cutoff.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::generation::GenerationConfig;
-    /// let config = GenerationConfig::default().with_top_k(std::num::NonZeroU32::new(20).unwrap());
-    /// assert_eq!(config.top_k(), std::num::NonZeroU32::new(20));
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::generation::GenerationConfig::with_top_k`] for a complete example.
     ///
     pub const fn top_k(&self) -> Option<NonZeroU32> {
         self.top_k
@@ -2278,15 +2113,7 @@ impl GenerationConfig {
     #[must_use]
     /// Returns the requested maximum output-token count.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::generation::GenerationConfig;
-    /// let config = GenerationConfig::default().with_max_output_tokens(std::num::NonZeroU32::new(256).unwrap());
-    /// assert_eq!(config.max_output_tokens(), std::num::NonZeroU32::new(256));
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::generation::GenerationConfig::with_max_output_tokens`] for a complete example.
     ///
     pub const fn max_output_tokens(&self) -> Option<NonZeroU32> {
         self.max_output_tokens
@@ -2295,15 +2122,7 @@ impl GenerationConfig {
     #[must_use]
     /// Returns validated stop sequences in caller order.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::generation::GenerationConfig;
-    /// let config = GenerationConfig::default().with_stop_sequences(vec!["END".into()])?;
-    /// assert_eq!(config.stop_sequences(), &["END"]);
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::generation::GenerationConfig::with_stop_sequences`] for a complete example.
     ///
     pub fn stop_sequences(&self) -> &[String] {
         &self.stop_sequences
@@ -2312,15 +2131,7 @@ impl GenerationConfig {
     #[must_use]
     /// Returns the requested presence penalty.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::generation::GenerationConfig;
-    /// let config = GenerationConfig::default().with_presence_penalty(0.25)?;
-    /// assert_eq!(config.presence_penalty(), Some(0.25));
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::generation::GenerationConfig::with_presence_penalty`] for a complete example.
     ///
     pub const fn presence_penalty(&self) -> Option<f32> {
         self.presence_penalty
@@ -2329,15 +2140,7 @@ impl GenerationConfig {
     #[must_use]
     /// Returns the requested frequency penalty.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::generation::GenerationConfig;
-    /// let config = GenerationConfig::default().with_frequency_penalty(0.25)?;
-    /// assert_eq!(config.frequency_penalty(), Some(0.25));
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::generation::GenerationConfig::with_frequency_penalty`] for a complete example.
     ///
     pub const fn frequency_penalty(&self) -> Option<f32> {
         self.frequency_penalty
@@ -2346,15 +2149,7 @@ impl GenerationConfig {
     #[must_use]
     /// Returns the requested sampling seed.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::generation::GenerationConfig;
-    /// let config = GenerationConfig::default().with_seed(42);
-    /// assert_eq!(config.seed(), Some(42));
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::generation::GenerationConfig::with_seed`] for a complete example.
     ///
     pub const fn seed(&self) -> Option<u64> {
         self.seed
@@ -2363,15 +2158,7 @@ impl GenerationConfig {
     #[must_use]
     /// Returns the requested tool-selection policy.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::generation::GenerationConfig;
-    /// let config = GenerationConfig::default().with_tool_choice(providers_kit::generation::ToolChoice::Auto);
-    /// assert_eq!(config.tool_choice(), Some(&providers_kit::generation::ToolChoice::Auto));
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::generation::GenerationConfig::with_tool_choice`] for a complete example.
     ///
     pub const fn tool_choice(&self) -> Option<&ToolChoice> {
         self.tool_choice.as_ref()
@@ -2461,15 +2248,7 @@ impl<C> GenerateRequest<C> {
     ///
     /// Returns an input error when messages are empty, contain only instructions, place instructions after ordinary messages, or violate a message role/content invariant.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::generation::{GenerateRequest, Message};
-    /// let request = GenerateRequest::<()>::new(vec![Message::user_text("Hello")?])?;
-    /// assert_eq!(request.messages().len(), 1);
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::generation::GenerateRequest`] for a complete example.
     ///
     pub fn new(messages: Vec<Message<C>>) -> Result<Self, KitError> {
         let request = Self {
@@ -2493,7 +2272,11 @@ impl<C> GenerateRequest<C> {
     ///
     /// ```
     /// use providers_kit::generation::{ProviderFunctionTool, JsonSchema};
-    /// let tool = ProviderFunctionTool::new("lookup", Some("Find a record".into()), JsonSchema::new(serde_json::json!({"type":"object"}))?)?;
+    /// let tool = ProviderFunctionTool::new(
+    ///     "lookup",
+    ///     Some("Find a record".into()),
+    ///     JsonSchema::new(serde_json::json!({"type":"object"}))?,
+    /// )?;
     /// use providers_kit::generation::{GenerateRequest, Message, ProviderToolSpec};
     /// let request = GenerateRequest::<()>::new(vec![Message::user_text("Look up a record")?])?
     ///     .with_tools(vec![ProviderToolSpec::Function(tool)])?;
@@ -2536,7 +2319,10 @@ impl<C> GenerateRequest<C> {
     /// use providers_kit::generation::{GenerateRequest, Message};
     /// let request = GenerateRequest::<()>::new(vec![Message::user_text("Hello")?])?;
     /// use providers_kit::generation::{ReasoningConfig, ReasoningEffort};
-    /// let request = request.with_reasoning(ReasoningConfig { effort: Some(ReasoningEffort::Low), ..Default::default() });
+    /// let request = request.with_reasoning(ReasoningConfig {
+    ///     effort: Some(ReasoningEffort::Low),
+    ///     ..Default::default()
+    /// });
     /// assert_eq!(request.reasoning().unwrap().effort, Some(ReasoningEffort::Low));
     ///
     /// # Ok::<(), providers_kit::KitError>(())
@@ -2575,15 +2361,7 @@ impl<C> GenerateRequest<C> {
     #[must_use]
     /// Returns validated messages in request order.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::generation::{GenerateRequest, Message};
-    /// let request = GenerateRequest::<()>::new(vec![Message::user_text("Hello")?])?;
-    /// assert_eq!(request.messages().len(), 1);
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::generation::GenerateRequest`] for a complete example.
     ///
     pub fn messages(&self) -> &[Message<C>] {
         &self.messages
@@ -2852,7 +2630,15 @@ pub enum Citation {
 ///
 /// ```
 /// use providers_kit::{ModelId, generation::{GenerateResponse, Message, FinishReason, Usage}};
-/// let response = GenerateResponse { model: ModelId::new("exact-model")?, message: Message::assistant_text("done")?.with_continuation(7_u32)?, finish_reason: Some(FinishReason::Stop), citations: Vec::new(), artifacts: Vec::new(), hosted_tool_outputs: Vec::new(), usage: Usage::default() };
+/// let response = GenerateResponse {
+///     model: ModelId::new("exact-model")?,
+///     message: Message::assistant_text("done")?.with_continuation(7_u32)?,
+///     finish_reason: Some(FinishReason::Stop),
+///     citations: Vec::new(),
+///     artifacts: Vec::new(),
+///     hosted_tool_outputs: Vec::new(),
+///     usage: Usage::default(),
+/// };
 /// let mapped = response.try_map_continuation(|value| Ok(value.to_string()))?;
 /// assert_eq!(mapped.message.continuation().map(String::as_str), Some("7"));
 /// assert_eq!(mapped.model.as_str(), "exact-model");
@@ -2886,17 +2672,7 @@ impl<C> GenerateResponse<C> {
     ///
     /// Returns the callback error unchanged if converting the response continuation fails; other response fields retain their exact values.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::{ModelId, generation::{GenerateResponse, Message, FinishReason, Usage}};
-    /// let response = GenerateResponse { model: ModelId::new("exact-model")?, message: Message::assistant_text("done")?.with_continuation(7_u32)?, finish_reason: Some(FinishReason::Stop), citations: Vec::new(), artifacts: Vec::new(), hosted_tool_outputs: Vec::new(), usage: Usage::default() };
-    /// let mapped = response.try_map_continuation(|value| Ok(value.to_string()))?;
-    /// assert_eq!(mapped.message.continuation().map(String::as_str), Some("7"));
-    /// assert_eq!(mapped.model.as_str(), "exact-model");
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::generation::GenerateResponse`] for a complete example.
     ///
     pub fn try_map_continuation<D>(
         self,
@@ -2956,11 +2732,21 @@ impl<C> GenerateEvent<C> {
     ///
     /// ```
     /// use providers_kit::{ModelId, generation::{GenerateResponse, Message, FinishReason, Usage}};
-    /// let response = GenerateResponse { model: ModelId::new("exact-model")?, message: Message::assistant_text("done")?.with_continuation(7_u32)?, finish_reason: Some(FinishReason::Stop), citations: Vec::new(), artifacts: Vec::new(), hosted_tool_outputs: Vec::new(), usage: Usage::default() };
+    /// let response = GenerateResponse {
+    ///     model: ModelId::new("exact-model")?,
+    ///     message: Message::assistant_text("done")?.with_continuation(7_u32)?,
+    ///     finish_reason: Some(FinishReason::Stop),
+    ///     citations: Vec::new(),
+    ///     artifacts: Vec::new(),
+    ///     hosted_tool_outputs: Vec::new(),
+    ///     usage: Usage::default(),
+    /// };
     /// use providers_kit::generation::GenerateEvent;
     /// let event = GenerateEvent::Completed(Box::new(response));
     /// let mapped = event.try_map_continuation(|value| Ok(value.to_string()))?;
-    /// assert!(matches!(mapped, GenerateEvent::Completed(response) if response.message.continuation().map(String::as_str) == Some("7")));
+    /// assert!(
+    ///     matches!(mapped, GenerateEvent::Completed(response) if response.message.continuation().map(String::as_str) == Some("7"))
+    /// );
     ///
     /// # Ok::<(), providers_kit::KitError>(())
     /// ```
@@ -2998,7 +2784,9 @@ impl<C> GenerateEvent<C> {
 /// use futures_util::{stream, StreamExt};
 /// let source = stream::iter([Ok(GenerateEvent::<()>::ContentDelta { delta: "hello".into() })]);
 /// let mut stream = GenerateEventStream::new(source);
-/// assert!(matches!(stream.next().await.transpose()?, Some(GenerateEvent::ContentDelta { delta }) if delta == "hello"));
+/// assert!(
+///     matches!(stream.next().await.transpose()?, Some(GenerateEvent::ContentDelta { delta }) if delta == "hello")
+/// );
 /// assert!(stream.next().await.is_none());
 ///
 /// # Ok(())
@@ -3016,22 +2804,7 @@ impl<C: 'static> GenerateEventStream<C> {
     /// bounded production, terminal ordering, admission release and cancellation.
     /// Supplied model streams produce no events after Completed and own no forwarding task.
     ///
-    /// # Examples
-    ///
-    /// ```
-    ///
-    /// # #[tokio::main(flavor = "current_thread")]
-    /// # async fn main() -> Result<(), providers_kit::KitError> {
-    /// use providers_kit::generation::{GenerateEvent, GenerateEventStream};
-    /// use futures_util::{stream, StreamExt};
-    /// let source = stream::iter([Ok(GenerateEvent::<()>::ContentDelta { delta: "hello".into() })]);
-    /// let mut stream = GenerateEventStream::new(source);
-    /// assert!(matches!(stream.next().await.transpose()?, Some(GenerateEvent::ContentDelta { delta }) if delta == "hello"));
-    /// assert!(stream.next().await.is_none());
-    ///
-    /// # Ok(())
-    /// # }
-    /// ```
+    /// See [`crate::generation::GenerateEventStream`] for a complete example.
     ///
     pub fn new<S>(stream: S) -> Self
     where

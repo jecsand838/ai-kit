@@ -58,11 +58,14 @@
 //!     assert_eq!(request.knowledge_policy(),
 //!         Some(&KnowledgePolicy::Only(vec![KnowledgeScope::Agent])));
 //!     // Sending this request through a Conversation requires the configured model.
-//!     Ok::<(), Box<dyn std::error::Error>>(())
+//!     Ok::<(), agents_kit::KitError>(())
 //! }.await;
 //! let shutdown = agent.shutdown().await;
-//! outcome?;
-//! shutdown?;
+//! match (outcome, shutdown) {
+//!     (Err(primary), Err(cleanup)) => Err(primary.with_supplementary(cleanup)),
+//!     (Err(error), _) | (_, Err(error)) => Err(error),
+//!     (Ok(()), Ok(())) => Ok(()),
+//! }?;
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! # })?;
 //! # Ok::<(), Box<dyn std::error::Error>>(())

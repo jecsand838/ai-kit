@@ -29,17 +29,24 @@
 //!     info,
 //!     |_invocation| async { Ok(ToolResult::text("pong")) },
 //! )])?;
-//! let mut handler = toolset.tool_handler(name).await?;
-//! let output = handler
-//!     .step(ToolHandlerInput::Invoke(ToolInvocation {
-//!         call_id: Some("call-1".to_owned()),
-//!         arguments: serde_json::json!({}),
-//!     }))
-//!     .await;
+//! let output = async {
+//!     let mut handler = toolset.tool_handler(name).await?;
+//!     handler
+//!         .step(ToolHandlerInput::Invoke(ToolInvocation {
+//!             call_id: Some("call-1".to_owned()),
+//!             arguments: serde_json::json!({}),
+//!         }))
+//!         .await
+//! }.await;
 //! let cleanup = toolset.shutdown().await;
+//! if let Err(error) = &cleanup {
+//!     eprintln!("Cleanup failed: {error}");
+//! }
 //! let ToolHandlerOutput::Completed(result) = output? else { panic!("completion expected") };
 //! assert!(!result.is_error);
-//! assert!(matches!(result.content.as_slice(), [tools_kit::execution::ToolContent::Text { text, .. }] if text == "pong"));
+//! assert!(
+//!     matches!(result.content.as_slice(), [tools_kit::execution::ToolContent::Text { text, .. }] if text == "pong")
+//! );
 //! cleanup?;
 //! # Ok(())
 //! # }
@@ -98,11 +105,16 @@ pub use crate::{
 /// use tools_kit::execution::{ToolHandlerInput, ToolHandlerOutput, ToolInvocation};
 /// let registration = tools_kit::tool!("double", |value: i64| async move { Ok(value * 2) })?;
 /// let tools = Toolset::local(vec![registration])?;
-/// let mut handler = tools.tool_handler(ToolName::new("double")?).await?;
-/// let result = handler.step(ToolHandlerInput::Invoke(ToolInvocation {
-///     call_id: None, arguments: serde_json::json!(3),
-/// })).await;
+/// let result = async {
+///     let mut handler = tools.tool_handler(ToolName::new("double")?).await?;
+///     handler.step(ToolHandlerInput::Invoke(ToolInvocation {
+///         call_id: None, arguments: serde_json::json!(3),
+///     })).await
+/// }.await;
 /// let cleanup = tools.shutdown().await;
+/// if let Err(error) = &cleanup {
+///     eprintln!("Cleanup failed: {error}");
+/// }
 /// let ToolHandlerOutput::Completed(result) = result? else { panic!("completion expected") };
 /// assert_eq!(result.structured_content, Some(serde_json::json!(6)));
 /// cleanup?;

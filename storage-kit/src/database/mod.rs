@@ -11,36 +11,31 @@
 //! Database writes do not share the transactional guarantees of
 //! [`crate::StateStore`].
 
-//! # Local collection, retrieval and cleanup
+//! # Write and filter a local collection
 //!
 //! This executable example uses a tiny process-local LanceDB collection. Logical
 //! identity lives in an application field: this LanceDB adapter does not support
-//! portable `DataRecord.id` or ID lookup. A scalar index works at this scale; a vector query
-//! does not require a trained vector index. Other backends can reject unsupported
-//! index kinds or options explicitly. Do not interpret every score as similarity.
+//! portable `DataRecord.id` or ID lookup. Query and index operations have separate
+//! request types; optional capabilities never guarantee every request is supported.
 //!
 //! ```
 //! use storage_kit::{Database, DatabaseBackend};
 //! use storage_kit::database::{StorageLocator, config::{DatabaseConfig, LanceConfig}};
 //! use storage_kit::database::catalog::{CatalogRequest, CreateCollectionMode, CreateCollectionRequest};
 //! use storage_kit::database::data::{DataRecord, DataRequest, DataResponse, DeleteRequest,
-//!     DenseVector, FilterExpr, InsertRequest, ScanRequest, CountRequest};
-//! use storage_kit::database::query::{DistanceMetric, NearestRequest, Projection,
-//!     QueryRequest, QueryScope, ScopedQuery, ScoreKind, VectorQueryOptions, VectorSearchParams};
-//! use storage_kit::database::index::{CreateIndexRequest, IndexKind, IndexRequest,
-//!     IndexResponse, WaitForIndexRequest};
+//!     FilterExpr, InsertRequest, ScanRequest, CountRequest, Projection};
 //! # tokio::runtime::Runtime::new()?.block_on(async {
 //! let database = Database::connect(DatabaseConfig::lance(LanceConfig::embedded_path("memory://"))).await?;
 //! let collection = StorageLocator::new("articles");
 //! let first = DataRecord::without_id().field("article", "intro")?.field("title", "Introduction")?
-//!     .field("published", true)?.vector("embedding", DenseVector::F32(vec![1.0, 0.0]));
+//!     .field("published", true)?;
 //! database.catalog(CatalogRequest::CreateCollection(CreateCollectionRequest {
 //!     locator: collection.clone(), schema: None, records: vec![first],
 //!     mode: CreateCollectionMode::Create,
 //! })).await?;
 //! database.data(DataRequest::Insert(InsertRequest::append(collection.clone(), vec![
-//!     DataRecord::without_id().field("article", "draft")?.field("title", "Draft")?.field("published", false)?
-//!         .vector("embedding", DenseVector::F32(vec![0.0, 1.0])),
+//!     DataRecord::without_id().field("article", "draft")?
+//!         .field("title", "Draft")?.field("published", false)?,
 //! ]))).await?;
 //! let page = database.data(DataRequest::Scan(ScanRequest {
 //!     locator: collection.clone(), filter: Some(FilterExpr::eq("published", true)),
@@ -51,40 +46,9 @@
 //! assert_eq!(page.records.len(), 1);
 //! assert_eq!(page.records[0].fields["title"], "Introduction");
 //!
-//! let nearest = database.query(QueryRequest::Nearest(NearestRequest {
-//!     query: ScopedQuery::new(QueryScope::new(collection.clone()), VectorQueryOptions {
-//!         vector_field: Some("embedding".into()),
-//!         params: VectorSearchParams { limit: 1, distance: Some(DistanceMetric::L2), ..Default::default() },
-//!     }),
-//!     vector: DenseVector::F32(vec![1.0, 0.0]),
-//! })).await?;
-//! assert_eq!(nearest.hits.len(), 1);
-//! assert_eq!(nearest.hits[0].record.fields["article"], "intro");
-//! assert_eq!(nearest.hits[0].score_kind, ScoreKind::Distance);
-//! assert_eq!(nearest.hits[0].raw_score, Some(0.0));
-//!
-//! database.index(IndexRequest::Create(CreateIndexRequest {
-//!     locator: collection.clone(), columns: vec!["title".into()], kind: IndexKind::Scalar,
-//!     wait_timeout_ms: None,
-//! })).await?;
-//! let IndexResponse::Indexes(indexes) = database.index(IndexRequest::List {
-//!     locator: collection.clone(),
-//! }).await? else { panic!("index listing returns metadata") };
-//! let name = indexes.iter().find(|index| index.columns == ["title"])
-//!     .and_then(|index| index.name.clone()).expect("LanceDB reports its scalar index name");
-//! database.index(IndexRequest::WaitFor(WaitForIndexRequest {
-//!     locator: collection.clone(), index_names: vec![name.clone()], timeout_ms: 5_000,
-//! })).await?;
-//! database.index(IndexRequest::Drop { locator: collection.clone(), name }).await?;
-//!
 //! database.data(DataRequest::Delete(DeleteRequest {
 //!     locator: collection.clone(), filter: FilterExpr::eq("published", false),
 //! })).await?;
-//! let DataResponse::Records(remaining) = database.data(DataRequest::Scan(ScanRequest {
-//!     locator: collection.clone(), filter: Some(FilterExpr::eq("article", "intro")),
-//!     projection: Projection::All, limit: Some(10), offset: None, page_token: None,
-//! })).await? else { panic!("scan returns records") };
-//! assert_eq!(remaining.records.len(), 1);
 //! assert!(matches!(database.data(DataRequest::Count(CountRequest {
 //!     locator: collection.clone(), filter: None,
 //! })).await?, DataResponse::Count(1)));
@@ -96,6 +60,12 @@
 //! # })?;
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
+//!
+//! For vector retrieval, build a [`query::NearestRequest`] and inspect each
+//! [`query::ScoredRecord::score_kind`] before interpreting its score. Vector
+//! queries do not require a trained vector index. Index creation and readiness
+//! are separate operations; see [`crate::DatabaseBackend::index`] and
+//! [`index::WaitForIndexRequest`]. Unsupported kinds or options fail explicitly.
 //!
 //! Database has no multi-operation transaction or explicit shutdown method. A
 //! failed ordinary write can have an uncertain outcome; reconcile before replaying.

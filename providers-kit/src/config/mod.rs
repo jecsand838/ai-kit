@@ -66,15 +66,7 @@ pub struct ProviderConfig {
 impl ProviderConfig {
     /// Combines one concrete provider config with shared transport policy.
     ///
-    /// ```
-    /// let config = providers_kit::ProviderConfig::new(
-    ///     providers_kit::config::ProviderKind::Ollama(
-    ///         providers_kit::config::OllamaConfig::local(),
-    ///     ),
-    ///     providers_kit::config::TransportConfig::default(),
-    /// );
-    /// let _ = config;
-    /// ```
+    /// See [`crate::ProviderConfig`] for a complete example.
     #[must_use]
     pub fn new(kind: ProviderKind, transport: TransportConfig) -> Self {
         Self { kind, transport }

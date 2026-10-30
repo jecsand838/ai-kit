@@ -52,6 +52,9 @@
 //!     model.generate(&request).await
 //! }.await;
 //! let cleanup = provider.shutdown().await;
+//! if let Err(error) = &cleanup {
+//!     eprintln!("Cleanup failed: {error}");
+//! }
 //! let response = result?;
 //! cleanup?;
 //! // Preserve response.message unchanged for subsequent function continuation.

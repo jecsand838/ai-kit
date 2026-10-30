@@ -23,7 +23,9 @@
 //!
 //! ```no_run
 //! use std::time::Duration;
-//! use providers_kit::{Provider, ProviderBackend, ProviderConfig, ModelBackend, ModelId, SessionBackend};
+//! use providers_kit::{
+//!     ModelBackend, ModelId, Provider, ProviderBackend, ProviderConfig, SessionBackend,
+//! };
 //! use providers_kit::config::{ApiKey, OpenAiConfig, ProviderKind, TransportConfig};
 //! use providers_kit::session::{SessionConfig, SessionEvent, SessionInput};
 //! # #[tokio::main(flavor = "current_thread")]
@@ -62,11 +64,17 @@
 //!         Ok::<(), Box<dyn std::error::Error>>(())
 //!     }).await;
 //!     let closed = session.close().await;
+//!     if let Err(error) = &closed {
+//!         eprintln!("Cleanup failed: {error}");
+//!     }
 //!     turn??;
 //!     closed?;
 //!     Ok::<(), Box<dyn std::error::Error>>(())
 //! }.await;
 //! let shutdown = provider.shutdown().await;
+//! if let Err(error) = &shutdown {
+//!     eprintln!("Cleanup failed: {error}");
+//! }
 //! work?;
 //! shutdown?;
 //! # Ok(())
@@ -143,15 +151,7 @@ impl SessionConfig {
     ///
     /// Returns an input error for empty or whitespace-only instructions.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::session::SessionConfig;
-    /// let config = SessionConfig::default().with_instructions("Answer briefly")?;
-    /// assert_eq!(config.instructions(), Some("Answer briefly"));
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::session::SessionConfig`] for a complete example.
     ///
     pub fn with_instructions(mut self, instructions: impl Into<String>) -> Result<Self, KitError> {
         let instructions = instructions.into();
@@ -251,7 +251,11 @@ impl SessionConfig {
     ///
     /// ```
     /// use providers_kit::generation::{ProviderFunctionTool, JsonSchema};
-    /// let tool = ProviderFunctionTool::new("lookup", Some("Find a record".into()), JsonSchema::new(serde_json::json!({"type":"object"}))?)?;
+    /// let tool = ProviderFunctionTool::new(
+    ///     "lookup",
+    ///     Some("Find a record".into()),
+    ///     JsonSchema::new(serde_json::json!({"type":"object"}))?,
+    /// )?;
     /// use providers_kit::{session::SessionConfig, generation::ToolChoice};
     /// let config = SessionConfig::default().with_functions(vec![tool], Some(ToolChoice::Auto))?;
     /// assert_eq!(config.functions()[0].name(), "lookup");
@@ -305,15 +309,7 @@ impl SessionConfig {
 
     /// Returns the session instructions, when configured.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::session::SessionConfig;
-    /// let config = SessionConfig::default().with_instructions("Answer briefly")?;
-    /// assert_eq!(config.instructions(), Some("Answer briefly"));
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::session::SessionConfig`] for a complete example.
     ///
     #[must_use]
     pub fn instructions(&self) -> Option<&str> {
@@ -322,16 +318,7 @@ impl SessionConfig {
 
     /// Returns the required input-audio media type, when enabled.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::session::SessionConfig;
-    /// let config = SessionConfig::default().with_input_audio("audio/pcm", true)?;
-    /// assert_eq!(config.input_audio_format(), Some("audio/pcm"));
-    /// assert!(config.input_transcription());
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::session::SessionConfig::with_input_audio`] for a complete example.
     ///
     #[must_use]
     pub fn input_audio_format(&self) -> Option<&str> {
@@ -342,16 +329,7 @@ impl SessionConfig {
 
     /// Returns the requested output-audio media type, when enabled.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::session::SessionConfig;
-    /// let config = SessionConfig::default().with_output_audio("audio/pcm", true)?;
-    /// assert_eq!(config.output_audio_format(), Some("audio/pcm"));
-    /// assert!(config.output_transcription());
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::session::SessionConfig::with_output_audio`] for a complete example.
     ///
     #[must_use]
     pub fn output_audio_format(&self) -> Option<&str> {
@@ -362,16 +340,7 @@ impl SessionConfig {
 
     /// Reports whether input transcription was requested.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::session::SessionConfig;
-    /// let config = SessionConfig::default().with_input_audio("audio/pcm", true)?;
-    /// assert_eq!(config.input_audio_format(), Some("audio/pcm"));
-    /// assert!(config.input_transcription());
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::session::SessionConfig::with_input_audio`] for a complete example.
     ///
     #[must_use]
     pub fn input_transcription(&self) -> bool {
@@ -382,16 +351,7 @@ impl SessionConfig {
 
     /// Reports whether output transcription was requested.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::session::SessionConfig;
-    /// let config = SessionConfig::default().with_output_audio("audio/pcm", true)?;
-    /// assert_eq!(config.output_audio_format(), Some("audio/pcm"));
-    /// assert!(config.output_transcription());
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::session::SessionConfig::with_output_audio`] for a complete example.
     ///
     #[must_use]
     pub fn output_transcription(&self) -> bool {
@@ -402,13 +362,7 @@ impl SessionConfig {
 
     /// Returns the configured turn-boundary policy.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::session::{SessionConfig, SessionTurnDetection};
-    /// let config = SessionConfig::default().with_turn_detection(SessionTurnDetection::Manual);
-    /// assert_eq!(config.turn_detection(), SessionTurnDetection::Manual);
-    /// ```
+    /// See [`crate::session::SessionConfig::with_turn_detection`] for a complete example.
     ///
     #[must_use]
     pub const fn turn_detection(&self) -> SessionTurnDetection {
@@ -417,18 +371,7 @@ impl SessionConfig {
 
     /// Returns the client functions available to the session.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::generation::{ProviderFunctionTool, JsonSchema};
-    /// let tool = ProviderFunctionTool::new("lookup", Some("Find a record".into()), JsonSchema::new(serde_json::json!({"type":"object"}))?)?;
-    /// use providers_kit::{session::SessionConfig, generation::ToolChoice};
-    /// let config = SessionConfig::default().with_functions(vec![tool], Some(ToolChoice::Auto))?;
-    /// assert_eq!(config.functions()[0].name(), "lookup");
-    /// assert_eq!(config.tool_choice(), Some(&ToolChoice::Auto));
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::session::SessionConfig::with_functions`] for a complete example.
     ///
     #[must_use]
     pub fn functions(&self) -> &[ProviderFunctionTool] {
@@ -437,18 +380,7 @@ impl SessionConfig {
 
     /// Returns the configured function-selection policy.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::generation::{ProviderFunctionTool, JsonSchema};
-    /// let tool = ProviderFunctionTool::new("lookup", Some("Find a record".into()), JsonSchema::new(serde_json::json!({"type":"object"}))?)?;
-    /// use providers_kit::{session::SessionConfig, generation::ToolChoice};
-    /// let config = SessionConfig::default().with_functions(vec![tool], Some(ToolChoice::Auto))?;
-    /// assert_eq!(config.functions()[0].name(), "lookup");
-    /// assert_eq!(config.tool_choice(), Some(&ToolChoice::Auto));
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::session::SessionConfig::with_functions`] for a complete example.
     ///
     #[must_use]
     pub const fn tool_choice(&self) -> Option<&ToolChoice> {
@@ -562,129 +494,31 @@ pub enum SessionEvent {
 /// Caller models return their concrete session implementation directly through
 /// [`crate::ModelBackend::Session`].
 ///
-/// This example requires valid credentials and a live model with native session
-/// support. Sessions are unique, mutable, and non-Clone. Consuming close settles
+/// Sessions are unique, mutable, and non-Clone. Consuming close settles
 /// the session transport; the Provider retains separate shared shutdown authority.
 /// Ordinary multi-turn generation instead uses messages and continuation.
 ///
-/// # Examples
-///
-/// ```no_run
-///
-/// # #[tokio::main(flavor = "current_thread")]
-/// # async fn main() -> Result<(), providers_kit::KitError> {
-/// use providers_kit::{Provider, ProviderBackend, ProviderConfig, config::{ApiKey, OpenAiConfig, ProviderKind, TransportConfig}};
-/// let provider = Provider::from_config(ProviderConfig::new(ProviderKind::OpenAi(OpenAiConfig::new(ApiKey::new("replace-with-your-key")?)), TransportConfig::default()))?;
-/// use providers_kit::{ModelBackend, ModelId, SessionBackend, session::{SessionConfig, SessionInput}};
-/// let model = provider.model(ModelId::new("your-exact-session-model-id")?)?;
-/// let observed = async {
-///     let mut session = model.open_session(SessionConfig::default()).await?;
-///     assert!(!session.id().is_empty());
-///     assert_eq!(session.model_id(), model.model_id());
-///     let closed = session.close().await;
-///     closed
-/// }.await;
-/// let cleanup = provider.shutdown().await;
-/// observed?;
-/// cleanup?;
-///
-/// # Ok(())
-/// # }
-/// ```
+/// See the [complete native turn](crate::session) for service setup and cleanup,
+/// or [`crate::ProviderBackend`] for an executable caller-owned session.
 ///
 pub trait SessionBackend: Send + 'static {
     /// Stable session identifier.
     ///
-    /// This example requires a live native session on a supporting exact model.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    ///
-    /// # #[tokio::main(flavor = "current_thread")]
-    /// # async fn main() -> Result<(), providers_kit::KitError> {
-    /// use providers_kit::{Provider, ProviderBackend, ProviderConfig, config::{ApiKey, OpenAiConfig, ProviderKind, TransportConfig}};
-    /// let provider = Provider::from_config(ProviderConfig::new(ProviderKind::OpenAi(OpenAiConfig::new(ApiKey::new("replace-with-your-key")?)), TransportConfig::default()))?;
-    /// use providers_kit::{ModelBackend, ModelId, SessionBackend, session::{SessionConfig, SessionInput}};
-    /// let model = provider.model(ModelId::new("your-exact-session-model-id")?)?;
-    /// let observed = async {
-    ///     let mut session = model.open_session(SessionConfig::default()).await?;
-    ///     assert!(!session.id().is_empty());
-    ///     assert_eq!(session.model_id(), model.model_id());
-    ///     let closed = session.close().await;
-    ///     closed
-    /// }.await;
-    /// let cleanup = provider.shutdown().await;
-    /// observed?;
-    /// cleanup?;
-    ///
-    /// # Ok(())
-    /// # }
-    /// ```
+    /// See [`crate::SessionBackend`] for a complete example.
     ///
     fn id(&self) -> &str;
     /// Exact selected model.
     ///
-    /// This example requires a live native session on a supporting exact model.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    ///
-    /// # #[tokio::main(flavor = "current_thread")]
-    /// # async fn main() -> Result<(), providers_kit::KitError> {
-    /// use providers_kit::{Provider, ProviderBackend, ProviderConfig, config::{ApiKey, OpenAiConfig, ProviderKind, TransportConfig}};
-    /// let provider = Provider::from_config(ProviderConfig::new(ProviderKind::OpenAi(OpenAiConfig::new(ApiKey::new("replace-with-your-key")?)), TransportConfig::default()))?;
-    /// use providers_kit::{ModelBackend, ModelId, SessionBackend, session::{SessionConfig, SessionInput}};
-    /// let model = provider.model(ModelId::new("your-exact-session-model-id")?)?;
-    /// let observed = async {
-    ///     let mut session = model.open_session(SessionConfig::default()).await?;
-    ///     assert!(!session.id().is_empty());
-    ///     assert_eq!(session.model_id(), model.model_id());
-    ///     let closed = session.close().await;
-    ///     closed
-    /// }.await;
-    /// let cleanup = provider.shutdown().await;
-    /// observed?;
-    /// cleanup?;
-    ///
-    /// # Ok(())
-    /// # }
-    /// ```
+    /// See [`crate::SessionBackend`] for a complete example.
     ///
     fn model_id(&self) -> &ModelId;
     /// Sends interactive input.
     ///
-    /// This example requires a live native session on a supporting exact model.
-    ///
     /// # Errors
     ///
-    /// Returns the owning input, unsupported, closed, transport, deadline, service-rejection, or protocol error. Consuming close does not make the session reusable.
+    /// Returns the owning input, unsupported, closed, transport, deadline, service-rejection, or protocol error.
     ///
-    /// # Examples
-    ///
-    /// ```no_run
-    ///
-    /// # #[tokio::main(flavor = "current_thread")]
-    /// # async fn main() -> Result<(), providers_kit::KitError> {
-    /// use providers_kit::{Provider, ProviderBackend, ProviderConfig, config::{ApiKey, OpenAiConfig, ProviderKind, TransportConfig}};
-    /// let provider = Provider::from_config(ProviderConfig::new(ProviderKind::OpenAi(OpenAiConfig::new(ApiKey::new("replace-with-your-key")?)), TransportConfig::default()))?;
-    /// use providers_kit::{ModelBackend, ModelId, SessionBackend, session::{SessionConfig, SessionInput}};
-    /// let model = provider.model(ModelId::new("your-exact-session-model-id")?)?;
-    /// let observed = async {
-    ///     let mut session = model.open_session(SessionConfig::default()).await?;
-    ///     let sent = session.send(SessionInput::Text { text: "Hello".into() }).await;
-    ///     let closed = session.close().await;
-    ///     sent?;
-    ///     closed
-    /// }.await;
-    /// let cleanup = provider.shutdown().await;
-    /// observed?;
-    /// cleanup?;
-    ///
-    /// # Ok(())
-    /// # }
-    /// ```
+    /// See the [complete session turn](crate::session) for bounded observation and cleanup.
     ///
     fn send(
         &mut self,
@@ -692,70 +526,25 @@ pub trait SessionBackend: Send + 'static {
     ) -> impl Future<Output = Result<(), KitError>> + Send + '_;
     /// Receives the next interactive event.
     ///
-    /// This example requires a live native session on a supporting exact model.
+    /// A delta or usage event does not finish the turn. Continue receiving until
+    /// its terminal event, as in the [complete session turn](crate::session).
     ///
     /// # Errors
     ///
-    /// Returns the owning input, unsupported, closed, transport, deadline, service-rejection, or protocol error. Consuming close does not make the session reusable.
+    /// Returns the owning input, unsupported, closed, transport, deadline, service-rejection, or protocol error.
     ///
-    /// # Examples
-    ///
-    /// ```no_run
-    ///
-    /// # #[tokio::main(flavor = "current_thread")]
-    /// # async fn main() -> Result<(), providers_kit::KitError> {
-    /// use providers_kit::{Provider, ProviderBackend, ProviderConfig, config::{ApiKey, OpenAiConfig, ProviderKind, TransportConfig}};
-    /// let provider = Provider::from_config(ProviderConfig::new(ProviderKind::OpenAi(OpenAiConfig::new(ApiKey::new("replace-with-your-key")?)), TransportConfig::default()))?;
-    /// use providers_kit::{ModelBackend, ModelId, SessionBackend, session::{SessionConfig, SessionInput}};
-    /// let model = provider.model(ModelId::new("your-exact-session-model-id")?)?;
-    /// let observed = async {
-    ///     let mut session = model.open_session(SessionConfig::default()).await?;
-    ///     let sent = session.send(SessionInput::Text { text: "Hello".into() }).await;
-    ///     let event = if sent.is_ok() { Some(session.recv().await) } else { None };
-    ///     let closed = session.close().await;
-    ///     sent?;
-    ///     if let Some(event) = event { let _event = event?; }
-    ///     closed
-    /// }.await;
-    /// let cleanup = provider.shutdown().await;
-    /// observed?;
-    /// cleanup?;
-    ///
-    /// # Ok(())
-    /// # }
-    /// ```
+    /// See the [complete session turn](crate::session) for bounded observation and cleanup.
     ///
     fn recv(&mut self) -> impl Future<Output = Result<SessionEvent, KitError>> + Send + '_;
     /// Closes the unique session and its transport.
     ///
-    /// This example requires a live native session on a supporting exact model.
+    /// Consuming close does not make the session reusable, even when it fails.
     ///
     /// # Errors
     ///
-    /// Returns the owning input, unsupported, closed, transport, deadline, service-rejection, or protocol error. Consuming close does not make the session reusable.
+    /// Returns the owning input, unsupported, closed, transport, deadline, service-rejection, or protocol error.
     ///
-    /// # Examples
-    ///
-    /// ```no_run
-    ///
-    /// # #[tokio::main(flavor = "current_thread")]
-    /// # async fn main() -> Result<(), providers_kit::KitError> {
-    /// use providers_kit::{Provider, ProviderBackend, ProviderConfig, config::{ApiKey, OpenAiConfig, ProviderKind, TransportConfig}};
-    /// let provider = Provider::from_config(ProviderConfig::new(ProviderKind::OpenAi(OpenAiConfig::new(ApiKey::new("replace-with-your-key")?)), TransportConfig::default()))?;
-    /// use providers_kit::{ModelBackend, ModelId, SessionBackend, session::{SessionConfig, SessionInput}};
-    /// let model = provider.model(ModelId::new("your-exact-session-model-id")?)?;
-    /// let observed = async {
-    ///     let mut session = model.open_session(SessionConfig::default()).await?;
-    ///     let closed = session.close().await;
-    ///     closed
-    /// }.await;
-    /// let cleanup = provider.shutdown().await;
-    /// observed?;
-    /// cleanup?;
-    ///
-    /// # Ok(())
-    /// # }
-    /// ```
+    /// See the [complete session turn](crate::session) for bounded observation and cleanup.
     ///
     fn close(self) -> impl Future<Output = Result<(), KitError>> + Send;
 }
@@ -788,35 +577,11 @@ pub(crate) enum SessionInner {
 
 /// Unique opaque provider-native interactive session supplied for OpenAI models.
 ///
-/// This example requires valid credentials and a live model with native session
-/// support. Sessions are unique, mutable, and non-Clone. Consuming close settles
+/// Sessions are unique, mutable, and non-Clone. Consuming close settles
 /// the session transport; the Provider retains separate shared shutdown authority.
 /// Ordinary multi-turn generation instead uses messages and continuation.
 ///
-/// # Examples
-///
-/// ```no_run
-///
-/// # #[tokio::main(flavor = "current_thread")]
-/// # async fn main() -> Result<(), providers_kit::KitError> {
-/// use providers_kit::{Provider, ProviderBackend, ProviderConfig, config::{ApiKey, OpenAiConfig, ProviderKind, TransportConfig}};
-/// let provider = Provider::from_config(ProviderConfig::new(ProviderKind::OpenAi(OpenAiConfig::new(ApiKey::new("replace-with-your-key")?)), TransportConfig::default()))?;
-/// use providers_kit::{ModelBackend, ModelId, SessionBackend, session::{SessionConfig, SessionInput}};
-/// let model = provider.model(ModelId::new("your-exact-session-model-id")?)?;
-/// let observed = async {
-///     let mut session = model.open_session(SessionConfig::default()).await?;
-///     assert!(!session.id().is_empty());
-///     assert_eq!(session.model_id(), model.model_id());
-///     let closed = session.close().await;
-///     closed
-/// }.await;
-/// let cleanup = provider.shutdown().await;
-/// observed?;
-/// cleanup?;
-///
-/// # Ok(())
-/// # }
-/// ```
+/// See [`crate::SessionBackend`] for a complete example.
 ///
 pub struct Session {
     inner: SessionInner,

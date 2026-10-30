@@ -32,6 +32,9 @@
 //!     Ok::<_, providers_kit::KitError>(response)
 //! }.await;
 //! let cleanup = provider.shutdown().await;
+//! if let Err(error) = &cleanup {
+//!     eprintln!("Cleanup failed: {error}");
+//! }
 //! let _ordered_vectors = work?;
 //! cleanup?;
 //! # Ok(())
@@ -74,17 +77,7 @@ impl EmbedRequest {
     ///
     /// Returns an input error if the input list is empty or any text is whitespace-only.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::embedding::EmbedRequest;
-    /// let request = EmbedRequest::new(vec!["search document".into()])?
-    ///     .with_dimensions(std::num::NonZeroU32::new(128).unwrap());
-    /// assert_eq!(request.inputs(), &["search document"]);
-    /// assert_eq!(request.dimensions().unwrap().get(), 128);
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::embedding::EmbedRequest`] for a complete example.
     ///
     pub fn new(inputs: Vec<String>) -> Result<Self, KitError> {
         if inputs.is_empty() || inputs.iter().any(|value| value.trim().is_empty()) {
@@ -105,17 +98,7 @@ impl EmbedRequest {
     ///
     /// The Model is already selected; dimensionality support is checked by the model operation.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::embedding::EmbedRequest;
-    /// let request = EmbedRequest::new(vec!["search document".into()])?
-    ///     .with_dimensions(std::num::NonZeroU32::new(128).unwrap());
-    /// assert_eq!(request.inputs(), &["search document"]);
-    /// assert_eq!(request.dimensions().unwrap().get(), 128);
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::embedding::EmbedRequest`] for a complete example.
     ///
     #[must_use]
     pub fn with_dimensions(mut self, dimensions: NonZeroU32) -> Self {
@@ -125,17 +108,7 @@ impl EmbedRequest {
 
     /// Returns text inputs in caller order.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::embedding::EmbedRequest;
-    /// let request = EmbedRequest::new(vec!["search document".into()])?
-    ///     .with_dimensions(std::num::NonZeroU32::new(128).unwrap());
-    /// assert_eq!(request.inputs(), &["search document"]);
-    /// assert_eq!(request.dimensions().unwrap().get(), 128);
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::embedding::EmbedRequest`] for a complete example.
     ///
     #[must_use]
     pub fn inputs(&self) -> &[String] {
@@ -144,17 +117,7 @@ impl EmbedRequest {
 
     /// Returns the requested output dimensionality.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::embedding::EmbedRequest;
-    /// let request = EmbedRequest::new(vec!["search document".into()])?
-    ///     .with_dimensions(std::num::NonZeroU32::new(128).unwrap());
-    /// assert_eq!(request.inputs(), &["search document"]);
-    /// assert_eq!(request.dimensions().unwrap().get(), 128);
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::embedding::EmbedRequest`] for a complete example.
     ///
     #[must_use]
     pub const fn dimensions(&self) -> Option<NonZeroU32> {

@@ -23,7 +23,10 @@
 //! # #[tokio::main(flavor = "current_thread")]
 //! # async fn main() -> Result<(), ToolError> {
 //! let name = ToolName::new("ask")?;
-//! let mut info = ToolInfo::new(name.clone(), JsonSchema::strict(serde_json::json!({"type":"object"})));
+//! let mut info = ToolInfo::new(
+//!     name.clone(),
+//!     JsonSchema::strict(serde_json::json!({"type":"object"})),
+//! );
 //! info.interactions = ToolInteractionCapabilities { text: true, ..Default::default() };
 //! let tools = Toolset::local(vec![ToolRegistration::interactive(info, |_input, context| async move {
 //!     let answer = context.request_text("Which city?", false).await?;
@@ -44,6 +47,9 @@
 //!     Ok::<(), ToolError>(())
 //! }.await;
 //! let cleanup = tools.shutdown().await;
+//! if let Err(error) = &cleanup {
+//!     eprintln!("Cleanup failed: {error}");
+//! }
 //! work?;
 //! cleanup?;
 //! # Ok(())
@@ -79,14 +85,30 @@ use crate::{
 /// # #[tokio::main(flavor = "current_thread")]
 /// # async fn main() -> Result<(), tools_kit::ToolError> {
 /// use tools_kit::{declaration::{ToolInfo, ToolName}, schema::JsonSchema};
-/// let info = ToolInfo::new(ToolName::new("ping")?, JsonSchema::strict(serde_json::json!({"type":"object"})));
+/// let info = ToolInfo::new(
+///     ToolName::new("ping")?,
+///     JsonSchema::strict(serde_json::json!({"type":"object"})),
+/// );
 /// use tools_kit::{local::ToolRegistration, execution::ToolResult};
 /// let registration = ToolRegistration::function(info, |_| async { Ok(ToolResult::text("pong")) });
-/// use tools_kit::{Toolset, ToolsetBackend, ToolHandlerBackend, execution::{ToolHandlerInput, ToolHandlerOutput, ToolInvocation}};
+/// use tools_kit::{
+///     ToolHandlerBackend, Toolset, ToolsetBackend,
+///     execution::{ToolHandlerInput, ToolHandlerOutput, ToolInvocation},
+/// };
 /// let tools = Toolset::local(vec![registration])?;
-/// let mut handler = tools.tool_handler(ToolName::new("ping")?).await?;
-/// let result = handler.step(ToolHandlerInput::Invoke(ToolInvocation { call_id: None, arguments: serde_json::json!({}) })).await;
+/// let result = async {
+///     let mut handler = tools.tool_handler(ToolName::new("ping")?).await?;
+///     handler
+///         .step(ToolHandlerInput::Invoke(ToolInvocation {
+///             call_id: None,
+///             arguments: serde_json::json!({}),
+///         }))
+///         .await
+/// }.await;
 /// let cleanup = tools.shutdown().await;
+/// if let Err(error) = &cleanup {
+///     eprintln!("Cleanup failed: {error}");
+/// }
 /// assert!(matches!(result?, ToolHandlerOutput::Completed(_)));
 /// cleanup?;
 ///
@@ -168,9 +190,19 @@ impl RegisteredTool {
 ///
 /// # #[tokio::main(flavor = "current_thread")]
 /// # async fn main() -> Result<(), tools_kit::ToolError> {
-/// use tools_kit::{Toolset, ToolsetBackend, ToolHandlerBackend, declaration::{ToolInfo, ToolName}, execution::{ToolHandlerInput, ToolHandlerOutput, ToolInvocation, ToolResult}, interaction::{ToolInteractionCapabilities, ToolInteractionResponse}, local::ToolRegistration, schema::JsonSchema};
+/// use tools_kit::{
+///     ToolHandlerBackend, Toolset, ToolsetBackend,
+///     declaration::{ToolInfo, ToolName},
+///     execution::{ToolHandlerInput, ToolHandlerOutput, ToolInvocation, ToolResult},
+///     interaction::{ToolInteractionCapabilities, ToolInteractionResponse},
+///     local::ToolRegistration,
+///     schema::JsonSchema,
+/// };
 /// let name = ToolName::new("ask")?;
-/// let mut info = ToolInfo::new(name.clone(), JsonSchema::strict(serde_json::json!({"type":"object"})));
+/// let mut info = ToolInfo::new(
+///     name.clone(),
+///     JsonSchema::strict(serde_json::json!({"type":"object"})),
+/// );
 /// info.interactions = ToolInteractionCapabilities { text: true, ..Default::default() };
 /// let registration = ToolRegistration::interactive(info, |_input, context| async move {
 ///     let city = context.request_text("Which city?", false).await?;
@@ -187,6 +219,9 @@ impl RegisteredTool {
 ///     Ok::<(), tools_kit::ToolError>(())
 /// }.await;
 /// let cleanup = tools.shutdown().await;
+/// if let Err(error) = &cleanup {
+///     eprintln!("Cleanup failed: {error}");
+/// }
 /// observed?;
 /// cleanup?;
 ///
@@ -225,27 +260,7 @@ impl ToolRegistration {
 
     /// Registers a non-interactive local handler.
     ///
-    /// # Examples
-    ///
-    /// ```
-    ///
-    /// # #[tokio::main(flavor = "current_thread")]
-    /// # async fn main() -> Result<(), tools_kit::ToolError> {
-    /// use tools_kit::{declaration::{ToolInfo, ToolName}, schema::JsonSchema};
-    /// let info = ToolInfo::new(ToolName::new("ping")?, JsonSchema::strict(serde_json::json!({"type":"object"})));
-    /// use tools_kit::{local::ToolRegistration, execution::ToolResult};
-    /// let registration = ToolRegistration::function(info, |_| async { Ok(ToolResult::text("pong")) });
-    /// use tools_kit::{Toolset, ToolsetBackend, ToolHandlerBackend, execution::{ToolHandlerInput, ToolHandlerOutput, ToolInvocation}};
-    /// let tools = Toolset::local(vec![registration])?;
-    /// let mut handler = tools.tool_handler(ToolName::new("ping")?).await?;
-    /// let result = handler.step(ToolHandlerInput::Invoke(ToolInvocation { call_id: None, arguments: serde_json::json!({}) })).await;
-    /// let cleanup = tools.shutdown().await;
-    /// assert!(matches!(result?, ToolHandlerOutput::Completed(_)));
-    /// cleanup?;
-    ///
-    /// # Ok(())
-    /// # }
-    /// ```
+    /// See [`crate::local::ToolRegistration`] for a complete example.
     ///
     #[must_use]
     pub fn function<F, Fut>(info: ToolInfo, handler: F) -> Self
@@ -265,9 +280,19 @@ impl ToolRegistration {
     ///
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() -> Result<(), tools_kit::ToolError> {
-    /// use tools_kit::{Toolset, ToolsetBackend, ToolHandlerBackend, declaration::{ToolInfo, ToolName}, execution::{ToolHandlerInput, ToolHandlerOutput, ToolInvocation, ToolResult}, interaction::{ToolInteractionCapabilities, ToolInteractionResponse}, local::ToolRegistration, schema::JsonSchema};
+    /// use tools_kit::{
+    ///     ToolHandlerBackend, Toolset, ToolsetBackend,
+    ///     declaration::{ToolInfo, ToolName},
+    ///     execution::{ToolHandlerInput, ToolHandlerOutput, ToolInvocation, ToolResult},
+    ///     interaction::{ToolInteractionCapabilities, ToolInteractionResponse},
+    ///     local::ToolRegistration,
+    ///     schema::JsonSchema,
+    /// };
     /// let name = ToolName::new("ask")?;
-    /// let mut info = ToolInfo::new(name.clone(), JsonSchema::strict(serde_json::json!({"type":"object"})));
+    /// let mut info = ToolInfo::new(
+    ///     name.clone(),
+    ///     JsonSchema::strict(serde_json::json!({"type":"object"})),
+    /// );
     /// info.interactions = ToolInteractionCapabilities { text: true, ..Default::default() };
     /// let registration = ToolRegistration::interactive(info, |_input, context| async move {
     ///     let city = context.request_text("Which city?", false).await?;
@@ -286,6 +311,9 @@ impl ToolRegistration {
     ///     Ok::<(), tools_kit::ToolError>(())
     /// }.await;
     /// let cleanup = tools.shutdown().await;
+    /// if let Err(error) = &cleanup {
+    ///     eprintln!("Cleanup failed: {error}");
+    /// }
     /// observed?;
     /// cleanup?;
     ///
@@ -332,6 +360,9 @@ impl ToolRegistration {
     ///     Ok::<(), tools_kit::ToolError>(())
     /// }.await;
     /// let cleanup = tools.shutdown().await;
+    /// if let Err(error) = &cleanup {
+    ///     eprintln!("Cleanup failed: {error}");
+    /// }
     /// observed?;
     /// cleanup?;
     ///
@@ -396,13 +427,19 @@ impl ToolRegistration {
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() -> Result<(), tools_kit::ToolError> {
     /// use tools_kit::{declaration::{ToolInfo, ToolName}, schema::JsonSchema};
-    /// let info = ToolInfo::new(ToolName::new("ping")?, JsonSchema::strict(serde_json::json!({"type":"object"})));
+    /// let info = ToolInfo::new(
+    ///     ToolName::new("ping")?,
+    ///     JsonSchema::strict(serde_json::json!({"type":"object"})),
+    /// );
     /// use tools_kit::{local::ToolRegistration, execution::ToolResult};
     /// let registration = ToolRegistration::function(info, |_| async { Ok(ToolResult::text("pong")) });
     /// use tools_kit::{Toolset, ToolsetBackend};
     /// let tools = Toolset::local(vec![registration.description("Responds with pong")])?;
     /// let inventory = tools.list_tools().await;
     /// let cleanup = tools.shutdown().await;
+    /// if let Err(error) = &cleanup {
+    ///     eprintln!("Cleanup failed: {error}");
+    /// }
     /// assert_eq!(inventory?[0].description.as_deref(), Some("Responds with pong"));
     /// cleanup?;
     ///
@@ -424,7 +461,10 @@ impl ToolRegistration {
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() -> Result<(), tools_kit::ToolError> {
     /// use tools_kit::{declaration::{ToolInfo, ToolName}, schema::JsonSchema};
-    /// let info = ToolInfo::new(ToolName::new("ping")?, JsonSchema::strict(serde_json::json!({"type":"object"})));
+    /// let info = ToolInfo::new(
+    ///     ToolName::new("ping")?,
+    ///     JsonSchema::strict(serde_json::json!({"type":"object"})),
+    /// );
     /// use tools_kit::{local::ToolRegistration, execution::ToolResult};
     /// let registration = ToolRegistration::function(info, |_| async { Ok(ToolResult::text("pong")) });
     /// use tools_kit::{Toolset, ToolsetBackend, interaction::ToolInteractionCapabilities};
@@ -432,6 +472,9 @@ impl ToolRegistration {
     /// let tools = Toolset::local(vec![registration])?;
     /// let inventory = tools.list_tools().await;
     /// let cleanup = tools.shutdown().await;
+    /// if let Err(error) = &cleanup {
+    ///     eprintln!("Cleanup failed: {error}");
+    /// }
     /// assert!(!inventory?[0].interactions.text);
     /// cleanup?;
     ///
@@ -531,39 +574,7 @@ impl ToolInvocationContext {
     ///
     /// Returns [`ToolError::UndeclaredInteraction`] for absent text or multiline capability, [`ToolError::InvalidInteraction`] for an invalid reply, or the corresponding decline, cancellation, or closure error.
     ///
-    /// # Examples
-    ///
-    /// ```
-    ///
-    /// # #[tokio::main(flavor = "current_thread")]
-    /// # async fn main() -> Result<(), tools_kit::ToolError> {
-    /// use tools_kit::{Toolset, ToolsetBackend, ToolHandlerBackend, declaration::{ToolInfo, ToolName}, execution::{ToolHandlerInput, ToolHandlerOutput, ToolInvocation, ToolResult}, interaction::{ToolInteractionCapabilities, ToolInteractionResponse}, local::ToolRegistration, schema::JsonSchema};
-    /// let name = ToolName::new("ask")?;
-    /// let mut info = ToolInfo::new(name.clone(), JsonSchema::strict(serde_json::json!({"type":"object"})));
-    /// info.interactions = ToolInteractionCapabilities { text: true, ..Default::default() };
-    /// let registration = ToolRegistration::interactive(info, |_input, context| async move {
-    ///     let city = context.request_text("Which city?", false).await?;
-    ///     Ok(ToolResult::text(city))
-    /// });
-    /// let tools = Toolset::local(vec![registration])?;
-    /// let observed = async {
-    ///     let mut handler = tools.tool_handler(name).await?;
-    ///     let pending = handler.step(ToolHandlerInput::Invoke(ToolInvocation { call_id: None, arguments: serde_json::json!({}) })).await?;
-    ///     let ToolHandlerOutput::Interaction(request) = pending else { panic!("interaction expected") };
-    ///     let reply = ToolInteractionResponse::submit(request.id, serde_json::json!("Chicago"));
-    ///     let done = handler.step(ToolHandlerInput::Interaction(reply)).await?;
-    ///     let ToolHandlerOutput::Completed(result) = done else { panic!("completion expected") };
-    ///     assert!(!result.is_error);
-    ///     assert!(matches!(result.content.as_slice(), [tools_kit::execution::ToolContent::Text { text, .. }] if text == "Chicago"));
-    ///     Ok::<(), tools_kit::ToolError>(())
-    /// }.await;
-    /// let cleanup = tools.shutdown().await;
-    /// observed?;
-    /// cleanup?;
-    ///
-    /// # Ok(())
-    /// # }
-    /// ```
+    /// See [`crate::local::ToolRegistration::interactive`] for a complete example.
     ///
     pub async fn request_text(
         &self,
@@ -620,9 +631,19 @@ impl ToolInvocationContext {
     ///
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() -> Result<(), tools_kit::ToolError> {
-    /// use tools_kit::{Toolset, ToolsetBackend, ToolHandlerBackend, declaration::{ToolInfo, ToolName}, execution::{ToolHandlerInput, ToolHandlerOutput, ToolInvocation, ToolResult}, interaction::{ToolInteractionCapabilities, ToolInteractionResponse}, local::ToolRegistration, schema::JsonSchema};
+    /// use tools_kit::{
+    ///     ToolHandlerBackend, Toolset, ToolsetBackend,
+    ///     declaration::{ToolInfo, ToolName},
+    ///     execution::{ToolHandlerInput, ToolHandlerOutput, ToolInvocation, ToolResult},
+    ///     interaction::{ToolInteractionCapabilities, ToolInteractionResponse},
+    ///     local::ToolRegistration,
+    ///     schema::JsonSchema,
+    /// };
     /// let name = ToolName::new("ask")?;
-    /// let mut info = ToolInfo::new(name.clone(), JsonSchema::strict(serde_json::json!({"type":"object"})));
+    /// let mut info = ToolInfo::new(
+    ///     name.clone(),
+    ///     JsonSchema::strict(serde_json::json!({"type":"object"})),
+    /// );
     /// info.interactions = ToolInteractionCapabilities { form: true, form_schema_validation: true, ..Default::default() };
     /// let registration = ToolRegistration::interactive(info, |_input, context| async move {
     ///     let city = context.request_form("Which city?", serde_json::json!({"type":"object","required":["city"],"properties":{"city":{"type":"string"}}}), true).await?;
@@ -641,6 +662,9 @@ impl ToolInvocationContext {
     ///     Ok::<(), tools_kit::ToolError>(())
     /// }.await;
     /// let cleanup = tools.shutdown().await;
+    /// if let Err(error) = &cleanup {
+    ///     eprintln!("Cleanup failed: {error}");
+    /// }
     /// observed?;
     /// cleanup?;
     ///

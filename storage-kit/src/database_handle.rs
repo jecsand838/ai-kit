@@ -18,94 +18,65 @@ use crate::{
 /// fail before mutation, and responses preserve real ids, counts and score
 /// semantics. Supporting DTOs live in [`crate::database`].
 ///
-/// # Examples
+/// # Caller-owned catalog example
+///
+/// This small test double validates one request and returns an empty catalog.
+/// It demonstrates direct trait consumption, not a database engine. Other
+/// operations reject explicitly; no native storage or service is constructed.
 ///
 /// ```
-/// use storage_kit::{Database, DatabaseBackend};
-/// use storage_kit::database::config::{DatabaseConfig, LanceConfig};
-/// use storage_kit::database::CapabilitySet;
-/// # tokio::runtime::Runtime::new()?.block_on(async {
-/// let database = Database::connect(DatabaseConfig::lance(LanceConfig::embedded_path("memory://"))).await?;
-/// let capabilities = database.capabilities();
-/// assert!(capabilities.contains(CapabilitySet::FILTERING));
-/// # Ok::<(), storage_kit::StorageError>(())
-/// # })?;
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// ```
-///
-/// # Caller-owned exhaustive composition
-///
-/// A caller can choose a database once and keep dispatch concrete. Here `Primary`
-/// and `Archive` are application roles over real supplied stores, not new backend
-/// capabilities. Every request and error is delegated unchanged. The same pattern
-/// can contain different concrete implementations of this trait; there is no
-/// normalization constructor and no obligation for the caller root to be Clone.
-///
-/// ```
-/// use storage_kit::{Database, DatabaseBackend, StorageError};
+/// use storage_kit::{DatabaseBackend, StorageError};
 /// use storage_kit::database::CapabilitySet;
 /// use storage_kit::database::catalog::{CatalogRequest, CatalogResponse, ListCollectionsRequest};
-/// use storage_kit::database::data::{DataRequest, DataResponse};
-/// use storage_kit::database::query::{QueryRequest, QueryResponse};
-/// use storage_kit::database::index::{IndexRequest, IndexResponse};
-/// use storage_kit::database::config::{DatabaseConfig, LanceConfig};
+/// # use storage_kit::database::data::{DataRequest, DataResponse};
+/// # use storage_kit::database::query::{QueryRequest, QueryResponse};
+/// # use storage_kit::database::index::{IndexRequest, IndexResponse};
 ///
-/// enum ApplicationDatabase { Primary(Database), Archive(Database) }
-/// impl DatabaseBackend for ApplicationDatabase {
-///     fn capabilities(&self) -> CapabilitySet {
-///         match self { Self::Primary(db) => db.capabilities(), Self::Archive(db) => db.capabilities() }
-///     }
+/// struct EmptyCatalog;
+/// impl DatabaseBackend for EmptyCatalog {
+///     fn capabilities(&self) -> CapabilitySet { CapabilitySet::empty() }
 ///     async fn catalog(&self, request: CatalogRequest) -> Result<CatalogResponse, StorageError> {
-///         match self { Self::Primary(db) => db.catalog(request).await, Self::Archive(db) => db.catalog(request).await }
+///         assert_eq!(request, CatalogRequest::ListCollections(ListCollectionsRequest {
+///             namespace: Vec::new(), limit: Some(10), start_after: None,
+///         }));
+///         Ok(CatalogResponse::Collections(Vec::new()))
 ///     }
-///     async fn data(&self, request: DataRequest) -> Result<DataResponse, StorageError> {
-///         match self { Self::Primary(db) => db.data(request).await, Self::Archive(db) => db.data(request).await }
-///     }
-///     async fn query(&self, request: QueryRequest) -> Result<QueryResponse, StorageError> {
-///         match self { Self::Primary(db) => db.query(request).await, Self::Archive(db) => db.query(request).await }
-///     }
-///     async fn index(&self, request: IndexRequest) -> Result<IndexResponse, StorageError> {
-///         match self { Self::Primary(db) => db.index(request).await, Self::Archive(db) => db.index(request).await }
-///     }
+/// #     async fn data(&self, _: DataRequest) -> Result<DataResponse, StorageError> {
+/// #         Err(StorageError::unsupported_capability("data", "catalog-only example"))
+/// #     }
+/// #     async fn query(&self, _: QueryRequest) -> Result<QueryResponse, StorageError> {
+/// #         Err(StorageError::unsupported_capability("query", "catalog-only example"))
+/// #     }
+/// #     async fn index(&self, _: IndexRequest) -> Result<IndexResponse, StorageError> {
+/// #         Err(StorageError::unsupported_capability("index", "catalog-only example"))
+/// #     }
 /// }
 /// # tokio::runtime::Runtime::new()?.block_on(async {
-/// let primary = ApplicationDatabase::Primary(Database::connect(
-///     DatabaseConfig::lance(LanceConfig::embedded_path("memory://")),
-/// ).await?);
-/// let archive = ApplicationDatabase::Archive(Database::connect(
-///     DatabaseConfig::lance(LanceConfig::embedded_path("memory://")),
-/// ).await?);
-/// for selected in [&primary, &archive] {
-///     let CatalogResponse::Collections(page) = selected.catalog(CatalogRequest::ListCollections(
-///         ListCollectionsRequest { namespace: Vec::new(), limit: Some(10), start_after: None },
-///     )).await? else { panic!("catalog listing returns collections") };
-///     assert!(page.is_empty());
-/// }
-/// drop((primary, archive));
+/// let database = EmptyCatalog;
+/// let response = database.catalog(CatalogRequest::ListCollections(ListCollectionsRequest {
+///     namespace: Vec::new(), limit: Some(10), start_after: None,
+/// })).await?;
+/// let CatalogResponse::Collections(collections) = response else {
+///     panic!("expected the catalog response");
+/// };
+/// assert!(collections.is_empty());
+/// assert!(database.capabilities().is_empty());
 /// # Ok::<(), StorageError>(())
 /// # })?;
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
+///
+/// An application may compose different implementations in its own exhaustive
+/// enum, forwarding requests and errors unchanged. See the
+/// [executable caller composition tests](https://github.com/jecsand838/ai-kit/blob/main/storage-kit/tests/mock_contracts.rs).
+/// The [local collection workflow](crate::database) uses real embedded storage.
 pub trait DatabaseBackend: Send + Sync + 'static {
     /// Returns optional retained capabilities.
     ///
     /// Use this to discover optional operation families, not to identify the
     /// implementation or assume an arbitrary request will succeed.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use storage_kit::{Database, DatabaseBackend};
-    /// use storage_kit::database::config::{DatabaseConfig, LanceConfig};
-    /// use storage_kit::database::CapabilitySet;
-    /// # tokio::runtime::Runtime::new()?.block_on(async {
-    /// let database = Database::connect(DatabaseConfig::lance(LanceConfig::embedded_path("memory://"))).await?;
-    /// let optional = database.capabilities();
-    /// assert!(optional.contains(CapabilitySet::FILTERING));
-    /// # Ok::<(), storage_kit::StorageError>(())
-    /// # })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See the [caller-owned catalog example](DatabaseBackend) for an executable example.
     fn capabilities(&self) -> CapabilitySet;
 
     /// Executes a retained catalog operation.
@@ -119,22 +90,7 @@ pub trait DatabaseBackend: Send + Sync + 'static {
     /// operations, and native connection, deadline, or execution failures. An
     /// unsupported operation must fail before mutation.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use storage_kit::{Database, DatabaseBackend};
-    /// use storage_kit::database::config::{DatabaseConfig, LanceConfig};
-    /// use storage_kit::database::catalog::{CatalogRequest, CatalogResponse, ListCollectionsRequest};
-    /// # tokio::runtime::Runtime::new()?.block_on(async {
-    /// let database = Database::connect(DatabaseConfig::lance(LanceConfig::embedded_path("memory://"))).await?;
-    /// let response = database.catalog(CatalogRequest::ListCollections(ListCollectionsRequest {
-    ///     namespace: Vec::new(), limit: Some(10), start_after: None,
-    /// })).await?;
-    /// assert!(matches!(response, CatalogResponse::Collections(_)));
-    /// # Ok::<(), storage_kit::StorageError>(())
-    /// # })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See the [caller-owned catalog example](DatabaseBackend) for an executable example.
     fn catalog(
         &self,
         request: CatalogRequest,
@@ -153,28 +109,7 @@ pub trait DatabaseBackend: Send + Sync + 'static {
     /// read-only policy, serialization failures, and native execution/deadline
     /// failures. Unsupported behavior must be rejected before mutation.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use storage_kit::{Database, DatabaseBackend};
-    /// use storage_kit::database::config::{DatabaseConfig, LanceConfig};
-    /// use storage_kit::database::StorageLocator;
-    /// use storage_kit::database::catalog::{CatalogRequest, CreateCollectionRequest, CreateCollectionMode};
-    /// use storage_kit::database::data::{DataRecord, DataRequest, DataResponse, CountRequest};
-    /// # tokio::runtime::Runtime::new()?.block_on(async {
-    /// let database = Database::connect(DatabaseConfig::lance(LanceConfig::embedded_path("memory://"))).await?;
-    /// let locator = StorageLocator::new("documents");
-    /// database.catalog(CatalogRequest::CreateCollection(CreateCollectionRequest {
-    ///     locator: locator.clone(), schema: None,
-    ///     records: vec![DataRecord::without_id().json_field("text", serde_json::json!("example"))],
-    ///     mode: CreateCollectionMode::Create,
-    /// })).await?;
-    /// let response = database.data(DataRequest::Count(CountRequest { locator, filter: None })).await?;
-    /// assert!(matches!(response, DataResponse::Count(1)));
-    /// # Ok::<(), storage_kit::StorageError>(())
-    /// # })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See the [local collection workflow](crate::database) for an executable example.
     fn data(
         &self,
         request: DataRequest,

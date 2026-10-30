@@ -16,9 +16,11 @@ use crate::{AppError, WorkspaceId};
 /// An explicit source error is an action failure, including
 /// [`AppError::Integration`]. A captured construction or polling panic is an
 /// execution failure; an App activation deadline is a timeout failure. EOF
-/// without a completed result succeeds with no output. Before storage commit
-/// admission, these outcomes, owning drop and abort discard staged workflow
-/// state and preserve the prior action position. None automatically retries.
+/// without a completed result is not an error, but commits no action or output:
+/// the prior action position remains available for a later explicit execution.
+/// Before storage commit admission, these outcomes, owning drop and abort discard
+/// staged workflow state and preserve the prior action position. None automatically
+/// retries.
 ///
 /// The caller owns the source's internal I/O, cancellation, independently spawned
 /// tasks and external reconciliation. Workflow-state rollback does not undo
@@ -85,33 +87,7 @@ pub trait ActionBackend: Send + Sync + 'static {
 
     /// Returns the stable declaration validated when App binds the inventory.
     ///
-    /// # Example
-    ///
-    /// ```
-    /// use app_kit::{AppError, workflow::{ActionBackend, ActionDeclaration, ActionEvent,
-    ///     ActionMode, ActionRequest, StateChange}};
-    /// use serde_json::{Map, Value};
-    /// struct Increment { declaration: ActionDeclaration }
-    /// impl ActionBackend for Increment {
-    ///     type Stream = futures_util::stream::Iter<std::vec::IntoIter<Result<ActionEvent, AppError>>>;
-    ///     fn declaration(&self) -> &ActionDeclaration { &self.declaration }
-    ///     fn start(&self, request: ActionRequest) -> Self::Stream {
-    ///         let count = request.state.values()["count"].as_i64().unwrap() + 1;
-    ///         futures_util::stream::iter(vec![Ok(ActionEvent::Completed {
-    ///             result: Map::from_iter([("new_count".into(), Value::from(count))]),
-    ///             writes: vec![StateChange::Increment { values: vec![("count".into(), Value::from(1))] }],
-    ///         })])
-    ///     }
-    /// }
-    /// let action = Increment { declaration: ActionDeclaration {
-    ///     key: "increment".into(), revision: "r1".into(), reads: vec!["count".into()],
-    ///     writes: vec!["count".into()], required_inputs: Vec::new(), optional_inputs: Vec::new(),
-    ///     bound_inputs: Map::new(), default_inputs: Map::new(), tags: vec!["counter".into()],
-    ///     source: Some("increment count by one".into()), mode: ActionMode::Both,
-    /// } };
-    /// assert_eq!(action.declaration().reads, ["count"]);
-    /// assert_eq!(action.declaration().revision, "r1");
-    /// ```
+    /// See [the complete action implementation](ActionBackend).
     fn declaration(&self) -> &ActionDeclaration;
 
     /// Constructs the source for one attempt without performing external work.
@@ -122,55 +98,7 @@ pub trait ActionBackend: Send + Sync + 'static {
     /// no action. The action owns cancellation and reconciliation of its own I/O and
     /// spawned tasks. State rollback cannot undo caller external effects.
     ///
-    /// # Example
-    ///
-    /// ```
-    /// use app_kit::{AppError, workflow::{ActionBackend, ActionDeclaration, ActionEvent,
-    ///     ActionMode, ActionRequest, StateChange}};
-    /// use serde_json::{Map, Value};
-    /// struct Increment { declaration: ActionDeclaration }
-    /// impl ActionBackend for Increment {
-    ///     type Stream = futures_util::stream::Iter<std::vec::IntoIter<Result<ActionEvent, AppError>>>;
-    ///     fn declaration(&self) -> &ActionDeclaration { &self.declaration }
-    ///     fn start(&self, request: ActionRequest) -> Self::Stream {
-    ///         let count = request.state.values()["count"].as_i64().unwrap() + 1;
-    ///         futures_util::stream::iter(vec![Ok(ActionEvent::Completed {
-    ///             result: Map::from_iter([("new_count".into(), Value::from(count))]),
-    ///             writes: vec![StateChange::Increment { values: vec![("count".into(), Value::from(1))] }],
-    ///         })])
-    ///     }
-    /// }
-    /// let action = Increment { declaration: ActionDeclaration {
-    ///     key: "increment".into(), revision: "r1".into(), reads: vec!["count".into()],
-    ///     writes: vec!["count".into()], required_inputs: Vec::new(), optional_inputs: Vec::new(),
-    ///     bound_inputs: Map::new(), default_inputs: Map::new(), tags: vec!["counter".into()],
-    ///     source: Some("increment count by one".into()), mode: ActionMode::Both,
-    /// } };
-    /// use app_kit::workflow::{ActionContext, WorkflowState};
-    /// let request = ActionRequest {
-    ///     state: WorkflowState::new(Map::from_iter([("count".into(), Value::from(2))]))?,
-    ///     inputs: Map::new(), context: ActionContext {
-    ///     workspace: "appws_8a7c251e-b5b8-4d9e-8f0b-123456789abc".parse()?,
-    ///     workflow: "counter".parse()?,
-    ///     run: "run_8a7c251e-b5b8-4d9e-8f0b-123456789abc".parse()?,
-    ///     occurrence: "00000000000040008000000000000001".into(),
-    ///     checkpoint: 0, action_ordinal: 0, node: "increment".into(), attempt: 0,
-    ///     mode: ActionMode::Asynchronous, parent: None, parent_occurrence: None,
-    /// },
-    /// };
-    /// use futures_util::StreamExt;
-    /// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-    /// # runtime.block_on(async {
-    /// let mut source = action.start(request);
-    /// let ActionEvent::Completed { result, writes } = source.next().await.unwrap()? else {
-    ///     panic!("increment emits a completed result");
-    /// };
-    /// assert_eq!(result["new_count"], 3);
-    /// assert_eq!(writes.len(), 1);
-    /// # Ok::<(), app_kit::AppError>(())
-    /// # })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See [the complete action implementation](ActionBackend).
     fn start(&self, request: ActionRequest) -> Self::Stream;
 }
 
@@ -234,55 +162,7 @@ pub struct ActionDeclaration {
 
 /// One action attempt's immutable state, resolved transient inputs and identity.
 ///
-/// # Example
-///
-/// ```
-/// use app_kit::{AppError, workflow::{ActionBackend, ActionDeclaration, ActionEvent,
-///     ActionMode, ActionRequest, StateChange}};
-/// use serde_json::{Map, Value};
-/// struct Increment { declaration: ActionDeclaration }
-/// impl ActionBackend for Increment {
-///     type Stream = futures_util::stream::Iter<std::vec::IntoIter<Result<ActionEvent, AppError>>>;
-///     fn declaration(&self) -> &ActionDeclaration { &self.declaration }
-///     fn start(&self, request: ActionRequest) -> Self::Stream {
-///         let count = request.state.values()["count"].as_i64().unwrap() + 1;
-///         futures_util::stream::iter(vec![Ok(ActionEvent::Completed {
-///             result: Map::from_iter([("new_count".into(), Value::from(count))]),
-///             writes: vec![StateChange::Increment { values: vec![("count".into(), Value::from(1))] }],
-///         })])
-///     }
-/// }
-/// let action = Increment { declaration: ActionDeclaration {
-///     key: "increment".into(), revision: "r1".into(), reads: vec!["count".into()],
-///     writes: vec!["count".into()], required_inputs: Vec::new(), optional_inputs: Vec::new(),
-///     bound_inputs: Map::new(), default_inputs: Map::new(), tags: vec!["counter".into()],
-///     source: Some("increment count by one".into()), mode: ActionMode::Both,
-/// } };
-/// use app_kit::workflow::{ActionContext, WorkflowState};
-/// let request = ActionRequest {
-///     state: WorkflowState::new(Map::from_iter([("count".into(), Value::from(2))]))?,
-///     inputs: Map::new(), context: ActionContext {
-///     workspace: "appws_8a7c251e-b5b8-4d9e-8f0b-123456789abc".parse()?,
-///     workflow: "counter".parse()?,
-///     run: "run_8a7c251e-b5b8-4d9e-8f0b-123456789abc".parse()?,
-///     occurrence: "00000000000040008000000000000001".into(),
-///     checkpoint: 0, action_ordinal: 0, node: "increment".into(), attempt: 0,
-///     mode: ActionMode::Asynchronous, parent: None, parent_occurrence: None,
-/// },
-/// };
-/// use futures_util::StreamExt;
-/// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-/// # runtime.block_on(async {
-/// let mut source = action.start(request);
-/// let ActionEvent::Completed { result, writes } = source.next().await.unwrap()? else {
-///     panic!("increment emits a completed result");
-/// };
-/// assert_eq!(result["new_count"], 3);
-/// assert_eq!(writes.len(), 1);
-/// # Ok::<(), app_kit::AppError>(())
-/// # })?;
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// ```
+/// See [the complete action implementation](ActionBackend).
 pub struct ActionRequest {
     /// The full immutable base state, independent of transient inputs and results.
     pub state: WorkflowState,
@@ -491,25 +371,7 @@ impl ActionEvent {
 pub trait ConditionBackend: Send + Sync + 'static {
     /// Returns the stable declaration for one logical predicate revision.
     ///
-    /// # Example
-    ///
-    /// ```
-    /// use app_kit::{AppError, workflow::{ConditionBackend, ConditionDeclaration, WorkflowState}};
-    /// struct Ready { declaration: ConditionDeclaration }
-    /// impl ConditionBackend for Ready {
-    ///     fn declaration(&self) -> &ConditionDeclaration { &self.declaration }
-    ///     fn evaluate(&self, state: &WorkflowState) -> Result<bool, AppError> {
-    ///         let count = state.values().get("count").and_then(serde_json::Value::as_i64)
-    ///             .ok_or_else(|| AppError::InvalidInput("count must be an integer".into()))?;
-    ///         Ok(count >= 3)
-    ///     }
-    /// }
-    /// let condition = Ready { declaration: ConditionDeclaration {
-    ///     key: "ready".into(), revision: "r1".into(), reads: vec!["count".into()],
-    /// } };
-    /// assert_eq!(condition.declaration().key, "ready");
-    /// assert_eq!(condition.declaration().reads, ["count"]);
-    /// ```
+    /// See [the complete condition implementation](ConditionBackend).
     fn declaration(&self) -> &ConditionDeclaration;
 
     /// Evaluates the predicate without advancing workflow state or action ordinals.
@@ -520,26 +382,7 @@ pub trait ConditionBackend: Send + Sync + 'static {
     /// declared reads before calling this method; caller failures stop that routing
     /// decision rather than being interpreted as false.
     ///
-    /// # Example
-    ///
-    /// ```
-    /// use app_kit::{AppError, workflow::{ConditionBackend, ConditionDeclaration, WorkflowState}};
-    /// struct Ready { declaration: ConditionDeclaration }
-    /// impl ConditionBackend for Ready {
-    ///     fn declaration(&self) -> &ConditionDeclaration { &self.declaration }
-    ///     fn evaluate(&self, state: &WorkflowState) -> Result<bool, AppError> {
-    ///         let count = state.values().get("count").and_then(serde_json::Value::as_i64)
-    ///             .ok_or_else(|| AppError::InvalidInput("count must be an integer".into()))?;
-    ///         Ok(count >= 3)
-    ///     }
-    /// }
-    /// let condition = Ready { declaration: ConditionDeclaration {
-    ///     key: "ready".into(), revision: "r1".into(), reads: vec!["count".into()],
-    /// } };
-    /// let state = WorkflowState::new(serde_json::from_str(r#"{"count":3}"#)?)?;
-    /// assert!(condition.evaluate(&state)?);
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See [the complete condition implementation](ConditionBackend).
     fn evaluate(&self, state: &WorkflowState) -> Result<bool, AppError>;
 }
 

@@ -9,15 +9,13 @@ use crate::workflow::run::RunRecord;
 
 /// Caller-selected execution of a complete, already-admitted child batch.
 ///
-/// The returned future may be local and need not be Unpin. App retains ownership
-/// of admission and validates exact returned membership before reducing results
-/// in original child order, independently of the executor's polling order.
+/// App owns admission; the executor chooses polling order and returns each
+/// admitted completion exactly once or reports failure. App validates membership
+/// before reducing results in original child order.
 ///
-/// The associated GAT future is the App-specific exception to ordinary RPITIT
-/// methods. Both the child futures and returned future may be non-Send and
-/// non-Unpin; retain their concrete types. App owns admission and validates exact
-/// completion membership regardless of custom polling order. A custom executor
-/// must return every admitted completion once or report failure.
+/// The associated future preserves concrete child and execution types, both of
+/// which may be non-Send and non-Unpin. This GAT is the App-specific exception
+/// to ordinary RPITIT methods.
 ///
 /// # Example
 ///
@@ -72,15 +70,21 @@ use crate::workflow::run::RunRecord;
 /// }"#)?;
 /// let config = AppConfig::<_, Agent>::new(store, Vec::new(), vec![definition, child]).with_child_executor(InspectChildren);
 /// let mut app = App::open(config).await?;
-/// let mut workspace = app.create_workspace(WorkspaceConfig {
-///     name: Some("local counter".into()), root: std::env::current_dir()?,
-/// }).await?;
-/// let workflow = workspace.workflow("counter".parse()?).await?;
-/// let mut run = workflow.prepare(WorkflowState::default()).await?;
-/// let terminal = run.execution(ExecutionOptions::default()).await?.finish().await?;
-/// assert_eq!(terminal.state.values()["sum"], 5);
-/// #
-/// app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }).await?;
+/// let outcome = async {
+///     let mut workspace = app.create_workspace(WorkspaceConfig {
+///         name: Some("local counter".into()), root: std::env::current_dir()?,
+///     }).await?;
+///     let workflow = workspace.workflow("counter".parse()?).await?;
+///     let mut run = workflow.prepare(WorkflowState::default()).await?;
+///     let terminal = run.execution(ExecutionOptions::default()).await?.finish().await?;
+///     assert_eq!(terminal.state.values()["sum"], 5);
+///     #
+///     Ok::<(), Box<dyn std::error::Error>>(())
+/// }.await;
+/// let cleanup = app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }).await;
+/// if let Err(error) = &cleanup { eprintln!("App shutdown: {error}"); }
+/// outcome?;
+/// cleanup?;
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// # })?;
 /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -109,72 +113,7 @@ pub trait ChildExecutor: Send + Sync + 'static {
     /// Neither failure reduces the parent from partial child results. Existing
     /// descendant cleanup retains ownership before terminal publication.
     ///
-    /// # Example
-    ///
-    /// ```
-    /// # use agents_kit::Agent;
-    /// # use app_kit::{App, AppConfig, Shutdown, WorkspaceConfig};
-    /// # use app_kit::workflow::{CheckpointSelector, ExecutionEvent, ExecutionOptions, RunSelector,
-    /// #     RunStatus, WorkflowDefinition, WorkflowState};
-    /// # use storage_kit::StateStore;
-    /// # use storage_kit::state::config::{LanceStateStoreConfig, StateStoreConfig};
-    /// use app_kit::{AppError, workflow::{ActionMode, ChildBatch, ChildCompletion, ChildExecutor}};
-    /// use futures_util::FutureExt;
-    /// use std::future::Future;
-    /// struct InspectChildren;
-    /// impl InspectChildren {
-    ///     fn inspect(result: Result<Vec<ChildCompletion>, AppError>) -> Result<Vec<ChildCompletion>, AppError> {
-    ///         let completed = result?;
-    ///         assert_eq!(completed.len(), 1);
-    ///         assert_eq!(completed[0].ordinal(), 0);
-    ///         Ok(completed)
-    ///     }
-    /// }
-    /// impl ChildExecutor for InspectChildren {
-    ///     type Execution<'a, F> = futures_util::future::Map<ChildBatch<F>,
-    ///         fn(Result<Vec<ChildCompletion>, AppError>) -> Result<Vec<ChildCompletion>, AppError>>
-    ///     where Self: 'a, F: Future<Output = Result<ChildCompletion, AppError>> + 'a;
-    ///     fn execute<'a, F>(&'a self, batch: ChildBatch<F>) -> Self::Execution<'a, F>
-    ///     where F: Future<Output = Result<ChildCompletion, AppError>> + 'a {
-    ///         assert_eq!(batch.mode(), ActionMode::Asynchronous);
-    ///         assert_eq!(batch.len(), 1);
-    ///         assert!(!batch.is_empty());
-    ///         batch.map(Self::inspect as fn(_) -> _)
-    ///     }
-    /// }
-    /// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-    /// # runtime.block_on(async {
-    /// # let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-    /// # let definition = WorkflowDefinition::parse(r#"{
-    /// #  "schema":"app-kit.workflow/v2","id":"counter","revision":"r1",
-    /// #  "state":{"sum":0},"required":["sum"],"reducers":{"sum":"sum_integer"},
-    /// #  "entry":"child","nodes":[{"id":"child","step":{"kind":"child","workflow":"child",
-    /// #  "input":{"count":{"kind":"literal","value":4}},
-    /// #  "reductions":[{"source":"count","target":"sum","reducer":"sum_integer"}]}}],"routes":{}
-    /// # }"#)?;
-    /// # let child = WorkflowDefinition::parse(r#"{
-    /// #     "schema":"app-kit.workflow/v2", "id":"child", "revision":"r1",
-    /// #     "state":{"count":0}, "required":["count"],
-    /// #     "reducers":{"count":"reject_concurrent"}, "entry":"increment",
-    /// #     "nodes":[{"id":"increment","step":{"kind":"state","mutations":[
-    /// #         {"kind":"increment","target":"count","value":{"kind":"literal","value":1}}
-    /// #     ]}}], "routes":{}
-    /// # }"#)?;
-    /// # let config = AppConfig::<_, Agent>::new(store, Vec::new(), vec![definition, child]).with_child_executor(InspectChildren);
-    /// # let mut app = App::open(config).await?;
-    /// # let mut workspace = app.create_workspace(WorkspaceConfig {
-    /// #     name: Some("local counter".into()), root: std::env::current_dir()?,
-    /// # }).await?;
-    /// # let workflow = workspace.workflow("counter".parse()?).await?;
-    /// # let mut run = workflow.prepare(WorkflowState::default()).await?;
-    /// let terminal = run.execution(ExecutionOptions::default()).await?.finish().await?;
-    /// assert_eq!(terminal.state.values()["sum"], 5);
-    /// #
-    /// # app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }).await?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// # })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See [the complete child executor workflow](ChildExecutor).
     fn execute<'a, F>(&'a self, batch: ChildBatch<F>) -> Self::Execution<'a, F>
     where
         F: Future<Output = Result<ChildCompletion, AppError>> + 'a;
@@ -187,72 +126,7 @@ pub trait ChildExecutor: Send + Sync + 'static {
 /// on the first error. Before its first poll a custom executor can transfer the exact pins with
 /// [`Self::into_tasks`]. No child future needs Send or Unpin.
 ///
-/// # Example
-///
-/// ```
-/// # use agents_kit::Agent;
-/// # use app_kit::{App, AppConfig, Shutdown, WorkspaceConfig};
-/// # use app_kit::workflow::{CheckpointSelector, ExecutionEvent, ExecutionOptions, RunSelector,
-/// #     RunStatus, WorkflowDefinition, WorkflowState};
-/// # use storage_kit::StateStore;
-/// # use storage_kit::state::config::{LanceStateStoreConfig, StateStoreConfig};
-/// use app_kit::{AppError, workflow::{ActionMode, ChildBatch, ChildCompletion, ChildExecutor}};
-/// use futures_util::FutureExt;
-/// use std::future::Future;
-/// struct InspectChildren;
-/// impl InspectChildren {
-///     fn inspect(result: Result<Vec<ChildCompletion>, AppError>) -> Result<Vec<ChildCompletion>, AppError> {
-///         let completed = result?;
-///         assert_eq!(completed.len(), 1);
-///         assert_eq!(completed[0].ordinal(), 0);
-///         Ok(completed)
-///     }
-/// }
-/// impl ChildExecutor for InspectChildren {
-///     type Execution<'a, F> = futures_util::future::Map<ChildBatch<F>,
-///         fn(Result<Vec<ChildCompletion>, AppError>) -> Result<Vec<ChildCompletion>, AppError>>
-///     where Self: 'a, F: Future<Output = Result<ChildCompletion, AppError>> + 'a;
-///     fn execute<'a, F>(&'a self, batch: ChildBatch<F>) -> Self::Execution<'a, F>
-///     where F: Future<Output = Result<ChildCompletion, AppError>> + 'a {
-///         assert_eq!(batch.mode(), ActionMode::Asynchronous);
-///         assert_eq!(batch.len(), 1);
-///         assert!(!batch.is_empty());
-///         batch.map(Self::inspect as fn(_) -> _)
-///     }
-/// }
-/// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-/// # runtime.block_on(async {
-/// # let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-/// # let definition = WorkflowDefinition::parse(r#"{
-/// #  "schema":"app-kit.workflow/v2","id":"counter","revision":"r1",
-/// #  "state":{"sum":0},"required":["sum"],"reducers":{"sum":"sum_integer"},
-/// #  "entry":"child","nodes":[{"id":"child","step":{"kind":"child","workflow":"child",
-/// #  "input":{"count":{"kind":"literal","value":4}},
-/// #  "reductions":[{"source":"count","target":"sum","reducer":"sum_integer"}]}}],"routes":{}
-/// # }"#)?;
-/// # let child = WorkflowDefinition::parse(r#"{
-/// #     "schema":"app-kit.workflow/v2", "id":"child", "revision":"r1",
-/// #     "state":{"count":0}, "required":["count"],
-/// #     "reducers":{"count":"reject_concurrent"}, "entry":"increment",
-/// #     "nodes":[{"id":"increment","step":{"kind":"state","mutations":[
-/// #         {"kind":"increment","target":"count","value":{"kind":"literal","value":1}}
-/// #     ]}}], "routes":{}
-/// # }"#)?;
-/// # let config = AppConfig::<_, Agent>::new(store, Vec::new(), vec![definition, child]).with_child_executor(InspectChildren);
-/// # let mut app = App::open(config).await?;
-/// # let mut workspace = app.create_workspace(WorkspaceConfig {
-/// #     name: Some("local counter".into()), root: std::env::current_dir()?,
-/// # }).await?;
-/// # let workflow = workspace.workflow("counter".parse()?).await?;
-/// # let mut run = workflow.prepare(WorkflowState::default()).await?;
-/// let terminal = run.execution(ExecutionOptions::default()).await?.finish().await?;
-/// assert_eq!(terminal.state.values()["sum"], 5);
-/// #
-/// # app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }).await?;
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// # })?;
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// ```
+/// See [the complete child executor workflow](ChildExecutor).
 pub struct ChildBatch<F> {
     mode: ActionMode,
     tasks: Vec<ChildSlot<F>>,
@@ -292,72 +166,7 @@ enum ChildBatchState {
 /// }
 /// ```
 ///
-/// # Example
-///
-/// ```
-/// # use agents_kit::Agent;
-/// # use app_kit::{App, AppConfig, Shutdown, WorkspaceConfig};
-/// # use app_kit::workflow::{CheckpointSelector, ExecutionEvent, ExecutionOptions, RunSelector,
-/// #     RunStatus, WorkflowDefinition, WorkflowState};
-/// # use storage_kit::StateStore;
-/// # use storage_kit::state::config::{LanceStateStoreConfig, StateStoreConfig};
-/// use app_kit::{AppError, workflow::{ActionMode, ChildBatch, ChildCompletion, ChildExecutor}};
-/// use futures_util::FutureExt;
-/// use std::future::Future;
-/// struct InspectChildren;
-/// impl InspectChildren {
-///     fn inspect(result: Result<Vec<ChildCompletion>, AppError>) -> Result<Vec<ChildCompletion>, AppError> {
-///         let completed = result?;
-///         assert_eq!(completed.len(), 1);
-///         assert_eq!(completed[0].ordinal(), 0);
-///         Ok(completed)
-///     }
-/// }
-/// impl ChildExecutor for InspectChildren {
-///     type Execution<'a, F> = futures_util::future::Map<ChildBatch<F>,
-///         fn(Result<Vec<ChildCompletion>, AppError>) -> Result<Vec<ChildCompletion>, AppError>>
-///     where Self: 'a, F: Future<Output = Result<ChildCompletion, AppError>> + 'a;
-///     fn execute<'a, F>(&'a self, batch: ChildBatch<F>) -> Self::Execution<'a, F>
-///     where F: Future<Output = Result<ChildCompletion, AppError>> + 'a {
-///         assert_eq!(batch.mode(), ActionMode::Asynchronous);
-///         assert_eq!(batch.len(), 1);
-///         assert!(!batch.is_empty());
-///         batch.map(Self::inspect as fn(_) -> _)
-///     }
-/// }
-/// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-/// # runtime.block_on(async {
-/// # let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-/// # let definition = WorkflowDefinition::parse(r#"{
-/// #  "schema":"app-kit.workflow/v2","id":"counter","revision":"r1",
-/// #  "state":{"sum":0},"required":["sum"],"reducers":{"sum":"sum_integer"},
-/// #  "entry":"child","nodes":[{"id":"child","step":{"kind":"child","workflow":"child",
-/// #  "input":{"count":{"kind":"literal","value":4}},
-/// #  "reductions":[{"source":"count","target":"sum","reducer":"sum_integer"}]}}],"routes":{}
-/// # }"#)?;
-/// # let child = WorkflowDefinition::parse(r#"{
-/// #     "schema":"app-kit.workflow/v2", "id":"child", "revision":"r1",
-/// #     "state":{"count":0}, "required":["count"],
-/// #     "reducers":{"count":"reject_concurrent"}, "entry":"increment",
-/// #     "nodes":[{"id":"increment","step":{"kind":"state","mutations":[
-/// #         {"kind":"increment","target":"count","value":{"kind":"literal","value":1}}
-/// #     ]}}], "routes":{}
-/// # }"#)?;
-/// # let config = AppConfig::<_, Agent>::new(store, Vec::new(), vec![definition, child]).with_child_executor(InspectChildren);
-/// # let mut app = App::open(config).await?;
-/// # let mut workspace = app.create_workspace(WorkspaceConfig {
-/// #     name: Some("local counter".into()), root: std::env::current_dir()?,
-/// # }).await?;
-/// # let workflow = workspace.workflow("counter".parse()?).await?;
-/// # let mut run = workflow.prepare(WorkflowState::default()).await?;
-/// let terminal = run.execution(ExecutionOptions::default()).await?.finish().await?;
-/// assert_eq!(terminal.state.values()["sum"], 5);
-/// #
-/// # app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }).await?;
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// # })?;
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// ```
+/// See [the complete child executor workflow](ChildExecutor).
 pub struct ChildCompletion {
     ordinal: usize,
     record: Box<RunRecord>,
@@ -384,72 +193,7 @@ impl<F> ChildBatch<F> {
     ///
     /// This never returns the declaration-only [`ActionMode::Both`] value.
     ///
-    /// # Example
-    ///
-    /// ```
-    /// # use agents_kit::Agent;
-    /// # use app_kit::{App, AppConfig, Shutdown, WorkspaceConfig};
-    /// # use app_kit::workflow::{CheckpointSelector, ExecutionEvent, ExecutionOptions, RunSelector,
-    /// #     RunStatus, WorkflowDefinition, WorkflowState};
-    /// # use storage_kit::StateStore;
-    /// # use storage_kit::state::config::{LanceStateStoreConfig, StateStoreConfig};
-    /// use app_kit::{AppError, workflow::{ActionMode, ChildBatch, ChildCompletion, ChildExecutor}};
-    /// use futures_util::FutureExt;
-    /// use std::future::Future;
-    /// struct InspectChildren;
-    /// impl InspectChildren {
-    ///     fn inspect(result: Result<Vec<ChildCompletion>, AppError>) -> Result<Vec<ChildCompletion>, AppError> {
-    ///         let completed = result?;
-    ///         assert_eq!(completed.len(), 1);
-    ///         assert_eq!(completed[0].ordinal(), 0);
-    ///         Ok(completed)
-    ///     }
-    /// }
-    /// impl ChildExecutor for InspectChildren {
-    ///     type Execution<'a, F> = futures_util::future::Map<ChildBatch<F>,
-    ///         fn(Result<Vec<ChildCompletion>, AppError>) -> Result<Vec<ChildCompletion>, AppError>>
-    ///     where Self: 'a, F: Future<Output = Result<ChildCompletion, AppError>> + 'a;
-    ///     fn execute<'a, F>(&'a self, batch: ChildBatch<F>) -> Self::Execution<'a, F>
-    ///     where F: Future<Output = Result<ChildCompletion, AppError>> + 'a {
-    ///         assert_eq!(batch.mode(), ActionMode::Asynchronous);
-    ///         assert_eq!(batch.len(), 1);
-    ///         assert!(!batch.is_empty());
-    ///         batch.map(Self::inspect as fn(_) -> _)
-    ///     }
-    /// }
-    /// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-    /// # runtime.block_on(async {
-    /// # let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-    /// # let definition = WorkflowDefinition::parse(r#"{
-    /// #  "schema":"app-kit.workflow/v2","id":"counter","revision":"r1",
-    /// #  "state":{"sum":0},"required":["sum"],"reducers":{"sum":"sum_integer"},
-    /// #  "entry":"child","nodes":[{"id":"child","step":{"kind":"child","workflow":"child",
-    /// #  "input":{"count":{"kind":"literal","value":4}},
-    /// #  "reductions":[{"source":"count","target":"sum","reducer":"sum_integer"}]}}],"routes":{}
-    /// # }"#)?;
-    /// # let child = WorkflowDefinition::parse(r#"{
-    /// #     "schema":"app-kit.workflow/v2", "id":"child", "revision":"r1",
-    /// #     "state":{"count":0}, "required":["count"],
-    /// #     "reducers":{"count":"reject_concurrent"}, "entry":"increment",
-    /// #     "nodes":[{"id":"increment","step":{"kind":"state","mutations":[
-    /// #         {"kind":"increment","target":"count","value":{"kind":"literal","value":1}}
-    /// #     ]}}], "routes":{}
-    /// # }"#)?;
-    /// # let config = AppConfig::<_, Agent>::new(store, Vec::new(), vec![definition, child]).with_child_executor(InspectChildren);
-    /// # let mut app = App::open(config).await?;
-    /// # let mut workspace = app.create_workspace(WorkspaceConfig {
-    /// #     name: Some("local counter".into()), root: std::env::current_dir()?,
-    /// # }).await?;
-    /// # let workflow = workspace.workflow("counter".parse()?).await?;
-    /// # let mut run = workflow.prepare(WorkflowState::default()).await?;
-    /// let terminal = run.execution(ExecutionOptions::default()).await?.finish().await?;
-    /// assert_eq!(terminal.state.values()["sum"], 5);
-    /// #
-    /// # app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }).await?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// # })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See [the complete child executor workflow](ChildExecutor).
     pub fn mode(&self) -> ActionMode {
         self.mode
     }
@@ -458,144 +202,14 @@ impl<F> ChildBatch<F> {
     ///
     /// After the Future returns its results or an error, the batch owns none.
     ///
-    /// # Example
-    ///
-    /// ```
-    /// # use agents_kit::Agent;
-    /// # use app_kit::{App, AppConfig, Shutdown, WorkspaceConfig};
-    /// # use app_kit::workflow::{CheckpointSelector, ExecutionEvent, ExecutionOptions, RunSelector,
-    /// #     RunStatus, WorkflowDefinition, WorkflowState};
-    /// # use storage_kit::StateStore;
-    /// # use storage_kit::state::config::{LanceStateStoreConfig, StateStoreConfig};
-    /// use app_kit::{AppError, workflow::{ActionMode, ChildBatch, ChildCompletion, ChildExecutor}};
-    /// use futures_util::FutureExt;
-    /// use std::future::Future;
-    /// struct InspectChildren;
-    /// impl InspectChildren {
-    ///     fn inspect(result: Result<Vec<ChildCompletion>, AppError>) -> Result<Vec<ChildCompletion>, AppError> {
-    ///         let completed = result?;
-    ///         assert_eq!(completed.len(), 1);
-    ///         assert_eq!(completed[0].ordinal(), 0);
-    ///         Ok(completed)
-    ///     }
-    /// }
-    /// impl ChildExecutor for InspectChildren {
-    ///     type Execution<'a, F> = futures_util::future::Map<ChildBatch<F>,
-    ///         fn(Result<Vec<ChildCompletion>, AppError>) -> Result<Vec<ChildCompletion>, AppError>>
-    ///     where Self: 'a, F: Future<Output = Result<ChildCompletion, AppError>> + 'a;
-    ///     fn execute<'a, F>(&'a self, batch: ChildBatch<F>) -> Self::Execution<'a, F>
-    ///     where F: Future<Output = Result<ChildCompletion, AppError>> + 'a {
-    ///         assert_eq!(batch.mode(), ActionMode::Asynchronous);
-    ///         assert_eq!(batch.len(), 1);
-    ///         assert!(!batch.is_empty());
-    ///         batch.map(Self::inspect as fn(_) -> _)
-    ///     }
-    /// }
-    /// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-    /// # runtime.block_on(async {
-    /// # let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-    /// # let definition = WorkflowDefinition::parse(r#"{
-    /// #  "schema":"app-kit.workflow/v2","id":"counter","revision":"r1",
-    /// #  "state":{"sum":0},"required":["sum"],"reducers":{"sum":"sum_integer"},
-    /// #  "entry":"child","nodes":[{"id":"child","step":{"kind":"child","workflow":"child",
-    /// #  "input":{"count":{"kind":"literal","value":4}},
-    /// #  "reductions":[{"source":"count","target":"sum","reducer":"sum_integer"}]}}],"routes":{}
-    /// # }"#)?;
-    /// # let child = WorkflowDefinition::parse(r#"{
-    /// #     "schema":"app-kit.workflow/v2", "id":"child", "revision":"r1",
-    /// #     "state":{"count":0}, "required":["count"],
-    /// #     "reducers":{"count":"reject_concurrent"}, "entry":"increment",
-    /// #     "nodes":[{"id":"increment","step":{"kind":"state","mutations":[
-    /// #         {"kind":"increment","target":"count","value":{"kind":"literal","value":1}}
-    /// #     ]}}], "routes":{}
-    /// # }"#)?;
-    /// # let config = AppConfig::<_, Agent>::new(store, Vec::new(), vec![definition, child]).with_child_executor(InspectChildren);
-    /// # let mut app = App::open(config).await?;
-    /// # let mut workspace = app.create_workspace(WorkspaceConfig {
-    /// #     name: Some("local counter".into()), root: std::env::current_dir()?,
-    /// # }).await?;
-    /// # let workflow = workspace.workflow("counter".parse()?).await?;
-    /// # let mut run = workflow.prepare(WorkflowState::default()).await?;
-    /// let terminal = run.execution(ExecutionOptions::default()).await?.finish().await?;
-    /// assert_eq!(terminal.state.values()["sum"], 5);
-    /// #
-    /// # app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }).await?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// # })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See [the complete child executor workflow](ChildExecutor).
     pub fn len(&self) -> usize {
         self.tasks.len()
     }
 
     /// Reports whether this batch still owns any child task or result.
     ///
-    /// # Example
-    ///
-    /// ```
-    /// # use agents_kit::Agent;
-    /// # use app_kit::{App, AppConfig, Shutdown, WorkspaceConfig};
-    /// # use app_kit::workflow::{CheckpointSelector, ExecutionEvent, ExecutionOptions, RunSelector,
-    /// #     RunStatus, WorkflowDefinition, WorkflowState};
-    /// # use storage_kit::StateStore;
-    /// # use storage_kit::state::config::{LanceStateStoreConfig, StateStoreConfig};
-    /// use app_kit::{AppError, workflow::{ActionMode, ChildBatch, ChildCompletion, ChildExecutor}};
-    /// use futures_util::FutureExt;
-    /// use std::future::Future;
-    /// struct InspectChildren;
-    /// impl InspectChildren {
-    ///     fn inspect(result: Result<Vec<ChildCompletion>, AppError>) -> Result<Vec<ChildCompletion>, AppError> {
-    ///         let completed = result?;
-    ///         assert_eq!(completed.len(), 1);
-    ///         assert_eq!(completed[0].ordinal(), 0);
-    ///         Ok(completed)
-    ///     }
-    /// }
-    /// impl ChildExecutor for InspectChildren {
-    ///     type Execution<'a, F> = futures_util::future::Map<ChildBatch<F>,
-    ///         fn(Result<Vec<ChildCompletion>, AppError>) -> Result<Vec<ChildCompletion>, AppError>>
-    ///     where Self: 'a, F: Future<Output = Result<ChildCompletion, AppError>> + 'a;
-    ///     fn execute<'a, F>(&'a self, batch: ChildBatch<F>) -> Self::Execution<'a, F>
-    ///     where F: Future<Output = Result<ChildCompletion, AppError>> + 'a {
-    ///         assert_eq!(batch.mode(), ActionMode::Asynchronous);
-    ///         assert_eq!(batch.len(), 1);
-    ///         assert!(!batch.is_empty());
-    ///         batch.map(Self::inspect as fn(_) -> _)
-    ///     }
-    /// }
-    /// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-    /// # runtime.block_on(async {
-    /// # let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-    /// # let definition = WorkflowDefinition::parse(r#"{
-    /// #  "schema":"app-kit.workflow/v2","id":"counter","revision":"r1",
-    /// #  "state":{"sum":0},"required":["sum"],"reducers":{"sum":"sum_integer"},
-    /// #  "entry":"child","nodes":[{"id":"child","step":{"kind":"child","workflow":"child",
-    /// #  "input":{"count":{"kind":"literal","value":4}},
-    /// #  "reductions":[{"source":"count","target":"sum","reducer":"sum_integer"}]}}],"routes":{}
-    /// # }"#)?;
-    /// # let child = WorkflowDefinition::parse(r#"{
-    /// #     "schema":"app-kit.workflow/v2", "id":"child", "revision":"r1",
-    /// #     "state":{"count":0}, "required":["count"],
-    /// #     "reducers":{"count":"reject_concurrent"}, "entry":"increment",
-    /// #     "nodes":[{"id":"increment","step":{"kind":"state","mutations":[
-    /// #         {"kind":"increment","target":"count","value":{"kind":"literal","value":1}}
-    /// #     ]}}], "routes":{}
-    /// # }"#)?;
-    /// # let config = AppConfig::<_, Agent>::new(store, Vec::new(), vec![definition, child]).with_child_executor(InspectChildren);
-    /// # let mut app = App::open(config).await?;
-    /// # let mut workspace = app.create_workspace(WorkspaceConfig {
-    /// #     name: Some("local counter".into()), root: std::env::current_dir()?,
-    /// # }).await?;
-    /// # let workflow = workspace.workflow("counter".parse()?).await?;
-    /// # let mut run = workflow.prepare(WorkflowState::default()).await?;
-    /// let terminal = run.execution(ExecutionOptions::default()).await?.finish().await?;
-    /// assert_eq!(terminal.state.values()["sum"], 5);
-    /// #
-    /// # app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }).await?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// # })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See [the complete child executor workflow](ChildExecutor).
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -661,15 +275,21 @@ impl<F> ChildBatch<F> {
     /// # }"#)?;
     /// # let config = AppConfig::<_, Agent>::new(store, Vec::new(), vec![definition, child]).with_child_executor(InspectChildren);
     /// # let mut app = App::open(config).await?;
-    /// # let mut workspace = app.create_workspace(WorkspaceConfig {
-    /// #     name: Some("local counter".into()), root: std::env::current_dir()?,
-    /// # }).await?;
-    /// # let workflow = workspace.workflow("counter".parse()?).await?;
-    /// # let mut run = workflow.prepare(WorkflowState::default()).await?;
-    /// let terminal = run.execution(ExecutionOptions::default()).await?.finish().await?;
-    /// assert_eq!(terminal.state.values()["sum"], 5);
-    /// #
-    /// # app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }).await?;
+    /// # let outcome = async {
+    /// #     let mut workspace = app.create_workspace(WorkspaceConfig {
+    /// #         name: Some("local counter".into()), root: std::env::current_dir()?,
+    /// #     }).await?;
+    /// #     let workflow = workspace.workflow("counter".parse()?).await?;
+    /// #     let mut run = workflow.prepare(WorkflowState::default()).await?;
+    ///     let terminal = run.execution(ExecutionOptions::default()).await?.finish().await?;
+    ///     assert_eq!(terminal.state.values()["sum"], 5);
+    ///     #
+    /// #     Ok::<(), Box<dyn std::error::Error>>(())
+    /// # }.await;
+    /// # let cleanup = app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }).await;
+    /// # if let Err(error) = &cleanup { eprintln!("App shutdown: {error}"); }
+    /// # outcome?;
+    /// # cleanup?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// # })?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -772,72 +392,7 @@ impl ChildCompletion {
 
     /// Returns this child's ordinal in the original admitted batch.
     ///
-    /// # Example
-    ///
-    /// ```
-    /// # use agents_kit::Agent;
-    /// # use app_kit::{App, AppConfig, Shutdown, WorkspaceConfig};
-    /// # use app_kit::workflow::{CheckpointSelector, ExecutionEvent, ExecutionOptions, RunSelector,
-    /// #     RunStatus, WorkflowDefinition, WorkflowState};
-    /// # use storage_kit::StateStore;
-    /// # use storage_kit::state::config::{LanceStateStoreConfig, StateStoreConfig};
-    /// use app_kit::{AppError, workflow::{ActionMode, ChildBatch, ChildCompletion, ChildExecutor}};
-    /// use futures_util::FutureExt;
-    /// use std::future::Future;
-    /// struct InspectChildren;
-    /// impl InspectChildren {
-    ///     fn inspect(result: Result<Vec<ChildCompletion>, AppError>) -> Result<Vec<ChildCompletion>, AppError> {
-    ///         let completed = result?;
-    ///         assert_eq!(completed.len(), 1);
-    ///         assert_eq!(completed[0].ordinal(), 0);
-    ///         Ok(completed)
-    ///     }
-    /// }
-    /// impl ChildExecutor for InspectChildren {
-    ///     type Execution<'a, F> = futures_util::future::Map<ChildBatch<F>,
-    ///         fn(Result<Vec<ChildCompletion>, AppError>) -> Result<Vec<ChildCompletion>, AppError>>
-    ///     where Self: 'a, F: Future<Output = Result<ChildCompletion, AppError>> + 'a;
-    ///     fn execute<'a, F>(&'a self, batch: ChildBatch<F>) -> Self::Execution<'a, F>
-    ///     where F: Future<Output = Result<ChildCompletion, AppError>> + 'a {
-    ///         assert_eq!(batch.mode(), ActionMode::Asynchronous);
-    ///         assert_eq!(batch.len(), 1);
-    ///         assert!(!batch.is_empty());
-    ///         batch.map(Self::inspect as fn(_) -> _)
-    ///     }
-    /// }
-    /// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-    /// # runtime.block_on(async {
-    /// # let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-    /// # let definition = WorkflowDefinition::parse(r#"{
-    /// #  "schema":"app-kit.workflow/v2","id":"counter","revision":"r1",
-    /// #  "state":{"sum":0},"required":["sum"],"reducers":{"sum":"sum_integer"},
-    /// #  "entry":"child","nodes":[{"id":"child","step":{"kind":"child","workflow":"child",
-    /// #  "input":{"count":{"kind":"literal","value":4}},
-    /// #  "reductions":[{"source":"count","target":"sum","reducer":"sum_integer"}]}}],"routes":{}
-    /// # }"#)?;
-    /// # let child = WorkflowDefinition::parse(r#"{
-    /// #     "schema":"app-kit.workflow/v2", "id":"child", "revision":"r1",
-    /// #     "state":{"count":0}, "required":["count"],
-    /// #     "reducers":{"count":"reject_concurrent"}, "entry":"increment",
-    /// #     "nodes":[{"id":"increment","step":{"kind":"state","mutations":[
-    /// #         {"kind":"increment","target":"count","value":{"kind":"literal","value":1}}
-    /// #     ]}}], "routes":{}
-    /// # }"#)?;
-    /// # let config = AppConfig::<_, Agent>::new(store, Vec::new(), vec![definition, child]).with_child_executor(InspectChildren);
-    /// # let mut app = App::open(config).await?;
-    /// # let mut workspace = app.create_workspace(WorkspaceConfig {
-    /// #     name: Some("local counter".into()), root: std::env::current_dir()?,
-    /// # }).await?;
-    /// # let workflow = workspace.workflow("counter".parse()?).await?;
-    /// # let mut run = workflow.prepare(WorkflowState::default()).await?;
-    /// let terminal = run.execution(ExecutionOptions::default()).await?.finish().await?;
-    /// assert_eq!(terminal.state.values()["sum"], 5);
-    /// #
-    /// # app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }).await?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// # })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See [the complete child executor workflow](ChildExecutor).
     pub fn ordinal(&self) -> usize {
         self.ordinal
     }
@@ -853,50 +408,7 @@ impl ChildCompletion {
 
 /// Default executor that applies the batch's actual execution-mode policy.
 ///
-/// # Example
-///
-/// ```
-/// # use agents_kit::Agent;
-/// # use app_kit::{App, AppConfig, Shutdown, WorkspaceConfig};
-/// # use app_kit::workflow::{CheckpointSelector, ExecutionEvent, ExecutionOptions, RunSelector,
-/// #     RunStatus, WorkflowDefinition, WorkflowState};
-/// # use storage_kit::StateStore;
-/// # use storage_kit::state::config::{LanceStateStoreConfig, StateStoreConfig};
-/// #
-/// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-/// # runtime.block_on(async {
-/// # let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-/// # let definition = WorkflowDefinition::parse(r#"{
-/// #  "schema":"app-kit.workflow/v2","id":"counter","revision":"r1",
-/// #  "state":{"sum":0},"required":["sum"],"reducers":{"sum":"sum_integer"},
-/// #  "entry":"child","nodes":[{"id":"child","step":{"kind":"child","workflow":"child",
-/// #  "input":{"count":{"kind":"literal","value":4}},
-/// #  "reductions":[{"source":"count","target":"sum","reducer":"sum_integer"}]}}],"routes":{}
-/// # }"#)?;
-/// # let child = WorkflowDefinition::parse(r#"{
-/// #     "schema":"app-kit.workflow/v2", "id":"child", "revision":"r1",
-/// #     "state":{"count":0}, "required":["count"],
-/// #     "reducers":{"count":"reject_concurrent"}, "entry":"increment",
-/// #     "nodes":[{"id":"increment","step":{"kind":"state","mutations":[
-/// #         {"kind":"increment","target":"count","value":{"kind":"literal","value":1}}
-/// #     ]}}], "routes":{}
-/// # }"#)?;
-/// # let config = AppConfig::<_, Agent>::new(store, Vec::new(), vec![definition, child])
-/// #     .with_child_executor(app_kit::workflow::InlineExecutor);
-/// # let mut app = App::open(config).await?;
-/// # let mut workspace = app.create_workspace(WorkspaceConfig {
-/// #     name: Some("local counter".into()), root: std::env::current_dir()?,
-/// # }).await?;
-/// # let workflow = workspace.workflow("counter".parse()?).await?;
-/// # let mut run = workflow.prepare(WorkflowState::default()).await?;
-/// let terminal = run.execution(ExecutionOptions::default()).await?.finish().await?;
-/// assert_eq!(terminal.state.values()["sum"], 5);
-/// #
-/// # app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }).await?;
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// # })?;
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// ```
+/// See [the complete child executor workflow](ChildExecutor).
 #[derive(Default)]
 pub struct InlineExecutor;
 

@@ -25,12 +25,7 @@ impl CustomLoopLimits {
     /// parallel actions, or more than 65,536 aggregate actions. Zero aggregate
     /// actions disables tools without disabling model turns.
     ///
-    /// ```
-    /// use agents_kit::config::CustomLoopLimits;
-    /// let limits = CustomLoopLimits::new(8, 0, 1)?;
-    /// assert_eq!(limits.max_tool_actions(), 0);
-    /// # Ok::<(), agents_kit::KitError>(())
-    /// ```
+    /// See [`CustomLoopLimits`] for construction and inspection.
     pub fn new(
         max_model_turns: usize,
         max_tool_actions: usize,
@@ -144,14 +139,7 @@ impl CustomAgentConfig {
     /// selection, duplicate names, or names outside the portable tool vocabulary.
     /// Model availability is checked by the selected backend during use.
     ///
-    /// ```
-    /// use agents_kit::{config::{CustomAgentConfig, CustomLoopLimits, CustomToolApproval},
-    ///     model::ModelSelector, tool::ToolSelection};
-    /// let config = CustomAgentConfig::new(ModelSelector::new("exact-model-id")?,
-    ///     ToolSelection::None, CustomLoopLimits::new(4, 0, 1)?, CustomToolApproval::Deny)?;
-    /// assert_eq!(config.default_tool_selection(), &ToolSelection::None);
-    /// # Ok::<(), agents_kit::KitError>(())
-    /// ```
+    /// See [`CustomAgentConfig`] for construction and inspection.
     pub fn new(
         default_model: ModelSelector,
         default_tool_selection: ToolSelection,

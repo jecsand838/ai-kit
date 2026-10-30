@@ -751,22 +751,7 @@ impl PromptStream {
     /// authoritative completed response or error, retain accepted work after
     /// observer drop, and keep pending output bounded.
     ///
-    /// ```
-    /// use agents_kit::prompt::{PromptEvent, PromptResponse, PromptStream};
-    /// let runtime = tokio::runtime::Builder::new_current_thread().build()?;
-    /// runtime.block_on(async {
-    ///     let mut output = PromptStream::from_stream(futures_util::stream::iter([
-    ///         Ok(PromptEvent::OutputDelta { text: "ready".into() }),
-    ///         Ok(PromptEvent::Completed(PromptResponse::new("done".into(), None))),
-    ///     ]));
-    ///     assert!(matches!(output.recv().await.transpose()?, Some(PromptEvent::OutputDelta { .. })));
-    ///     let Some(PromptEvent::Completed(response)) = output.recv().await.transpose()? else { panic!("terminal response"); };
-    ///     assert_eq!(response.output(), "done");
-    ///     assert!(output.recv().await.is_none());
-    ///     Ok::<(), agents_kit::KitError>(())
-    /// })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See [`PromptStream`] for a complete caller-stream example.
     pub fn from_stream<S>(stream: S) -> Self
     where
         S: Stream<Item = Result<PromptEvent, KitError>> + Send + 'static,
@@ -787,19 +772,13 @@ impl PromptStream {
     /// fuse subsequent reads to None.
     ///
     /// ```
-    /// use agents_kit::prompt::{PromptEvent, PromptResponse, PromptStream};
-    /// let runtime = tokio::runtime::Builder::new_current_thread().build()?;
-    /// runtime.block_on(async {
-    ///     let mut output = PromptStream::from_stream(futures_util::stream::iter([
-    ///         Ok(PromptEvent::OutputDelta { text: "ready".into() }),
-    ///         Ok(PromptEvent::Completed(PromptResponse::new("done".into(), None))),
-    ///     ]));
-    ///     assert!(matches!(output.recv().await.transpose()?, Some(PromptEvent::OutputDelta { .. })));
-    ///     let Some(PromptEvent::Completed(response)) = output.recv().await.transpose()? else { panic!("terminal response"); };
-    ///     assert_eq!(response.output(), "done");
-    ///     assert!(output.recv().await.is_none());
-    ///     Ok::<(), agents_kit::KitError>(())
-    /// })?;
+    /// use agents_kit::{error::ErrorKind, prompt::PromptStream};
+    /// # tokio::runtime::Builder::new_current_thread().build()?.block_on(async {
+    /// let mut output = PromptStream::from_stream(futures_util::stream::empty());
+    /// let error = output.recv().await.expect("one terminal error").unwrap_err();
+    /// assert_eq!(error.kind(), ErrorKind::Protocol);
+    /// assert!(output.recv().await.is_none());
+    /// # });
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub async fn recv(&mut self) -> Option<Result<PromptEvent, KitError>> {

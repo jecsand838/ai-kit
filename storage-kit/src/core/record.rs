@@ -86,17 +86,18 @@ impl From<Uuid> for RecordId {
 
 /// Portable record payload used for inserts, updates, and query responses.
 ///
+/// Use [`Self::without_id`] with the default LanceDB backend. [`Self::new`]
+/// supplies a logical ID only for implementations that support it; it does not
+/// enable logical-ID persistence on an unsupported backend.
+///
 /// # Examples
 ///
 /// ```
-/// let mut record = storage_kit::database::data::DataRecord {
-///     id: Some(storage_kit::database::data::RecordId::String("doc-1".into())),
-///     ..Default::default()
-/// };
-/// record
-///     .fields
-///     .insert("title".into(), serde_json::json!("Storage Kit"));
-/// assert_eq!(record.id.as_ref().unwrap().as_string_lossy(), "doc-1");
+/// use storage_kit::database::data::DataRecord;
+/// let record = DataRecord::without_id().field("title", "Storage Kit")?;
+/// assert_eq!(record.fields["title"], "Storage Kit");
+/// assert!(record.id.is_none());
+/// # Ok::<(), storage_kit::StorageError>(())
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct DataRecord {
@@ -111,6 +112,9 @@ pub struct DataRecord {
 
 impl DataRecord {
     /// Creates a record with a logical id.
+    ///
+    /// The selected backend must support logical IDs. For LanceDB, use
+    /// [`Self::without_id`] and put the application identity in a normal field.
     ///
     /// # Examples
     ///
@@ -144,7 +148,7 @@ impl DataRecord {
     /// # Examples
     ///
     /// ```
-    /// let record = storage_kit::database::data::DataRecord::new("doc-1")
+    /// let record = storage_kit::database::data::DataRecord::without_id()
     ///     .field("title", "Storage Kit")?;
     /// assert_eq!(record.fields["title"], serde_json::json!("Storage Kit"));
     /// # Ok::<(), storage_kit::StorageError>(())
@@ -169,7 +173,7 @@ impl DataRecord {
     /// # Examples
     ///
     /// ```
-    /// let record = storage_kit::database::data::DataRecord::new("doc-1")
+    /// let record = storage_kit::database::data::DataRecord::without_id()
     ///     .json_field("title", serde_json::json!("Storage Kit"));
     /// assert_eq!(record.fields["title"], serde_json::json!("Storage Kit"));
     /// ```
@@ -184,7 +188,7 @@ impl DataRecord {
     /// # Examples
     ///
     /// ```
-    /// let record = storage_kit::database::data::DataRecord::new("doc-1").vector(
+    /// let record = storage_kit::database::data::DataRecord::without_id().vector(
     ///     "embedding",
     ///     storage_kit::database::data::DenseVector::F32(vec![0.1, 0.2]),
     /// );

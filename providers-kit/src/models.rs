@@ -54,16 +54,7 @@ impl ModelId {
     ///
     /// Returns an input error unless the value is 1 through 256 UTF-8 bytes, unpadded, and free of control characters.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::ModelId;
-    /// let id = ModelId::new("team/model:revision")?;
-    /// assert_eq!(id.as_str(), "team/model:revision");
-    /// assert!(ModelId::new(" padded ").is_err());
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::ModelId`] for a complete example.
     ///
     pub fn new(value: impl Into<String>) -> Result<Self, KitError> {
         let value = value.into();
@@ -85,16 +76,7 @@ impl ModelId {
 
     /// Returns the exact id.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::ModelId;
-    /// let id = ModelId::new("team/model:revision")?;
-    /// assert_eq!(id.as_str(), "team/model:revision");
-    /// assert!(ModelId::new(" padded ").is_err());
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::ModelId`] for a complete example.
     ///
     #[must_use]
     pub fn as_str(&self) -> &str {
@@ -126,7 +108,9 @@ impl<'de> Deserialize<'de> for ModelId {
 ///
 /// ```
 /// use providers_kit::models::ModelListRequest;
-/// let request = ModelListRequest::default().with_limit(std::num::NonZeroUsize::new(10).unwrap()).with_cursor("opaque-next")?;
+/// let request = ModelListRequest::default()
+///     .with_limit(std::num::NonZeroUsize::new(10).unwrap())
+///     .with_cursor("opaque-next")?;
 /// assert_eq!(request.limit().unwrap().get(), 10);
 /// assert_eq!(request.cursor(), Some("opaque-next"));
 ///
@@ -143,16 +127,7 @@ pub struct ModelListRequest {
 impl ModelListRequest {
     /// Sets a non-zero result limit.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::models::ModelListRequest;
-    /// let request = ModelListRequest::default().with_limit(std::num::NonZeroUsize::new(10).unwrap()).with_cursor("opaque-next")?;
-    /// assert_eq!(request.limit().unwrap().get(), 10);
-    /// assert_eq!(request.cursor(), Some("opaque-next"));
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::models::ModelListRequest`] for a complete example.
     ///
     #[must_use]
     pub fn with_limit(mut self, limit: NonZeroUsize) -> Self {
@@ -166,16 +141,7 @@ impl ModelListRequest {
     ///
     /// Returns an input error when the cursor is empty or whitespace-only. Nonblank cursor bytes are retained exactly; use only a cursor returned by the same provider operation.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::models::ModelListRequest;
-    /// let request = ModelListRequest::default().with_limit(std::num::NonZeroUsize::new(10).unwrap()).with_cursor("opaque-next")?;
-    /// assert_eq!(request.limit().unwrap().get(), 10);
-    /// assert_eq!(request.cursor(), Some("opaque-next"));
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::models::ModelListRequest`] for a complete example.
     ///
     pub fn with_cursor(mut self, cursor: impl Into<String>) -> Result<Self, KitError> {
         let cursor = cursor.into();
@@ -193,16 +159,7 @@ impl ModelListRequest {
 
     /// Returns the requested result limit.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::models::ModelListRequest;
-    /// let request = ModelListRequest::default().with_limit(std::num::NonZeroUsize::new(10).unwrap()).with_cursor("opaque-next")?;
-    /// assert_eq!(request.limit().unwrap().get(), 10);
-    /// assert_eq!(request.cursor(), Some("opaque-next"));
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::models::ModelListRequest`] for a complete example.
     ///
     #[must_use]
     pub const fn limit(&self) -> Option<NonZeroUsize> {
@@ -211,16 +168,7 @@ impl ModelListRequest {
 
     /// Returns the provider-native continuation cursor.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::models::ModelListRequest;
-    /// let request = ModelListRequest::default().with_limit(std::num::NonZeroUsize::new(10).unwrap()).with_cursor("opaque-next")?;
-    /// assert_eq!(request.limit().unwrap().get(), 10);
-    /// assert_eq!(request.cursor(), Some("opaque-next"));
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::models::ModelListRequest`] for a complete example.
     ///
     #[must_use]
     pub fn cursor(&self) -> Option<&str> {
@@ -233,7 +181,9 @@ impl ModelListRequest {
     ///
     /// ```
     /// use providers_kit::models::ModelListRequest;
-    /// let request = ModelListRequest::default().with_limit(std::num::NonZeroUsize::new(10).unwrap()).with_cursor("opaque-next")?;
+    /// let request = ModelListRequest::default()
+    ///     .with_limit(std::num::NonZeroUsize::new(10).unwrap())
+    ///     .with_cursor("opaque-next")?;
     /// let (limit, cursor) = request.into_parts();
     /// assert_eq!(limit.unwrap().get(), 10);
     /// assert_eq!(cursor.as_deref(), Some("opaque-next"));
@@ -278,7 +228,12 @@ impl<'de> Deserialize<'de> for ModelListRequest {
 ///
 /// ```
 /// use providers_kit::models::{ModelId, ModelSummary};
-/// let summary = ModelSummary { id: ModelId::new("exact-model")?, display_name: Some("Example".into()), description: None, context_window_tokens: None };
+/// let summary = ModelSummary {
+///     id: ModelId::new("exact-model")?,
+///     display_name: Some("Example".into()),
+///     description: None,
+///     context_window_tokens: None,
+/// };
 /// assert_eq!(summary.id.as_str(), "exact-model");
 ///
 /// # Ok::<(), providers_kit::KitError>(())
@@ -319,56 +274,84 @@ pub struct ModelPage {
 /// associated Session type. Requests do not repeat model selection. Caller models
 /// remain concrete; supplied Model clones share their Provider lifecycle.
 ///
-/// # Examples
+/// See [`crate::ProviderBackend`] for a complete example.
 ///
-/// ```
+/// # A runnable caller model
 ///
-/// # #[tokio::main(flavor = "current_thread")]
-/// # async fn main() -> Result<(), providers_kit::KitError> {
-/// use providers_kit::{Provider, ProviderBackend, ProviderConfig, ModelBackend, ModelId, config::{ProviderKind, OllamaConfig, TransportConfig}};
-/// let provider = Provider::from_config(ProviderConfig::new(ProviderKind::Ollama(OllamaConfig::local()), TransportConfig::default()))?;
-/// let model = provider.model(ModelId::new("exact-model")?)?;
-/// assert_eq!(model.model_id().as_str(), "exact-model");
-/// provider.shutdown().await?;
-///
-/// # Ok(())
-/// # }
-/// ```
-///
-/// # A sessionless caller model
-///
-/// Use `Infallible` when no Session can be constructed; its `SessionBackend`
-/// implementation is supplied by this crate. Keep the default `open_session`
-/// Unsupported result instead of fabricating a session. This deliberately limited
-/// caller model rejects generation as well; it demonstrates the associated-type
-/// choice, not an implemented model capability. See [`crate::ProviderBackend`] for
-/// an executable text-generating caller hierarchy.
+/// This small test double accepts one expected request and returns a scripted
+/// response. It demonstrates portable consumption without credentials or a service;
+/// it does not model a provider or establish native compatibility. Unrelated
+/// operations retain their Unsupported defaults. `Infallible` is the associated
+/// Session because this model cannot construct one.
 ///
 /// ```
 /// use std::convert::Infallible;
-/// use providers_kit::{ModelBackend, ModelId, KitError};
-/// use providers_kit::generation::{GenerateEventStream, GenerateRequest, GenerateResponse};
-/// use providers_kit::error::{ErrorKind, ErrorPhase, Operation};
-/// struct Sessionless { id: ModelId }
-/// impl ModelBackend for Sessionless {
+/// use futures_util::{stream, StreamExt};
+/// use providers_kit::{KitError, ModelBackend, ModelId};
+/// use providers_kit::error::ErrorKind;
+/// use providers_kit::generation::{
+///     ContentPart, FinishReason, GenerateEvent, GenerateEventStream,
+///     GenerateRequest, GenerateResponse, Message, Usage,
+/// };
+///
+/// struct ScriptedModel { id: ModelId, expected: GenerateRequest<()> }
+/// impl ModelBackend for ScriptedModel {
 ///     type Continuation = ();
 ///     type Session = Infallible;
 ///     fn model_id(&self) -> &ModelId { &self.id }
-///     async fn generate(&self, _: &GenerateRequest<()>) -> Result<GenerateResponse<()>, KitError> {
-///         Err(KitError::new(ErrorKind::Unsupported, Operation::Generate, ErrorPhase::InputValidation))
+///     async fn generate(&self, request: &GenerateRequest<()>) -> Result<GenerateResponse<()>, KitError> {
+///         assert_eq!(request, &self.expected, "unexpected request to the test double");
+///         Ok(GenerateResponse {
+///             model: self.id.clone(),
+///             message: Message::assistant_text("hello")?.with_continuation(())?,
+///             finish_reason: Some(FinishReason::Stop),
+///             citations: Vec::new(), artifacts: Vec::new(), hosted_tool_outputs: Vec::new(),
+///             usage: Usage::default(),
+///         })
 ///     }
-///     async fn generate_stream(&self, _: &GenerateRequest<()>) -> Result<GenerateEventStream<()>, KitError> {
-///         Err(KitError::new(ErrorKind::Unsupported, Operation::GenerateStream, ErrorPhase::InputValidation))
+///     async fn generate_stream(&self, request: &GenerateRequest<()>) -> Result<GenerateEventStream<()>, KitError> {
+///         let response = self.generate(request).await?;
+///         Ok(GenerateEventStream::new(stream::iter([
+///             Ok(GenerateEvent::Started { model: self.id.clone() }),
+///             Ok(GenerateEvent::ContentDelta { delta: "hello".into() }),
+///             Ok(GenerateEvent::Completed(Box::new(response))),
+///         ])))
 ///     }
 /// }
 /// # #[tokio::main(flavor = "current_thread")]
 /// # async fn main() -> Result<(), KitError> {
-/// let model = Sessionless { id: ModelId::new("sessionless")? };
-/// let error = model.open_session(Default::default()).await.unwrap_err();
-/// assert_eq!(error.kind(), ErrorKind::Unsupported);
+/// let request = GenerateRequest::new(vec![Message::user_text("Say hello")?])?;
+/// let model = ScriptedModel { id: ModelId::new("scripted")?, expected: request.clone() };
+/// let response = model.generate(&request).await?;
+/// assert_eq!(&response.model, model.model_id());
+/// assert!(matches!(response.message.content(), [ContentPart::Text { text }] if text == "hello"));
+/// assert_eq!(response.message.continuation(), Some(&()));
+/// let mut events = model.generate_stream(&request).await?;
+/// assert!(
+///     matches!(events.next().await.transpose()?, Some(GenerateEvent::Started { model: id }) if &id == model.model_id())
+/// );
+/// assert!(
+///     matches!(events.next().await.transpose()?, Some(GenerateEvent::ContentDelta { delta }) if delta == "hello")
+/// );
+/// let Some(GenerateEvent::Completed(completed)) = events.next().await.transpose()? else {
+///     panic!("the scripted turn must complete");
+/// };
+/// assert_eq!(*completed, response);
+/// assert!(events.next().await.is_none());
+/// assert_eq!(
+///     model
+///         .open_session(Default::default())
+///         .await
+///         .unwrap_err()
+///         .kind(),
+///     ErrorKind::Unsupported
+/// );
 /// # Ok(())
 /// # }
 /// ```
+///
+/// For the full Provider/Model/Session lifecycle and an opaque continuation,
+/// see [`crate::ProviderBackend`].
 ///
 pub trait ModelBackend: Send + Sync + 'static {
     /// Opaque model-authored state retained between generation turns.
@@ -379,28 +362,12 @@ pub trait ModelBackend: Send + Sync + 'static {
 
     /// Exact selected model id.
     ///
-    /// # Examples
-    ///
-    /// ```
-    ///
-    /// # #[tokio::main(flavor = "current_thread")]
-    /// # async fn main() -> Result<(), providers_kit::KitError> {
-    /// use providers_kit::{Provider, ProviderBackend, ProviderConfig, ModelBackend, ModelId, config::{ProviderKind, OllamaConfig, TransportConfig}};
-    /// let provider = Provider::from_config(ProviderConfig::new(ProviderKind::Ollama(OllamaConfig::local()), TransportConfig::default()))?;
-    /// let model = provider.model(ModelId::new("exact-model")?)?;
-    /// assert_eq!(model.model_id().as_str(), "exact-model");
-    /// provider.shutdown().await?;
-    ///
-    /// # Ok(())
-    /// # }
-    /// ```
+    /// See [`crate::ProviderBackend`] for a complete example.
     ///
     fn model_id(&self) -> &ModelId;
 
     /// Runs non-streaming generation.
     ///
-    /// This example requires a real service, valid credentials, and an exact model
-    /// supporting this operation.
     /// Append the returned assistant message unchanged when continuing with tool results.
     /// Its exact associated continuation is model-owned and remains in that message.
     ///
@@ -408,25 +375,7 @@ pub trait ModelBackend: Send + Sync + 'static {
     ///
     /// Returns [`KitError`] for closed admission, unsupported selected-model behavior, invalid request combinations, transport/deadline failures, service rejection, or malformed response. The operation is authoritative; no capability matrix or fallback model supplies success.
     ///
-    /// # Examples
-    ///
-    /// ```no_run
-    ///
-    /// # #[tokio::main(flavor = "current_thread")]
-    /// # async fn main() -> Result<(), providers_kit::KitError> {
-    /// use providers_kit::{Provider, ProviderBackend, ProviderConfig, config::{ApiKey, OpenAiConfig, ProviderKind, TransportConfig}};
-    /// let provider = Provider::from_config(ProviderConfig::new(ProviderKind::OpenAi(OpenAiConfig::new(ApiKey::new("replace-with-your-key")?)), TransportConfig::default()))?;
-    /// use providers_kit::{ModelBackend, ModelId, generation::{GenerateRequest, Message}};
-    /// let model = provider.model(ModelId::new("your-exact-model-id")?)?;
-    /// let request = GenerateRequest::new(vec![Message::user_text("Summarize the task")?])?;
-    /// let result = model.generate(&request).await;
-    /// let cleanup = provider.shutdown().await;
-    /// let _response = result?;
-    /// cleanup?;
-    ///
-    /// # Ok(())
-    /// # }
-    /// ```
+    /// See [`crate::ModelBackend`] for the complete executable workflow and its prerequisites.
     ///
     fn generate<'a>(
         &'a self,
@@ -435,8 +384,6 @@ pub trait ModelBackend: Send + Sync + 'static {
 
     /// Opens a normalized generation stream.
     ///
-    /// This example requires a real service, valid credentials, and an exact model
-    /// supporting this operation.
     /// The returned stream is demand-driven and bounded, with no forwarding task.
     /// Completion, error, or drop releases admission; no event follows Completed.
     /// The final response is authoritative; partial deltas do not replace it.
@@ -445,31 +392,7 @@ pub trait ModelBackend: Send + Sync + 'static {
     ///
     /// Returns [`KitError`] for closed admission, unsupported selected-model behavior, invalid request combinations, transport/deadline failures, service rejection, or malformed response. The operation is authoritative; no capability matrix or fallback model supplies success.
     ///
-    /// # Examples
-    ///
-    /// ```no_run
-    ///
-    /// # #[tokio::main(flavor = "current_thread")]
-    /// # async fn main() -> Result<(), providers_kit::KitError> {
-    /// use providers_kit::{Provider, ProviderBackend, ProviderConfig, config::{ApiKey, OpenAiConfig, ProviderKind, TransportConfig}};
-    /// let provider = Provider::from_config(ProviderConfig::new(ProviderKind::OpenAi(OpenAiConfig::new(ApiKey::new("replace-with-your-key")?)), TransportConfig::default()))?;
-    /// use providers_kit::{ModelBackend, ModelId, generation::{GenerateRequest, Message}};
-    /// let model = provider.model(ModelId::new("your-exact-model-id")?)?;
-    /// let request = GenerateRequest::new(vec![Message::user_text("Summarize the task")?])?;
-    /// let result = model.generate_stream(&request).await;
-    /// let observed = async {
-    ///     use futures_util::StreamExt;
-    ///     let mut stream = result?;
-    ///     while let Some(event) = stream.next().await { let _event = event?; }
-    ///     Ok::<(), providers_kit::KitError>(())
-    /// }.await;
-    /// let cleanup = provider.shutdown().await;
-    /// observed?;
-    /// cleanup?;
-    ///
-    /// # Ok(())
-    /// # }
-    /// ```
+    /// See [`crate::ModelBackend`] for the complete executable workflow and its prerequisites.
     ///
     fn generate_stream<'a>(
         &'a self,
@@ -478,31 +401,11 @@ pub trait ModelBackend: Send + Sync + 'static {
 
     /// Runs embeddings when supported.
     ///
-    /// This example requires a real service, valid credentials, and an exact model
-    /// supporting this operation.
-    ///
     /// # Errors
     ///
     /// Returns [`KitError`] for closed admission, unsupported selected-model behavior, invalid request combinations, transport/deadline failures, service rejection, or malformed response. The operation is authoritative; no capability matrix or fallback model supplies success.
     ///
-    /// # Examples
-    ///
-    /// ```no_run
-    ///
-    /// # #[tokio::main(flavor = "current_thread")]
-    /// # async fn main() -> Result<(), providers_kit::KitError> {
-    /// use providers_kit::{Provider, ProviderBackend, ProviderConfig, config::{ApiKey, OpenAiConfig, ProviderKind, TransportConfig}};
-    /// let provider = Provider::from_config(ProviderConfig::new(ProviderKind::OpenAi(OpenAiConfig::new(ApiKey::new("replace-with-your-key")?)), TransportConfig::default()))?;
-    /// use providers_kit::{ModelBackend, ModelId, generation::{GenerateRequest, Message}};
-    /// let model = provider.model(ModelId::new("your-exact-model-id")?)?;
-    /// let result = model.embed(&providers_kit::embedding::EmbedRequest::new(vec!["document".into()])?).await;
-    /// let cleanup = provider.shutdown().await;
-    /// let _response = result?;
-    /// cleanup?;
-    ///
-    /// # Ok(())
-    /// # }
-    /// ```
+    /// See [`crate::embedding`] for the complete executable workflow and its prerequisites.
     ///
     fn embed<'a>(
         &'a self,
@@ -525,67 +428,76 @@ pub trait ModelBackend: Send + Sync + 'static {
     /// Retain the exact returned job id to observe or cancel the remote job. Shared
     /// provider shutdown closes local resources; it does not cancel remote jobs.
     ///
-    /// This example requires a real service, valid credentials, and an exact model
-    /// supporting this operation.
-    ///
     /// # Errors
     ///
     /// Returns [`KitError`] for closed admission, unsupported selected-model behavior, invalid request combinations, transport/deadline failures, service rejection, or malformed response. The operation is authoritative; no capability matrix or fallback model supplies success.
     ///
+    /// This service example creates one inline batch, retains its exact id, and
+    /// requests cancellation before observing terminal settlement. It requires a
+    /// configured OpenAI account and an exact model supporting batch submission.
+    /// Completed may win the race; an unresolved id remains caller-owned.
+    ///
     /// # Examples
     ///
     /// ```no_run
-    ///
-    /// # #[tokio::main(flavor = "current_thread")]
-    /// # async fn main() -> Result<(), providers_kit::KitError> {
-    /// use providers_kit::{Provider, ProviderBackend, ProviderConfig, config::{ApiKey, OpenAiConfig, ProviderKind, TransportConfig}};
-    /// let provider = Provider::from_config(ProviderConfig::new(ProviderKind::OpenAi(OpenAiConfig::new(ApiKey::new("replace-with-your-key")?)), TransportConfig::default()))?;
-    /// use providers_kit::{ModelBackend, ModelId, generation::{GenerateRequest, Message}};
-    /// let model = provider.model(ModelId::new("your-exact-model-id")?)?;
-    /// let request = GenerateRequest::new(vec![Message::user_text("Summarize the task")?])?;
-    /// let result = model.submit_batch(&providers_kit::batch::BatchSubmitRequest::Inline { rows: vec![providers_kit::batch::BatchInput::new("row-1", request)?] }).await;
-    /// use providers_kit::batch::BatchStatus;
-    /// use providers_kit::error::{ErrorKind, ErrorPhase, Operation};
     /// use std::time::Duration;
-    /// let observed = match result {
-    ///     Ok(job) => {
-    ///         let owned_id = job.id; // Persist this id in the application's job inventory.
-    ///         let settlement = tokio::time::timeout(Duration::from_secs(11 * 60), async {
-    ///             let acknowledgement = provider.cancel_batch(owned_id.clone()).await?;
-    ///             assert_eq!(acknowledgement.id, owned_id);
-    ///             loop {
-    ///                 let status = provider.batch_status(owned_id.clone()).await?;
-    ///                 assert_eq!(status.id, owned_id);
-    ///                 match status.status {
-    ///                     BatchStatus::Queued | BatchStatus::Running =>
-    ///                         tokio::time::sleep(Duration::from_secs(5)).await,
-    ///                     terminal => break Ok::<_, providers_kit::KitError>(terminal),
+    /// use providers_kit::{KitError, ModelBackend, ModelId, Provider, ProviderBackend, ProviderConfig};
+    /// use providers_kit::batch::{BatchInput, BatchStatus, BatchSubmitRequest};
+    /// use providers_kit::config::{ApiKey, OpenAiConfig, ProviderKind, TransportConfig};
+    /// use providers_kit::error::{ErrorKind, ErrorPhase, Operation};
+    /// use providers_kit::generation::{GenerateRequest, Message};
+    /// # #[tokio::main(flavor = "current_thread")]
+    /// # async fn main() -> Result<(), KitError> {
+    /// let provider = Provider::from_config(ProviderConfig::new(
+    ///     ProviderKind::OpenAi(OpenAiConfig::new(ApiKey::new("replace-with-your-key")?)),
+    ///     TransportConfig::default(),
+    /// ))?;
+    /// let observed = async {
+    ///     let model = provider.model(ModelId::new("your-exact-model-id")?)?;
+    ///     let request = BatchSubmitRequest::Inline {
+    ///         rows: vec![BatchInput::new("row-1", GenerateRequest::new(vec![
+    ///             Message::user_text("Summarize the task")?,
+    ///         ])?)?],
+    ///     };
+    ///     let job = model.submit_batch(&request).await?;
+    ///     let owned_id = job.id;
+    ///     // Persist this id in the application's inventory before waiting. This recipe
+    ///     // prints it; errors below retain it for a later reconciliation attempt.
+    ///     println!("Owned batch to retain: {owned_id}");
+    ///     let settlement = tokio::time::timeout(Duration::from_secs(11 * 60), async {
+    ///         let acknowledgement = provider.cancel_batch(owned_id.clone()).await?;
+    ///         assert_eq!(acknowledgement.id, owned_id);
+    ///         loop {
+    ///             let job = provider.batch_status(owned_id.clone()).await?;
+    ///             assert_eq!(job.id, owned_id);
+    ///             match job.status {
+    ///                 BatchStatus::Queued | BatchStatus::Running => {
+    ///                     tokio::time::sleep(Duration::from_secs(5)).await;
     ///                 }
+    ///                 terminal => break Ok::<_, KitError>(terminal),
     ///             }
-    ///         }).await;
-    ///         match settlement {
-    ///             Ok(Ok(terminal)) => {
-    ///                 // Completed may win the race: this does not prove cancellation.
-    ///                 println!("{owned_id}: {terminal:?}");
-    ///                 Ok(())
-    ///             }
-    ///             Ok(Err(error)) => Err(error.with_correlation_id(owned_id)),
-    ///             Err(_) => Err(providers_kit::KitError::new(ErrorKind::Timeout,
-    ///                 Operation::BatchStatus, ErrorPhase::Cleanup).with_correlation_id(owned_id)),
     ///         }
+    ///     }).await;
+    ///     match settlement {
+    ///         Ok(Ok(terminal)) => {
+    ///             // Completed can win the race; this does not prove cancellation.
+    ///             println!("{owned_id}: {terminal:?}");
+    ///             Ok(())
+    ///         }
+    ///         Ok(Err(error)) => Err(error.with_correlation_id(owned_id)),
+    ///         Err(_) => Err(KitError::new(
+    ///             ErrorKind::Timeout, Operation::BatchStatus, ErrorPhase::Cleanup,
+    ///         ).with_correlation_id(owned_id)),
     ///     }
-    ///     Err(error) => Err(error),
-    /// };
+    /// }.await;
     /// let cleanup = provider.shutdown().await;
-    /// // Keep an unresolved id/error for later reconciliation. Shutdown does not
-    /// // delete remote files; see the batch module's artifact-ownership limits.
+    /// // Keep unresolved ids for reconciliation; shutdown does not delete remote files.
+    /// // The batch module explains the separate artifact-ownership limits.
     /// match (observed, cleanup) {
-    ///     (Err(primary), Err(cleanup)) => return Err(primary.with_supplementary(cleanup)),
-    ///     (Err(error), Ok(())) | (Ok(()), Err(error)) => return Err(error),
-    ///     (Ok(()), Ok(())) => {}
+    ///     (Err(primary), Err(cleanup)) => Err(primary.with_supplementary(cleanup)),
+    ///     (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
+    ///     (Ok(()), Ok(())) => Ok(()),
     /// }
-    ///
-    /// # Ok(())
     /// # }
     /// ```
     ///
@@ -611,33 +523,11 @@ pub trait ModelBackend: Send + Sync + 'static {
     /// Unsupported. Caller Models retain their own associated Session semantics.
     /// See the complete [Session progression](crate::session) and consuming cleanup.
     ///
-    /// This example requires a real service, valid credentials, and an exact model
-    /// supporting this operation.
-    ///
     /// # Errors
     ///
     /// Returns [`KitError`] for closed admission, unsupported selected-model behavior, invalid request combinations, transport/deadline failures, service rejection, or malformed response. The operation is authoritative; no capability matrix or fallback model supplies success.
     ///
-    /// # Examples
-    ///
-    /// ```no_run
-    ///
-    /// # #[tokio::main(flavor = "current_thread")]
-    /// # async fn main() -> Result<(), providers_kit::KitError> {
-    /// use providers_kit::{Provider, ProviderBackend, ProviderConfig, config::{ApiKey, OpenAiConfig, ProviderKind, TransportConfig}};
-    /// let provider = Provider::from_config(ProviderConfig::new(ProviderKind::OpenAi(OpenAiConfig::new(ApiKey::new("replace-with-your-key")?)), TransportConfig::default()))?;
-    /// use providers_kit::{ModelBackend, ModelId, generation::{GenerateRequest, Message}};
-    /// let model = provider.model(ModelId::new("your-exact-model-id")?)?;
-    /// let result = model.open_session(providers_kit::session::SessionConfig::default()).await;
-    /// use providers_kit::SessionBackend;
-    /// let observed = match result { Ok(session) => session.close().await, Err(error) => Err(error) };
-    /// let cleanup = provider.shutdown().await;
-    /// observed?;
-    /// cleanup?;
-    ///
-    /// # Ok(())
-    /// # }
-    /// ```
+    /// See [`crate::session`] for the complete executable workflow and its prerequisites.
     ///
     fn open_session(
         &self,
@@ -670,21 +560,7 @@ pub(crate) enum ModelInner {
 /// associated Session type. Requests do not repeat model selection. Caller models
 /// remain concrete; supplied Model clones share their Provider lifecycle.
 ///
-/// # Examples
-///
-/// ```
-///
-/// # #[tokio::main(flavor = "current_thread")]
-/// # async fn main() -> Result<(), providers_kit::KitError> {
-/// use providers_kit::{Provider, ProviderBackend, ProviderConfig, ModelBackend, ModelId, config::{ProviderKind, OllamaConfig, TransportConfig}};
-/// let provider = Provider::from_config(ProviderConfig::new(ProviderKind::Ollama(OllamaConfig::local()), TransportConfig::default()))?;
-/// let model = provider.model(ModelId::new("exact-model")?)?;
-/// assert_eq!(model.model_id().as_str(), "exact-model");
-/// provider.shutdown().await?;
-///
-/// # Ok(())
-/// # }
-/// ```
+/// See [`crate::ProviderBackend`] for a complete example.
 ///
 #[derive(Clone)]
 pub struct Model {

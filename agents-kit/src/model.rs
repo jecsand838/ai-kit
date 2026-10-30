@@ -64,7 +64,7 @@
 //!         let request = PromptRequest::new("Describe the current task without changing files.")?
 //!             .with_model(selected).with_reasoning_effort(effort)
 //!             .with_timeout(Duration::from_secs(90))?;
-//!         let conversation = workspace.new_conversation(NewConversation::new(None, None, vec![])?).await?;
+//!         let conversation = Box::pin(workspace.new_conversation(NewConversation::new(None, None, vec![])?)).await?;
 //!         let response = conversation.prompt(request).await;
 //!         let close = conversation.close().await;
 //!         let response = match (response, close) {

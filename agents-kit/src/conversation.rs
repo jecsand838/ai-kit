@@ -28,6 +28,7 @@
 //! the separate cancellation portion uses `abort`, then observes settlement.
 //!
 //! ```no_run,standalone_crate
+//! #![recursion_limit = "256"] // Nested concrete async futures need this on Linux.
 //! use std::{num::NonZeroUsize, time::Duration};
 //! use agents_kit::{AgentBackend, AgentBuilder, AgentStorage, ConversationBackend, WorkspaceBackend};
 //! use agents_kit::config::{AgentConfig, CustomAgentConfig, CustomLoopLimits, CustomToolApproval};
@@ -59,14 +60,14 @@
 //!     ProviderKind::Ollama(OllamaConfig::local()), TransportConfig::default()))?;
 //! let agent = AgentBuilder::create(config, AgentStorage::new(store))
 //!     .with_provider(provider).with_toolset(tools).build().await?;
-//! let outcome = Box::pin(async {
+//! let outcome = async {
 //!     let cwd = std::env::current_dir()?;
 //!     let context = WorkspaceContext::new(cwd.clone(),
 //!         vec![WorkspaceRoot::new(cwd, WorkspaceRootAccess::ReadWrite)?],
 //!         WorkspaceExecutionPolicy::new(WorkspaceSandboxMode::FullAccess, WorkspaceNetworkAccess::Enabled))?;
 //!     let workspace = agent.new_workspace(NewWorkspace::new("review", context, WorkspaceDefaults::empty())?).await?;
 //!     let work = async {
-//!         let conversation = Box::pin(workspace.new_conversation(NewConversation::new(None, None, vec![])?)).await?;
+//!         let conversation = workspace.new_conversation(NewConversation::new(None, None, vec![])?).await?;
 //!         let work = async {
 //!             let mut notifications = conversation.notification_stream()?;
 //!             let request = PromptRequest::new("Call inspect_status, then describe its outcome.")?
@@ -132,7 +133,7 @@
 //!         (Err(error), _) | (_, Err(error)) => Err(error),
 //!         (Ok(()), Ok(())) => Ok(()),
 //!     }
-//! }).await;
+//! }.await;
 //! let shutdown = agent.shutdown().await;
 //! match (outcome, shutdown) {
 //!     (Err(primary), Err(cleanup)) => Err(primary.with_supplementary(cleanup)),

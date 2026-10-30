@@ -22,6 +22,7 @@
 //! The request carries sources, never private retrieval context or an adapter.
 //!
 //! ```standalone_crate
+//! #![recursion_limit = "256"] // Nested concrete async futures need this on Linux.
 //! use std::{num::NonZeroUsize, time::Duration};
 //! use agents_kit::{AgentBackend, AgentBuilder, AgentStorage};
 //! use agents_kit::config::{AgentConfig, CustomAgentConfig, CustomLoopLimits, CustomToolApproval};
@@ -44,7 +45,7 @@
 //!     ProviderKind::Ollama(OllamaConfig::local()), TransportConfig::default()))?;
 //! let agent = AgentBuilder::create(config, AgentStorage::new(store))
 //!     .with_provider(provider).with_knowledge_database(database).build().await?;
-//! let outcome = Box::pin(async {
+//! let outcome = async {
 //!     agent.ingest_knowledge(IngestKnowledgeRequest::new(vec![
 //!         KnowledgeSource::text("runbook", "Incident runbook", "Escalate service incidents.")?,
 //!     ])?.with_scope(KnowledgeScope::Agent)).await?;
@@ -59,7 +60,7 @@
 //!         Some(&KnowledgePolicy::Only(vec![KnowledgeScope::Agent])));
 //!     // Sending this request through a Conversation requires the configured model.
 //!     Ok::<(), agents_kit::KitError>(())
-//! }).await;
+//! }.await;
 //! let shutdown = agent.shutdown().await;
 //! match (outcome, shutdown) {
 //!     (Err(primary), Err(cleanup)) => Err(primary.with_supplementary(cleanup)),

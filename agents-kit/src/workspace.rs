@@ -1262,7 +1262,7 @@ pub trait WorkspaceBackend: Send + Sync + 'static {
     ///
     /// This local Custom agent uses in-memory Lance and sends no network requests.
     ///
-    /// ```
+    /// ```standalone_crate
     /// # use std::{num::NonZeroUsize, time::Duration};
     /// # use agents_kit::{AgentBackend, AgentBuilder, AgentStorage, WorkspaceBackend};
     /// # use agents_kit::config::{AgentConfig, CustomAgentConfig, CustomLoopLimits, CustomToolApproval};
@@ -1278,7 +1278,7 @@ pub trait WorkspaceBackend: Send + Sync + 'static {
     /// # let provider = Provider::from_config(ProviderConfig::new(
     /// #     ProviderKind::Ollama(OllamaConfig::local()), TransportConfig::default()))?;
     /// # let agent = AgentBuilder::create(config, AgentStorage::new(store)).with_provider(provider).build().await?;
-    /// # let outcome = async {
+    /// # let outcome = Box::pin(async {
     /// # use agents_kit::workspace::{NewWorkspace, WorkspaceContext, WorkspaceDefaults,
     /// #     WorkspaceRoot, WorkspaceRootAccess, WorkspaceExecutionPolicy, WorkspaceSandboxMode, WorkspaceNetworkAccess};
     /// # let cwd = std::env::current_dir()?;
@@ -1338,7 +1338,7 @@ pub trait WorkspaceBackend: Send + Sync + 'static {
     ///     (Ok(()), Ok(())) => Ok(()),
     /// }?;
     /// # Ok::<(), agents_kit::KitError>(())
-    /// # }.await;
+    /// # }).await;
     /// # let cleanup = agent.shutdown().await;
     /// # match (outcome, cleanup) {
     /// #     (Err(primary), Err(cleanup)) => Err(primary.with_supplementary(cleanup)),

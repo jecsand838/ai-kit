@@ -27,7 +27,7 @@
 //! is not an alternative final answer. Observer loss does not abort accepted work;
 //! the separate cancellation portion uses `abort`, then observes settlement.
 //!
-//! ```no_run
+//! ```no_run,standalone_crate
 //! use std::{num::NonZeroUsize, time::Duration};
 //! use agents_kit::{AgentBackend, AgentBuilder, AgentStorage, ConversationBackend, WorkspaceBackend};
 //! use agents_kit::config::{AgentConfig, CustomAgentConfig, CustomLoopLimits, CustomToolApproval};
@@ -59,7 +59,7 @@
 //!     ProviderKind::Ollama(OllamaConfig::local()), TransportConfig::default()))?;
 //! let agent = AgentBuilder::create(config, AgentStorage::new(store))
 //!     .with_provider(provider).with_toolset(tools).build().await?;
-//! let outcome = async {
+//! let outcome = Box::pin(async {
 //!     let cwd = std::env::current_dir()?;
 //!     let context = WorkspaceContext::new(cwd.clone(),
 //!         vec![WorkspaceRoot::new(cwd, WorkspaceRootAccess::ReadWrite)?],
@@ -132,7 +132,7 @@
 //!         (Err(error), _) | (_, Err(error)) => Err(error),
 //!         (Ok(()), Ok(())) => Ok(()),
 //!     }
-//! }.await;
+//! }).await;
 //! let shutdown = agent.shutdown().await;
 //! match (outcome, shutdown) {
 //!     (Err(primary), Err(cleanup)) => Err(primary.with_supplementary(cleanup)),

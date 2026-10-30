@@ -28,7 +28,7 @@
 //! listing and prompting use the real native service, so this compiles without
 //! running as a doctest. No caller Provider is constructed for a native Agent.
 //!
-//! ```no_run
+//! ```no_run,standalone_crate
 //! use std::{num::NonZeroUsize, time::Duration};
 //! use agents_kit::{AgentBackend, AgentBuilder, AgentStorage, ConversationBackend, WorkspaceBackend};
 //! use agents_kit::config::{AgentConfig, CodexConfig};
@@ -46,7 +46,7 @@
 //! let config = AgentConfig::new(CodexConfig::spawn(Duration::from_secs(15),
 //!     Duration::from_secs(90))?.into(), Duration::from_secs(60), NonZeroUsize::MIN)?;
 //! let agent = AgentBuilder::create(config, AgentStorage::new(store)).build().await?;
-//! let outcome = async {
+//! let outcome = Box::pin(async {
 //!     let selected = ModelSelector::new("gpt-6-luna")?;
 //!     let effort = ReasoningEffort::medium();
 //!     let inventory = agent.list_models().await?;
@@ -81,7 +81,7 @@
 //!         (Err(error), _) | (_, Err(error)) => Err(error),
 //!         (Ok(()), Ok(())) => Ok(()),
 //!     }
-//! }.await;
+//! }).await;
 //! let shutdown = agent.shutdown().await;
 //! match (outcome, shutdown) {
 //!     (Err(primary), Err(cleanup)) => Err(primary.with_supplementary(cleanup)),

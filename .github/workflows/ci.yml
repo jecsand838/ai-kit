@@ -1,60 +1,35 @@
-name: CI
+# TEMPORARY DIAGNOSTIC BRANCH ONLY. Do not merge this replacement CI workflow.
+name: Agent doctest diagnostic
 
 on:
-  pull_request:
-    branches: [main]
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
-
 jobs:
-  formatting:
-    name: Formatting
+  agent-doctest-diagnostic:
+    name: Compare four Agent doctests on pinned Linux and Rust
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    steps:
-      - name: Check out source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Check formatting with the repository Rust toolchain
-        run: |
-          toolchain="$(python3 -c 'import tomllib; print(tomllib.load(open("rust-toolchain.toml", "rb"))["toolchain"]["channel"])')"
-          rustup toolchain install "$toolchain" --profile minimal --component rustfmt
-          cargo +"$toolchain" fmt --all --check
-
-  tests:
-    name: Tests
-    needs: formatting
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 60
     env:
       CARGO_BUILD_JOBS: "2"
       CARGO_INCREMENTAL: "0"
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_TERM_COLOR: never
+      RUSTUP_TOOLCHAIN: "1.99.0"
+      RUSTFLAGS: ""
+      RUSTDOCFLAGS: ""
     steps:
-      - name: Check out source
+      - name: Check out candidate diagnostic branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
 
-      - name: Verify registry sources and explicit audit exceptions
-        run: python3 scripts/security_dependencies.py verify --root "$GITHUB_WORKSPACE"
-
-      - name: Install the repository Rust toolchain
-        run: |
-          toolchain="$(python3 -c 'import tomllib; print(tomllib.load(open("rust-toolchain.toml", "rb"))["toolchain"]["channel"])')"
-          rustup toolchain install "$toolchain" --profile minimal --component clippy,rustfmt
-          rustup show active-toolchain
+      - name: Install pinned Rust compiler
+        run: rustup toolchain install 1.99.0 --profile minimal --component clippy,rustfmt
 
       - name: Install native build prerequisites
         run: |
@@ -63,7 +38,7 @@ jobs:
             clang libclang-dev cmake protobuf-compiler libprotobuf-dev \
             python3 pkg-config libssl-dev
 
-      - name: Restore Cargo downloads and build outputs
+      - name: Restore existing Cargo downloads and build outputs without saving
         id: cargo-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -71,197 +46,221 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target/debug
-          # Bump v1 when changing artifact-affecting build settings, not timeouts/triggers.
           key: cargo-unified-v1-nodebug-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'providers-kit/Cargo.toml', 'storage-kit/Cargo.toml', 'tools-kit/Cargo.toml', 'agents-kit/Cargo.toml', 'app-kit/Cargo.toml') }}-tests
-          restore-keys: |
-            cargo-unified-v1-nodebug-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'providers-kit/Cargo.toml', 'storage-kit/Cargo.toml', 'tools-kit/Cargo.toml', 'agents-kit/Cargo.toml', 'app-kit/Cargo.toml') }}-linting
-            cargo-unified-v1-nodebug-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'providers-kit/Cargo.toml', 'storage-kit/Cargo.toml', 'tools-kit/Cargo.toml', 'agents-kit/Cargo.toml', 'app-kit/Cargo.toml') }}
-            cargo-unified-v1-nodebug-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-
 
-      - name: Run all seven public-trait mock targets
-        id: validation
-        # Signal the runner directly so it joins its Cargo process group before
-        # caches are archived. GitHub's step timeout is a final backstop.
-        timeout-minutes: 19
-        run: exec timeout --signal=TERM --kill-after=10s 18m python3 scripts/mock_contract_runner.py ci-tests
-
-      - name: Report build disk usage
-        if: ${{ always() }}
-        run: |
-          df -h .
-          if [ -d target/debug ]; then
-            du -sh target/debug
-          fi
-
-      - name: Upload fresh CI reports and logs
-        if: ${{ always() }}
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: tests-${{ github.run_id }}-${{ github.run_attempt }}
-          path: target/mock-contracts/
-          retention-days: 7
-          if-no-files-found: warn
-
-      - name: Save Cargo cache after a successful cache miss
-        if: ${{ success() && steps.cargo-cache.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target/debug
-          key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
-
-      - name: Preserve partial compilation after a failed cache miss
-        # A bounded cold build may need another run. Cargo rechecks these outputs;
-        # the failed run stays failed and test reports are never cached.
-        if: >-
-          ${{ failure() && !cancelled() && steps.validation.outcome == 'failure' &&
-              steps.cargo-cache.outputs.cache-primary-key != '' &&
-              steps.cargo-cache.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target/debug
-          key: ${{ steps.cargo-cache.outputs.cache-primary-key }}-partial-${{ github.run_id }}-${{ github.run_attempt }}
-
-  linting:
-    name: Linting
-    needs: tests
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    env:
-      CARGO_BUILD_JOBS: "2"
-      CARGO_INCREMENTAL: "0"
-      CARGO_PROFILE_DEV_DEBUG: "0"
-      CARGO_PROFILE_TEST_DEBUG: "0"
-    steps:
-      - name: Check out source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Verify registry sources and explicit audit exceptions
-        run: python3 scripts/security_dependencies.py verify --root "$GITHUB_WORKSPACE"
-
-      - name: Install the repository Rust toolchain
-        run: |
-          toolchain="$(python3 -c 'import tomllib; print(tomllib.load(open("rust-toolchain.toml", "rb"))["toolchain"]["channel"])')"
-          rustup toolchain install "$toolchain" --profile minimal --component clippy,rustfmt
-          rustup show active-toolchain
-
-      - name: Install native build prerequisites
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends \
-            clang libclang-dev cmake protobuf-compiler libprotobuf-dev \
-            python3 pkg-config libssl-dev
-
-      - name: Restore Cargo downloads and build outputs
-        id: cargo-cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target/debug
-          # Bump v1 when changing artifact-affecting build settings, not timeouts/triggers.
-          key: cargo-unified-v1-nodebug-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'providers-kit/Cargo.toml', 'storage-kit/Cargo.toml', 'tools-kit/Cargo.toml', 'agents-kit/Cargo.toml', 'app-kit/Cargo.toml') }}-linting
-          restore-keys: |
-            cargo-unified-v1-nodebug-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'providers-kit/Cargo.toml', 'storage-kit/Cargo.toml', 'tools-kit/Cargo.toml', 'agents-kit/Cargo.toml', 'app-kit/Cargo.toml') }}-tests
-            cargo-unified-v1-nodebug-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'providers-kit/Cargo.toml', 'storage-kit/Cargo.toml', 'tools-kit/Cargo.toml', 'agents-kit/Cargo.toml', 'app-kit/Cargo.toml') }}
-            cargo-unified-v1-nodebug-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-
-
-      - name: Lint libraries and mock targets with Clippy
-        id: validation
-        # Signal the runner directly so it joins its Cargo process group before
-        # caches are archived. GitHub's step timeout is a final backstop.
-        timeout-minutes: 9
-        run: exec timeout --signal=TERM --kill-after=10s 8m python3 scripts/mock_contract_runner.py ci-lint
-
-      - name: Report build disk usage
-        if: ${{ always() }}
-        run: |
-          df -h .
-          if [ -d target/debug ]; then
-            du -sh target/debug
-          fi
-
-      - name: Upload fresh CI reports and logs
-        if: ${{ always() }}
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: linting-${{ github.run_id }}-${{ github.run_attempt }}
-          path: target/mock-contracts/
-          retention-days: 7
-          if-no-files-found: warn
-
-      - name: Save Cargo cache after a successful cache miss
-        if: ${{ success() && steps.cargo-cache.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target/debug
-          key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
-
-      - name: Preserve partial compilation after a failed cache miss
-        # A bounded cold build may need another run. Cargo rechecks these outputs;
-        # the failed run stays failed and test reports are never cached.
-        if: >-
-          ${{ failure() && !cancelled() && steps.validation.outcome == 'failure' &&
-              steps.cargo-cache.outputs.cache-primary-key != '' &&
-              steps.cargo-cache.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target/debug
-          key: ${{ steps.cargo-cache.outputs.cache-primary-key }}-partial-${{ github.run_id }}-${{ github.run_attempt }}
-
-  security:
-    name: Security audit
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    steps:
-      - name: Check out source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Verify registry sources and explicit audit exceptions
-        run: python3 scripts/security_dependencies.py verify --root "$GITHUB_WORKSPACE"
-
-      - name: Install the pinned prebuilt security scanner
-        working-directory: ${{ runner.temp }}
-        run: |
-          curl --fail --location --retry 2 --connect-timeout 15 --max-time 120 \
-            https://github.com/rustsec/rustsec/releases/download/cargo-audit/v0.22.2/cargo-audit-x86_64-unknown-linux-musl-v0.22.2.tgz \
-            --output cargo-audit.tgz
-          printf '%s  %s\n' \
-            7fb9497f8594b389e5fce5ef9b92db08432996895b2e0c5a0167a69ed445c428 \
-            cargo-audit.tgz | sha256sum --check --strict
-          tar -xzf cargo-audit.tgz --strip-components=1
-
-      - name: Audit the lockfile and retain raw findings with qualified results
+      - name: Run baseline and candidate sequentially and grade exact evidence
+        timeout-minutes: 45
         shell: bash
-        working-directory: ${{ runner.temp }}
+        env:
+          DIAGNOSTIC_CACHE_HIT: ${{ steps.cargo-cache.outputs.cache-hit }}
+          DIAGNOSTIC_CACHE_KEY: ${{ steps.cargo-cache.outputs.cache-primary-key }}
         run: |
-          python3 "$GITHUB_WORKSPACE/scripts/security_dependencies.py" audit \
-            --root "$GITHUB_WORKSPACE" \
-            --scanner "$RUNNER_TEMP/cargo-audit" \
-            --database "$RUNNER_TEMP/advisory-db" \
-            --output "$RUNNER_TEMP/security-audit"
+          set -euo pipefail
+          diagnostic_dir=target/agent-doctest-diagnostic
+          mkdir -p "$diagnostic_dir"
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import subprocess
+          import tempfile
+          import tomllib
 
-      - name: Upload security audit diagnostics
+          root = pathlib.Path.cwd()
+          evidence = root / "target/agent-doctest-diagnostic"
+          baseline = "fdbaae857624964723ebe955d9a6572da9bb7f4f"
+          files = [f"agents-kit/src/{name}.rs" for name in
+                   ("conversation", "knowledge", "model", "workspace")]
+
+          def git(*arguments):
+              return subprocess.check_output(["git", *arguments])
+
+          candidate = git("rev-parse", "HEAD").decode().strip()
+          (evidence / "baseline.sha").write_text(baseline + "\n")
+          (evidence / "candidate.sha").write_text(candidate + "\n")
+          (evidence / "candidate.patch").write_bytes(
+              git("diff", "--binary", baseline, candidate, "--", *files))
+          (evidence / "all-changed-files.txt").write_bytes(
+              git("diff", "--name-status", baseline, candidate))
+          worktree = git("status", "--porcelain")
+          (evidence / "initial-worktree.txt").write_bytes(worktree)
+          if worktree:
+              raise SystemExit("Diagnostic requires a clean candidate checkout.")
+          changed = set(git("diff", "--name-only", baseline, candidate).decode().splitlines())
+          if changed != set(files) | {".github/workflows/ci.yml"}:
+              raise SystemExit(f"Unexpected candidate delta: {sorted(changed)}")
+          if tomllib.loads((root / "rust-toolchain.toml").read_text())["toolchain"]["channel"] != "1.99.0":
+              raise SystemExit("Repository toolchain is not the expected 1.99.0.")
+
+          originals = pathlib.Path(tempfile.mkdtemp(prefix="originals-", dir=evidence))
+          (evidence / "originals-directory.txt").write_text(str(originals) + "\n")
+          identities = []
+          for filename in files:
+              candidate_bytes = (root / filename).read_bytes()
+              baseline_bytes = git("show", f"{baseline}:{filename}")
+              saved = originals / filename
+              saved.parent.mkdir(parents=True, exist_ok=True)
+              saved.write_bytes(candidate_bytes)
+              identities.append({
+                  "path": filename,
+                  "baseline_sha256": hashlib.sha256(baseline_bytes).hexdigest(),
+                  "candidate_sha256": hashlib.sha256(candidate_bytes).hexdigest(),
+              })
+
+          compiler = subprocess.check_output(["rustc", "--version", "--verbose"], text=True)
+          if not compiler.startswith("rustc 1.99.0 "):
+              raise SystemExit("Unexpected active Rust compiler.")
+          (evidence / "compiler.txt").write_text(compiler)
+          (evidence / "cargo.txt").write_bytes(subprocess.check_output(["cargo", "--version", "--verbose"]))
+          (evidence / "toolchain.txt").write_bytes(subprocess.check_output(["rustup", "show", "active-toolchain"]))
+          (evidence / "platform.txt").write_bytes(subprocess.check_output(["uname", "-a"]))
+          (evidence / "os-release.txt").write_bytes(pathlib.Path("/etc/os-release").read_bytes())
+          profile_keys = ["CARGO_BUILD_JOBS", "CARGO_INCREMENTAL", "CARGO_PROFILE_DEV_DEBUG",
+                          "CARGO_PROFILE_TEST_DEBUG", "CARGO_TERM_COLOR", "RUSTUP_TOOLCHAIN",
+                          "RUSTFLAGS", "RUSTDOCFLAGS"]
+          provenance = {
+              "baseline_sha": baseline, "candidate_sha": candidate,
+              "source_files": identities,
+              "profile": {key: os.environ.get(key) for key in profile_keys},
+              "cache": {"hit": os.environ.get("DIAGNOSTIC_CACHE_HIT"),
+                        "key": os.environ.get("DIAGNOSTIC_CACHE_KEY")},
+              "github": {key: os.environ.get(key) for key in
+                         ("GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "GITHUB_REF", "GITHUB_SHA")},
+              "command": ["cargo", "test", "--locked", "-p", "agents-kit", "--doc",
+                          "--all-features", "--", "--show-output", "agents-kit/src/lib.rs",
+                          "WorkspaceBackend::new_conversation", "--skip", "33)", "--test-threads=1"],
+              "per_command_timeout_seconds": 1200,
+              "scope": "Four affected doctests only; no full docs, release, docs.rs, or strict-live qualification.",
+          }
+          (evidence / "provenance.json").write_text(json.dumps(provenance, indent=2) + "\n")
+          PY
+
+          originals_dir="$(cat "$diagnostic_dir/originals-directory.txt")"
+          diagnostic_files=(
+            agents-kit/src/conversation.rs
+            agents-kit/src/knowledge.rs
+            agents-kit/src/model.rs
+            agents-kit/src/workspace.rs
+          )
+          restore_candidate() {
+            for filename in "${diagnostic_files[@]}"; do
+              # Write fresh mtimes so Cargo cannot reuse a baseline fingerprint.
+              cat "$originals_dir/$filename" > "$filename"
+            done
+          }
+          trap restore_candidate EXIT
+
+          baseline_sha="$(cat "$diagnostic_dir/baseline.sha")"
+          for filename in "${diagnostic_files[@]}"; do
+            git show "$baseline_sha:$filename" > "$filename"
+          done
+          git diff --binary HEAD -- "${diagnostic_files[@]}" > "$diagnostic_dir/baseline-working-tree.patch"
+          git diff --exit-code "$baseline_sha" -- . ':!.github/workflows/ci.yml' > "$diagnostic_dir/baseline-source-check.txt"
+
+          set +e
+          timeout --signal=TERM --kill-after=10s 20m \
+            cargo test --locked -p agents-kit --doc --all-features -- --show-output \
+            agents-kit/src/lib.rs WorkspaceBackend::new_conversation --skip '33)' --test-threads=1 \
+            2>&1 | tee "$diagnostic_dir/baseline.log"
+          baseline_statuses=("${PIPESTATUS[@]}")
+          set -e
+          printf '%s\n' "${baseline_statuses[0]}" > "$diagnostic_dir/baseline.exit-status"
+          printf '%s\n' "${baseline_statuses[1]}" > "$diagnostic_dir/baseline.tee-status"
+          printf 'Baseline exit status: %s; log writer exit status: %s\n' "${baseline_statuses[@]}"
+
+          restore_candidate
+          git diff --exit-code HEAD -- . > "$diagnostic_dir/candidate-source-check.txt"
+          set +e
+          timeout --signal=TERM --kill-after=10s 20m \
+            cargo test --locked -p agents-kit --doc --all-features -- --show-output \
+            agents-kit/src/lib.rs WorkspaceBackend::new_conversation --skip '33)' --test-threads=1 \
+            2>&1 | tee "$diagnostic_dir/candidate.log"
+          candidate_statuses=("${PIPESTATUS[@]}")
+          set -e
+          printf '%s\n' "${candidate_statuses[0]}" > "$diagnostic_dir/candidate.exit-status"
+          printf '%s\n' "${candidate_statuses[1]}" > "$diagnostic_dir/candidate.tee-status"
+          printf 'Candidate exit status: %s; log writer exit status: %s\n' "${candidate_statuses[@]}"
+          git diff --exit-code HEAD -- . > "$diagnostic_dir/final-source-check.txt"
+
+          python3 - <<'PY'
+          import json
+          import os
+          import pathlib
+          import re
+
+          evidence = pathlib.Path("target/agent-doctest-diagnostic")
+          expected = {
+              "agents-kit/src/lib.rs - conversation (line 103)",
+              "agents-kit/src/lib.rs - knowledge (line 104)",
+              "agents-kit/src/lib.rs - model (line 112)",
+              "agents-kit/src/workspace.rs - workspace::WorkspaceBackend::new_conversation (line 1265)",
+          }
+
+          def inspect(label):
+              text = (evidence / f"{label}.log").read_text()
+              rows = re.findall(r"^test (.*?) \.\.\. (ok|FAILED)\s*$", text, re.MULTILINE)
+              outcomes = [{"test": name.removesuffix(" - compile"), "status": status}
+                          for name, status in rows]
+              summaries = re.findall(
+                  r"^test result: (ok|FAILED)\. (\d+) passed; (\d+) failed; (\d+) ignored; (\d+) measured; (\d+) filtered out;",
+                  text, re.MULTILINE)
+              return {
+                  "exit_status": int((evidence / f"{label}.exit-status").read_text()),
+                  "tee_status": int((evidence / f"{label}.tee-status").read_text()),
+                  "tests": outcomes,
+                  "summary_count": len(summaries),
+                  "passed": sum(int(row[1]) for row in summaries),
+                  "failed": sum(int(row[2]) for row in summaries),
+                  "ignored": sum(int(row[3]) for row in summaries),
+                  "measured": sum(int(row[4]) for row in summaries),
+                  "depth_limit_errors": text.count("error: queries overflow the depth limit!"),
+                  "recursion_limit_diagnostics": text.count('recursion_limit = "256"'),
+              }
+
+          baseline = inspect("baseline")
+          candidate = inspect("candidate")
+
+          def exact_tests(result, status):
+              return (len(result["tests"]) == 4
+                      and {row["test"] for row in result["tests"]} == expected
+                      and all(row["status"] == status for row in result["tests"])
+                      and result["summary_count"] > 0
+                      and result["ignored"] == result["measured"] == result["tee_status"] == 0)
+
+          reproduced = (exact_tests(baseline, "FAILED") and baseline["exit_status"] == 101
+                        and baseline["passed"] == 0 and baseline["failed"] == 4
+                        and baseline["depth_limit_errors"] == baseline["recursion_limit_diagnostics"] == 4)
+          candidate_passed = (exact_tests(candidate, "ok") and candidate["exit_status"] == 0
+                              and candidate["passed"] == 4 and candidate["failed"] == 0
+                              and candidate["depth_limit_errors"] == 0)
+          if not reproduced:
+              verdict = "inconclusive_baseline_not_reproduced"
+              explanation = "Baseline did not reproduce exactly four expected recursion failures; no repair is proven."
+          elif not candidate_passed:
+              verdict = "candidate_failed"
+              explanation = "Baseline reproduced; candidate did not pass all four affected doctests."
+          else:
+              verdict = "repair_proven_for_four_doctests"
+              explanation = "Baseline reproduced all four recursion failures; candidate passed the same four doctests."
+          result = {
+              "verdict": verdict, "explanation": explanation,
+              "baseline": baseline, "candidate": candidate,
+              "qualification": "Focused diagnostic only. Full documentation and release gates remain separate.",
+          }
+          rendered = json.dumps(result, indent=2) + "\n"
+          (evidence / "result.json").write_text(rendered)
+          print(rendered)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+              summary.write(f"**{verdict}**\n\n{explanation}\n\n{result['qualification']}\n")
+          raise SystemExit(0 if reproduced and candidate_passed else 1)
+          PY
+
+      - name: Upload diagnostic evidence even on failure
         if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: security-audit-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/security-audit/
+          name: agent-doctest-diagnostic-${{ github.run_id }}-${{ github.run_attempt }}
+          path: target/agent-doctest-diagnostic/
           retention-days: 7
           if-no-files-found: warn

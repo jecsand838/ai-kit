@@ -6,7 +6,7 @@ on:
       version:
         description: Cargo version already committed on main (without v)
         required: true
-        default: '0.0.1'
+        default: '0.0.2'
         type: string
       initial_release_override:
         description: '0.0.1 only: accept deferred strict-live, slow tests and full qualification'

@@ -81,8 +81,10 @@ when reproducibility matters, and review the
 Repository `main` may contain changes that are not yet published; the package
 links above identify available versions and their released API documentation.
 
-Maintainers publish selected revisions of `main` through the manual
-[release process](docs/RELEASING.md).
+The current release preparation targets `0.0.2`; the installation example above
+retains the published `0.0.1` pin. Maintainers publish selected revisions of
+`main` through the manual [release process](docs/RELEASING.md) after normal
+qualification. Preparation does not publish packages or establish qualification.
 
 ## Contributing and testing
 

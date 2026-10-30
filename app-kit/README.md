@@ -40,7 +40,7 @@ Agent, Workspace, and Conversation enums.
 The exact public contract is
 [`specs/SPECIFICATIONS.md`](specs/SPECIFICATIONS.md).
 
-App's packaged dependency requires exactly `agents-kit =0.0.1`, inherited from
+App's packaged dependency requires exactly `agents-kit =0.0.2`, inherited from
 the workspace dependency declaration. This prevents Cargo from selecting a
 different Agent patch release when verifying the package. Advancing that
 requirement requires explicit compatibility review and package verification;

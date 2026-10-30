@@ -79,7 +79,7 @@ dependencies = [
 
 [[package]]
 name = "agents-kit"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -184,7 +184,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "app-kit"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "agents-kit",
  "futures-util",
@@ -6385,7 +6385,7 @@ dependencies = [
 
 [[package]]
 name = "providers-kit"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "base64 0.22.1",
  "futures-util",
@@ -7917,7 +7917,7 @@ dependencies = [
 
 [[package]]
 name = "storage-kit"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "arrow-array",
  "arrow-schema",
@@ -9277,7 +9277,7 @@ dependencies = [
 
 [[package]]
 name = "tools-kit"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "axum",
  "futures-core",

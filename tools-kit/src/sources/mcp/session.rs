@@ -32,7 +32,7 @@ impl ClientHandler for ToolKitClientHandler {
             });
         }
         InitializeRequestParams::new(capabilities, {
-            let mut implementation = Implementation::new("ai-kit-tools-kit", "0.0.1");
+            let mut implementation = Implementation::new("ai-kit-tools-kit", "0.0.2");
             implementation.title = Some("ai-kit tools-kit".to_owned());
             implementation
         })

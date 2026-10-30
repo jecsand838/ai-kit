@@ -29,6 +29,7 @@
 //! running as a doctest. No caller Provider is constructed for a native Agent.
 //!
 //! ```no_run,standalone_crate
+//! #![recursion_limit = "256"] // Nested concrete async futures need this on Linux.
 //! use std::{num::NonZeroUsize, time::Duration};
 //! use agents_kit::{AgentBackend, AgentBuilder, AgentStorage, ConversationBackend, WorkspaceBackend};
 //! use agents_kit::config::{AgentConfig, CodexConfig};
@@ -46,7 +47,7 @@
 //! let config = AgentConfig::new(CodexConfig::spawn(Duration::from_secs(15),
 //!     Duration::from_secs(90))?.into(), Duration::from_secs(60), NonZeroUsize::MIN)?;
 //! let agent = AgentBuilder::create(config, AgentStorage::new(store)).build().await?;
-//! let outcome = Box::pin(async {
+//! let outcome = async {
 //!     let selected = ModelSelector::new("gpt-6-luna")?;
 //!     let effort = ReasoningEffort::medium();
 //!     let inventory = agent.list_models().await?;
@@ -64,7 +65,7 @@
 //!         let request = PromptRequest::new("Describe the current task without changing files.")?
 //!             .with_model(selected).with_reasoning_effort(effort)
 //!             .with_timeout(Duration::from_secs(90))?;
-//!         let conversation = Box::pin(workspace.new_conversation(NewConversation::new(None, None, vec![])?)).await?;
+//!         let conversation = workspace.new_conversation(NewConversation::new(None, None, vec![])?).await?;
 //!         let response = conversation.prompt(request).await;
 //!         let close = conversation.close().await;
 //!         let response = match (response, close) {
@@ -81,7 +82,7 @@
 //!         (Err(error), _) | (_, Err(error)) => Err(error),
 //!         (Ok(()), Ok(())) => Ok(()),
 //!     }
-//! }).await;
+//! }.await;
 //! let shutdown = agent.shutdown().await;
 //! match (outcome, shutdown) {
 //!     (Err(primary), Err(cleanup)) => Err(primary.with_supplementary(cleanup)),

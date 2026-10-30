@@ -1263,6 +1263,7 @@ pub trait WorkspaceBackend: Send + Sync + 'static {
     /// This local Custom agent uses in-memory Lance and sends no network requests.
     ///
     /// ```standalone_crate
+    /// #![recursion_limit = "256"] // Nested concrete async futures need this on Linux.
     /// # use std::{num::NonZeroUsize, time::Duration};
     /// # use agents_kit::{AgentBackend, AgentBuilder, AgentStorage, WorkspaceBackend};
     /// # use agents_kit::config::{AgentConfig, CustomAgentConfig, CustomLoopLimits, CustomToolApproval};
@@ -1278,7 +1279,7 @@ pub trait WorkspaceBackend: Send + Sync + 'static {
     /// # let provider = Provider::from_config(ProviderConfig::new(
     /// #     ProviderKind::Ollama(OllamaConfig::local()), TransportConfig::default()))?;
     /// # let agent = AgentBuilder::create(config, AgentStorage::new(store)).with_provider(provider).build().await?;
-    /// # let outcome = Box::pin(async {
+    /// # let outcome = async {
     /// # use agents_kit::workspace::{NewWorkspace, WorkspaceContext, WorkspaceDefaults,
     /// #     WorkspaceRoot, WorkspaceRootAccess, WorkspaceExecutionPolicy, WorkspaceSandboxMode, WorkspaceNetworkAccess};
     /// # let cwd = std::env::current_dir()?;
@@ -1290,9 +1291,9 @@ pub trait WorkspaceBackend: Send + Sync + 'static {
     /// use agents_kit::conversation::NewConversation;
     /// let workspace_id = workspace.id();
     /// let result = async {
-    ///     let conversation = Box::pin(workspace.new_conversation(NewConversation::new(
+    ///     let conversation = workspace.new_conversation(NewConversation::new(
     ///         Some("Review".into()), None, Vec::new(),
-    ///     )?)).await?;
+    ///     )?).await?;
     ///     let id = conversation.id();
     ///     let info = conversation.info().await?;
     ///     assert_eq!(info.id(), &id);
@@ -1338,7 +1339,7 @@ pub trait WorkspaceBackend: Send + Sync + 'static {
     ///     (Ok(()), Ok(())) => Ok(()),
     /// }?;
     /// # Ok::<(), agents_kit::KitError>(())
-    /// # }).await;
+    /// # }.await;
     /// # let cleanup = agent.shutdown().await;
     /// # match (outcome, cleanup) {
     /// #     (Err(primary), Err(cleanup)) => Err(primary.with_supplementary(cleanup)),

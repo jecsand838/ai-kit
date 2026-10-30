@@ -19,6 +19,8 @@ Use this file for the exact `ai-kit` workspace rustdoc refresh sequence.
    `# Errors`, `# Panics`, or `# Safety`.
 3. Identify the items that may justify `no_run` because they require live
    services, credentials, or subprocesses.
+4. Identify canonical examples and repeated setup. Record source example counts
+   and duplicated bodies as review evidence, not quotas that freeze documentation.
 
 ## Execution
 
@@ -27,8 +29,15 @@ Use this file for the exact `ai-kit` workspace rustdoc refresh sequence.
    correct.
 3. Prefer runnable examples for pure or local APIs and reserve `no_run` for
    real live-service or subprocess entrypoints.
+   Use small direct-trait implementations where they simplify portable examples;
+   instantiate them and assert the observed behavior. Reuse larger private mocks
+   in crate-local example tests and distinguish linked executable recipes from
+   standalone doctests. Keep real persistence examples for durability claims.
 4. Update focused source-contract tests and the shared docs gate together when
    rustdoc expectations change.
+5. Replace redundant examples with intra-doc links to their canonical workflow,
+   preserving method-specific errors, lifecycle guarantees and compile-fail
+   contracts. Ensure retained resource-owning examples settle cleanup on failure.
 
 ## Validation
 

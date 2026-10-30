@@ -42,8 +42,14 @@ use crate::runtime::HealthStatus;
 ///
 /// # #[tokio::main(flavor = "current_thread")]
 /// # async fn main() -> Result<(), providers_kit::KitError> {
-/// use providers_kit::{Provider, ProviderBackend, ProviderConfig, ModelBackend, ModelId, config::{ProviderKind, OllamaConfig, TransportConfig}};
-/// let provider = Provider::from_config(ProviderConfig::new(ProviderKind::Ollama(OllamaConfig::local()), TransportConfig::default()))?;
+/// use providers_kit::{
+///     ModelBackend, ModelId, Provider, ProviderBackend, ProviderConfig,
+///     config::{OllamaConfig, ProviderKind, TransportConfig},
+/// };
+/// let provider = Provider::from_config(ProviderConfig::new(
+///     ProviderKind::Ollama(OllamaConfig::local()),
+///     TransportConfig::default(),
+/// ))?;
 /// let model = provider.model(ModelId::new("exact-model")?)?;
 /// assert_eq!(model.model_id().as_str(), "exact-model");
 /// provider.shutdown().await?;
@@ -199,12 +205,16 @@ use crate::runtime::HealthStatus;
 /// assert!(Arc::ptr_eq(&response.message.continuation().unwrap().0, &model.replay.0));
 /// let mut events = model.generate_stream(&request).await?;
 /// assert!(matches!(events.next().await.transpose()?, Some(GenerateEvent::Started { .. })));
-/// assert!(matches!(events.next().await.transpose()?, Some(GenerateEvent::ContentDelta { delta }) if delta == "hello"));
+/// assert!(
+///     matches!(events.next().await.transpose()?, Some(GenerateEvent::ContentDelta { delta }) if delta == "hello")
+/// );
 /// assert!(matches!(events.next().await.transpose()?, Some(GenerateEvent::Completed(_))));
 /// assert!(events.next().await.is_none());
 /// let mut session = model.open_session(SessionConfig::default()).await?;
 /// session.send(SessionInput::Text { text: "hello again".into() }).await?;
-/// assert!(matches!(session.recv().await?, SessionEvent::TextDelta { delta } if delta == "hello again"));
+/// assert!(
+///     matches!(session.recv().await?, SessionEvent::TextDelta { delta } if delta == "hello again")
+/// );
 /// assert_eq!(session.recv().await?, SessionEvent::Completed);
 /// session.close().await?;
 /// provider.shutdown().await?;
@@ -224,28 +234,14 @@ pub trait ProviderBackend: Send + Sync + 'static {
     ///
     /// Returns an error when root admission is closed or the selected implementation cannot construct this exact model. Selection never silently falls back to another model.
     ///
-    /// # Examples
-    ///
-    /// ```
-    ///
-    /// # #[tokio::main(flavor = "current_thread")]
-    /// # async fn main() -> Result<(), providers_kit::KitError> {
-    /// use providers_kit::{Provider, ProviderBackend, ProviderConfig, ModelBackend, ModelId, config::{ProviderKind, OllamaConfig, TransportConfig}};
-    /// let provider = Provider::from_config(ProviderConfig::new(ProviderKind::Ollama(OllamaConfig::local()), TransportConfig::default()))?;
-    /// let model = provider.model(ModelId::new("exact-model")?)?;
-    /// assert_eq!(model.model_id().as_str(), "exact-model");
-    /// provider.shutdown().await?;
-    ///
-    /// # Ok(())
-    /// # }
-    /// ```
+    /// See [`crate::ProviderBackend`] for a complete example.
     ///
     fn model(&self, id: ModelId) -> Result<Self::Model, KitError>;
 
     /// Lists provider-visible models.
     ///
     /// This example requires a real configured service, valid credentials, and any exact
-    /// resource ids shown. Only delete or cancel resources the caller owns.
+    /// resource ids shown.
     /// The default trait implementation returns Unsupported.
     ///
     /// # Errors
@@ -258,12 +254,24 @@ pub trait ProviderBackend: Send + Sync + 'static {
     ///
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() -> Result<(), providers_kit::KitError> {
-    /// use providers_kit::{Provider, ProviderBackend, ProviderConfig, config::{ApiKey, OpenAiConfig, ProviderKind, TransportConfig}};
-    /// let provider = Provider::from_config(ProviderConfig::new(ProviderKind::OpenAi(OpenAiConfig::new(ApiKey::new("replace-with-your-key")?)), TransportConfig::default()))?;
+    /// use providers_kit::{
+    ///     Provider, ProviderBackend, ProviderConfig,
+    ///     config::{ApiKey, OpenAiConfig, ProviderKind, TransportConfig},
+    /// };
+    /// let provider = Provider::from_config(ProviderConfig::new(
+    ///     ProviderKind::OpenAi(OpenAiConfig::new(ApiKey::new("replace-with-your-key")?)),
+    ///     TransportConfig::default(),
+    /// ))?;
     /// let result = provider.list_models(providers_kit::models::ModelListRequest::default()).await;
     /// let cleanup = provider.shutdown().await;
-    /// let _value = result?;
+    /// if let Err(error) = &cleanup {
+    ///     eprintln!("Cleanup failed: {error}");
+    /// }
+    /// let page = result?;
     /// cleanup?;
+    /// for model in page.models {
+    ///     println!("{}", model.id.as_str());
+    /// }
     ///
     /// # Ok(())
     /// # }
@@ -288,7 +296,7 @@ pub trait ProviderBackend: Send + Sync + 'static {
     /// Fetches descriptive metadata for one exact provider-local model.
     ///
     /// This example requires a real configured service, valid credentials, and any exact
-    /// resource ids shown. Only delete or cancel resources the caller owns.
+    /// resource ids shown.
     /// The default trait implementation returns Unsupported.
     ///
     /// # Errors
@@ -301,10 +309,19 @@ pub trait ProviderBackend: Send + Sync + 'static {
     ///
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() -> Result<(), providers_kit::KitError> {
-    /// use providers_kit::{Provider, ProviderBackend, ProviderConfig, config::{ApiKey, OpenAiConfig, ProviderKind, TransportConfig}};
-    /// let provider = Provider::from_config(ProviderConfig::new(ProviderKind::OpenAi(OpenAiConfig::new(ApiKey::new("replace-with-your-key")?)), TransportConfig::default()))?;
+    /// use providers_kit::{
+    ///     Provider, ProviderBackend, ProviderConfig,
+    ///     config::{ApiKey, OpenAiConfig, ProviderKind, TransportConfig},
+    /// };
+    /// let provider = Provider::from_config(ProviderConfig::new(
+    ///     ProviderKind::OpenAi(OpenAiConfig::new(ApiKey::new("replace-with-your-key")?)),
+    ///     TransportConfig::default(),
+    /// ))?;
     /// let result = provider.model_info(providers_kit::ModelId::new("your-exact-model-id")?).await;
     /// let cleanup = provider.shutdown().await;
+    /// if let Err(error) = &cleanup {
+    ///     eprintln!("Cleanup failed: {error}");
+    /// }
     /// let _value = result?;
     /// cleanup?;
     ///
@@ -344,11 +361,29 @@ pub trait ProviderBackend: Send + Sync + 'static {
     ///
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() -> Result<(), providers_kit::KitError> {
-    /// use providers_kit::{Provider, ProviderBackend, ProviderConfig, config::{ApiKey, OpenAiConfig, ProviderKind, TransportConfig}};
-    /// let provider = Provider::from_config(ProviderConfig::new(ProviderKind::OpenAi(OpenAiConfig::new(ApiKey::new("replace-with-your-key")?)), TransportConfig::default()))?;
-    /// let result = provider.upload_file(providers_kit::files::FileUploadRequest::new("notes.txt", "text/plain", b"notes".to_vec())?).await;
-    /// let deletion = match &result { Ok(file) => provider.delete_file(file.id.clone()).await, Err(_) => Ok(()) };
+    /// use providers_kit::{
+    ///     Provider, ProviderBackend, ProviderConfig,
+    ///     config::{ApiKey, OpenAiConfig, ProviderKind, TransportConfig},
+    /// };
+    /// let provider = Provider::from_config(ProviderConfig::new(
+    ///     ProviderKind::OpenAi(OpenAiConfig::new(ApiKey::new("replace-with-your-key")?)),
+    ///     TransportConfig::default(),
+    /// ))?;
+    /// let result = provider
+    ///     .upload_file(providers_kit::files::FileUploadRequest::new(
+    ///         "notes.txt",
+    ///         "text/plain",
+    ///         b"notes".to_vec(),
+    ///     )?)
+    ///     .await;
+    /// let deletion = match &result {
+    ///     Ok(file) => provider.delete_file(file.id.clone()).await,
+    ///     Err(_) => Ok(()),
+    /// };
     /// let cleanup = provider.shutdown().await;
+    /// if let Err(error) = &cleanup {
+    ///     eprintln!("Cleanup failed: {error}");
+    /// }
     /// let _value = result?;
     /// deletion?;
     /// cleanup?;
@@ -389,10 +424,19 @@ pub trait ProviderBackend: Send + Sync + 'static {
     ///
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() -> Result<(), providers_kit::KitError> {
-    /// use providers_kit::{Provider, ProviderBackend, ProviderConfig, config::{ApiKey, OpenAiConfig, ProviderKind, TransportConfig}};
-    /// let provider = Provider::from_config(ProviderConfig::new(ProviderKind::OpenAi(OpenAiConfig::new(ApiKey::new("replace-with-your-key")?)), TransportConfig::default()))?;
+    /// use providers_kit::{
+    ///     Provider, ProviderBackend, ProviderConfig,
+    ///     config::{ApiKey, OpenAiConfig, ProviderKind, TransportConfig},
+    /// };
+    /// let provider = Provider::from_config(ProviderConfig::new(
+    ///     ProviderKind::OpenAi(OpenAiConfig::new(ApiKey::new("replace-with-your-key")?)),
+    ///     TransportConfig::default(),
+    /// ))?;
     /// let result = provider.list_files(providers_kit::files::FileListRequest::default()).await;
     /// let cleanup = provider.shutdown().await;
+    /// if let Err(error) = &cleanup {
+    ///     eprintln!("Cleanup failed: {error}");
+    /// }
     /// let _value = result?;
     /// cleanup?;
     ///
@@ -432,10 +476,19 @@ pub trait ProviderBackend: Send + Sync + 'static {
     ///
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() -> Result<(), providers_kit::KitError> {
-    /// use providers_kit::{Provider, ProviderBackend, ProviderConfig, config::{ApiKey, OpenAiConfig, ProviderKind, TransportConfig}};
-    /// let provider = Provider::from_config(ProviderConfig::new(ProviderKind::OpenAi(OpenAiConfig::new(ApiKey::new("replace-with-your-key")?)), TransportConfig::default()))?;
+    /// use providers_kit::{
+    ///     Provider, ProviderBackend, ProviderConfig,
+    ///     config::{ApiKey, OpenAiConfig, ProviderKind, TransportConfig},
+    /// };
+    /// let provider = Provider::from_config(ProviderConfig::new(
+    ///     ProviderKind::OpenAi(OpenAiConfig::new(ApiKey::new("replace-with-your-key")?)),
+    ///     TransportConfig::default(),
+    /// ))?;
     /// let result = provider.file_info("owned-file-id".into()).await;
     /// let cleanup = provider.shutdown().await;
+    /// if let Err(error) = &cleanup {
+    ///     eprintln!("Cleanup failed: {error}");
+    /// }
     /// let _value = result?;
     /// cleanup?;
     ///
@@ -475,10 +528,19 @@ pub trait ProviderBackend: Send + Sync + 'static {
     ///
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() -> Result<(), providers_kit::KitError> {
-    /// use providers_kit::{Provider, ProviderBackend, ProviderConfig, config::{ApiKey, OpenAiConfig, ProviderKind, TransportConfig}};
-    /// let provider = Provider::from_config(ProviderConfig::new(ProviderKind::OpenAi(OpenAiConfig::new(ApiKey::new("replace-with-your-key")?)), TransportConfig::default()))?;
+    /// use providers_kit::{
+    ///     Provider, ProviderBackend, ProviderConfig,
+    ///     config::{ApiKey, OpenAiConfig, ProviderKind, TransportConfig},
+    /// };
+    /// let provider = Provider::from_config(ProviderConfig::new(
+    ///     ProviderKind::OpenAi(OpenAiConfig::new(ApiKey::new("replace-with-your-key")?)),
+    ///     TransportConfig::default(),
+    /// ))?;
     /// let result = provider.delete_file("owned-file-id".into()).await;
     /// let cleanup = provider.shutdown().await;
+    /// if let Err(error) = &cleanup {
+    ///     eprintln!("Cleanup failed: {error}");
+    /// }
     /// let _value = result?;
     /// cleanup?;
     ///
@@ -515,10 +577,24 @@ pub trait ProviderBackend: Send + Sync + 'static {
     ///
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() -> Result<(), providers_kit::KitError> {
-    /// use providers_kit::{Provider, ProviderBackend, ProviderConfig, config::{ApiKey, OpenAiConfig, ProviderKind, TransportConfig}};
-    /// let provider = Provider::from_config(ProviderConfig::new(ProviderKind::OpenAi(OpenAiConfig::new(ApiKey::new("replace-with-your-key")?)), TransportConfig::default()))?;
-    /// let result = provider.download_file("owned-file-id".into(), std::num::NonZeroUsize::new(1024 * 1024).unwrap()).await;
+    /// use providers_kit::{
+    ///     Provider, ProviderBackend, ProviderConfig,
+    ///     config::{ApiKey, OpenAiConfig, ProviderKind, TransportConfig},
+    /// };
+    /// let provider = Provider::from_config(ProviderConfig::new(
+    ///     ProviderKind::OpenAi(OpenAiConfig::new(ApiKey::new("replace-with-your-key")?)),
+    ///     TransportConfig::default(),
+    /// ))?;
+    /// let result = provider
+    ///     .download_file(
+    ///         "owned-file-id".into(),
+    ///         std::num::NonZeroUsize::new(1024 * 1024).unwrap(),
+    ///     )
+    ///     .await;
     /// let cleanup = provider.shutdown().await;
+    /// if let Err(error) = &cleanup {
+    ///     eprintln!("Cleanup failed: {error}");
+    /// }
     /// let _value = result?;
     /// cleanup?;
     ///
@@ -564,10 +640,19 @@ pub trait ProviderBackend: Send + Sync + 'static {
     ///
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() -> Result<(), providers_kit::KitError> {
-    /// use providers_kit::{Provider, ProviderBackend, ProviderConfig, config::{ApiKey, OpenAiConfig, ProviderKind, TransportConfig}};
-    /// let provider = Provider::from_config(ProviderConfig::new(ProviderKind::OpenAi(OpenAiConfig::new(ApiKey::new("replace-with-your-key")?)), TransportConfig::default()))?;
+    /// use providers_kit::{
+    ///     Provider, ProviderBackend, ProviderConfig,
+    ///     config::{ApiKey, OpenAiConfig, ProviderKind, TransportConfig},
+    /// };
+    /// let provider = Provider::from_config(ProviderConfig::new(
+    ///     ProviderKind::OpenAi(OpenAiConfig::new(ApiKey::new("replace-with-your-key")?)),
+    ///     TransportConfig::default(),
+    /// ))?;
     /// let result = provider.batch_status("owned-batch-id".into()).await;
     /// let cleanup = provider.shutdown().await;
+    /// if let Err(error) = &cleanup {
+    ///     eprintln!("Cleanup failed: {error}");
+    /// }
     /// let _value = result?;
     /// cleanup?;
     ///
@@ -591,7 +676,11 @@ pub trait ProviderBackend: Send + Sync + 'static {
         }
     }
 
-    /// Cancels one batch job.
+    /// Requests cancellation of one batch job.
+    ///
+    /// Acknowledgement is not terminality: the returned job may still be running.
+    /// Observe its status until terminal before cleaning up owned input files; see
+    /// the [bounded batch workflow](crate::batch).
     ///
     /// This example requires a real configured service, valid credentials, and any exact
     /// resource ids shown. Only delete or cancel resources the caller owns.
@@ -607,10 +696,19 @@ pub trait ProviderBackend: Send + Sync + 'static {
     ///
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() -> Result<(), providers_kit::KitError> {
-    /// use providers_kit::{Provider, ProviderBackend, ProviderConfig, config::{ApiKey, OpenAiConfig, ProviderKind, TransportConfig}};
-    /// let provider = Provider::from_config(ProviderConfig::new(ProviderKind::OpenAi(OpenAiConfig::new(ApiKey::new("replace-with-your-key")?)), TransportConfig::default()))?;
+    /// use providers_kit::{
+    ///     Provider, ProviderBackend, ProviderConfig,
+    ///     config::{ApiKey, OpenAiConfig, ProviderKind, TransportConfig},
+    /// };
+    /// let provider = Provider::from_config(ProviderConfig::new(
+    ///     ProviderKind::OpenAi(OpenAiConfig::new(ApiKey::new("replace-with-your-key")?)),
+    ///     TransportConfig::default(),
+    /// ))?;
     /// let result = provider.cancel_batch("owned-batch-id".into()).await;
     /// let cleanup = provider.shutdown().await;
+    /// if let Err(error) = &cleanup {
+    ///     eprintln!("Cleanup failed: {error}");
+    /// }
     /// let _value = result?;
     /// cleanup?;
     ///
@@ -653,10 +751,24 @@ pub trait ProviderBackend: Send + Sync + 'static {
     ///
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() -> Result<(), providers_kit::KitError> {
-    /// use providers_kit::{Provider, ProviderBackend, ProviderConfig, config::{ApiKey, OpenAiConfig, ProviderKind, TransportConfig}};
-    /// let provider = Provider::from_config(ProviderConfig::new(ProviderKind::OpenAi(OpenAiConfig::new(ApiKey::new("replace-with-your-key")?)), TransportConfig::default()))?;
-    /// let result = provider.batch_results("owned-batch-id".into(), std::num::NonZeroUsize::new(1024 * 1024).unwrap()).await;
+    /// use providers_kit::{
+    ///     Provider, ProviderBackend, ProviderConfig,
+    ///     config::{ApiKey, OpenAiConfig, ProviderKind, TransportConfig},
+    /// };
+    /// let provider = Provider::from_config(ProviderConfig::new(
+    ///     ProviderKind::OpenAi(OpenAiConfig::new(ApiKey::new("replace-with-your-key")?)),
+    ///     TransportConfig::default(),
+    /// ))?;
+    /// let result = provider
+    ///     .batch_results(
+    ///         "owned-batch-id".into(),
+    ///         std::num::NonZeroUsize::new(1024 * 1024).unwrap(),
+    ///     )
+    ///     .await;
     /// let cleanup = provider.shutdown().await;
+    /// if let Err(error) = &cleanup {
+    ///     eprintln!("Cleanup failed: {error}");
+    /// }
     /// let _value = result?;
     /// cleanup?;
     ///
@@ -700,10 +812,19 @@ pub trait ProviderBackend: Send + Sync + 'static {
     ///
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() -> Result<(), providers_kit::KitError> {
-    /// use providers_kit::{Provider, ProviderBackend, ProviderConfig, config::{ApiKey, OpenAiConfig, ProviderKind, TransportConfig}};
-    /// let provider = Provider::from_config(ProviderConfig::new(ProviderKind::OpenAi(OpenAiConfig::new(ApiKey::new("replace-with-your-key")?)), TransportConfig::default()))?;
+    /// use providers_kit::{
+    ///     Provider, ProviderBackend, ProviderConfig,
+    ///     config::{ApiKey, OpenAiConfig, ProviderKind, TransportConfig},
+    /// };
+    /// let provider = Provider::from_config(ProviderConfig::new(
+    ///     ProviderKind::OpenAi(OpenAiConfig::new(ApiKey::new("replace-with-your-key")?)),
+    ///     TransportConfig::default(),
+    /// ))?;
     /// let result = provider.list_batches(providers_kit::batch::BatchListRequest::default()).await;
     /// let cleanup = provider.shutdown().await;
+    /// if let Err(error) = &cleanup {
+    ///     eprintln!("Cleanup failed: {error}");
+    /// }
     /// let _value = result?;
     /// cleanup?;
     ///
@@ -730,7 +851,7 @@ pub trait ProviderBackend: Send + Sync + 'static {
     /// Probes provider runtime health.
     ///
     /// This example requires a real configured service, valid credentials, and any exact
-    /// resource ids shown. Only delete or cancel resources the caller owns.
+    /// resource ids shown.
     /// The default trait implementation returns Unsupported.
     ///
     /// # Errors
@@ -743,10 +864,19 @@ pub trait ProviderBackend: Send + Sync + 'static {
     ///
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() -> Result<(), providers_kit::KitError> {
-    /// use providers_kit::{Provider, ProviderBackend, ProviderConfig, config::{ApiKey, OpenAiConfig, ProviderKind, TransportConfig}};
-    /// let provider = Provider::from_config(ProviderConfig::new(ProviderKind::OpenAi(OpenAiConfig::new(ApiKey::new("replace-with-your-key")?)), TransportConfig::default()))?;
+    /// use providers_kit::{
+    ///     Provider, ProviderBackend, ProviderConfig,
+    ///     config::{ApiKey, OpenAiConfig, ProviderKind, TransportConfig},
+    /// };
+    /// let provider = Provider::from_config(ProviderConfig::new(
+    ///     ProviderKind::OpenAi(OpenAiConfig::new(ApiKey::new("replace-with-your-key")?)),
+    ///     TransportConfig::default(),
+    /// ))?;
     /// let result = provider.health().await;
     /// let cleanup = provider.shutdown().await;
+    /// if let Err(error) = &cleanup {
+    ///     eprintln!("Cleanup failed: {error}");
+    /// }
     /// let _value = result?;
     /// cleanup?;
     ///
@@ -782,8 +912,14 @@ pub trait ProviderBackend: Send + Sync + 'static {
     ///
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() -> Result<(), providers_kit::KitError> {
-    /// use providers_kit::{Provider, ProviderBackend, ProviderConfig, ModelBackend, ModelId, config::{ProviderKind, OllamaConfig, TransportConfig}};
-    /// let provider = Provider::from_config(ProviderConfig::new(ProviderKind::Ollama(OllamaConfig::local()), TransportConfig::default()))?;
+    /// use providers_kit::{
+    ///     ModelBackend, ModelId, Provider, ProviderBackend, ProviderConfig,
+    ///     config::{OllamaConfig, ProviderKind, TransportConfig},
+    /// };
+    /// let provider = Provider::from_config(ProviderConfig::new(
+    ///     ProviderKind::Ollama(OllamaConfig::local()),
+    ///     TransportConfig::default(),
+    /// ))?;
     /// let clone = provider.clone();
     /// provider.shutdown().await?;
     /// clone.shutdown().await?;
@@ -948,21 +1084,7 @@ impl ProviderBackend for ProviderInner {
 /// a waiter cannot cancel owned cleanup. Models have no independent shutdown.
 /// Caller implementations retain their concrete associated children directly.
 ///
-/// # Examples
-///
-/// ```
-///
-/// # #[tokio::main(flavor = "current_thread")]
-/// # async fn main() -> Result<(), providers_kit::KitError> {
-/// use providers_kit::{Provider, ProviderBackend, ProviderConfig, ModelBackend, ModelId, config::{ProviderKind, OllamaConfig, TransportConfig}};
-/// let provider = Provider::from_config(ProviderConfig::new(ProviderKind::Ollama(OllamaConfig::local()), TransportConfig::default()))?;
-/// let model = provider.model(ModelId::new("exact-model")?)?;
-/// assert_eq!(model.model_id().as_str(), "exact-model");
-/// provider.shutdown().await?;
-///
-/// # Ok(())
-/// # }
-/// ```
+/// See [`crate::ProviderBackend`] for a complete example.
 ///
 #[derive(Clone)]
 pub struct Provider {
@@ -1283,21 +1405,7 @@ impl Provider {
     ///
     /// Returns a configuration or client-construction error for invalid endpoints, transport settings, or HTTP/TLS client setup. Service authentication is checked by subsequent operations.
     ///
-    /// # Examples
-    ///
-    /// ```
-    ///
-    /// # #[tokio::main(flavor = "current_thread")]
-    /// # async fn main() -> Result<(), providers_kit::KitError> {
-    /// use providers_kit::{Provider, ProviderBackend, ProviderConfig, ModelBackend, ModelId, config::{ProviderKind, OllamaConfig, TransportConfig}};
-    /// let provider = Provider::from_config(ProviderConfig::new(ProviderKind::Ollama(OllamaConfig::local()), TransportConfig::default()))?;
-    /// let model = provider.model(ModelId::new("exact-model")?)?;
-    /// assert_eq!(model.model_id().as_str(), "exact-model");
-    /// provider.shutdown().await?;
-    ///
-    /// # Ok(())
-    /// # }
-    /// ```
+    /// See [`crate::ProviderBackend`] for a complete example.
     ///
     pub fn from_config(config: ProviderConfig) -> Result<Self, KitError> {
         let (kind, transport) = config.into_parts();

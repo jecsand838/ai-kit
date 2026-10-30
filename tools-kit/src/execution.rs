@@ -13,7 +13,9 @@
 //! ```
 //! use tools_kit::{Toolset, ToolsetBackend, ToolHandlerBackend, ToolError};
 //! use tools_kit::declaration::{ToolInfo, ToolName};
-//! use tools_kit::execution::{ToolContent, ToolHandlerInput, ToolHandlerOutput, ToolInvocation, ToolResult};
+//! use tools_kit::execution::{
+//!     ToolContent, ToolHandlerInput, ToolHandlerOutput, ToolInvocation, ToolResult,
+//! };
 //! use tools_kit::local::ToolRegistration;
 //! use tools_kit::schema::JsonSchema;
 //! # #[tokio::main(flavor = "current_thread")]
@@ -42,6 +44,9 @@
 //!     Ok::<(), ToolError>(())
 //! }.await;
 //! let cleanup = tools.shutdown().await;
+//! if let Err(error) = &cleanup {
+//!     eprintln!("Cleanup failed: {error}");
+//! }
 //! work?;
 //! cleanup?;
 //! # Ok(())
@@ -63,7 +68,10 @@ use crate::{
 ///
 /// ```
 /// use tools_kit::execution::ToolInvocation;
-/// let input = ToolInvocation { call_id: Some("call-1".into()), arguments: serde_json::json!({"city":"Chicago"}) };
+/// let input = ToolInvocation {
+///     call_id: Some("call-1".into()),
+///     arguments: serde_json::json!({"city":"Chicago"}),
+/// };
 /// assert_eq!(input.arguments["city"], "Chicago");
 /// ```
 ///
@@ -217,14 +225,7 @@ impl ToolResult {
 
     /// Creates a structured JSON result.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use tools_kit::execution::ToolResult;
-    /// let result = ToolResult::json(serde_json::json!({"count":2}));
-    /// assert_eq!(result.structured_content, Some(serde_json::json!({"count":2})));
-    /// assert!(!result.is_error);
-    /// ```
+    /// See [`crate::execution::ToolResult`] for a complete example.
     ///
     #[must_use]
     pub fn json(value: serde_json::Value) -> Self {

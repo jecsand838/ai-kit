@@ -503,7 +503,8 @@ async fn both_workflow_enum_arms_compose_with_both_storage_enum_arms() {
     }
 }
 #[tokio::test]
-async fn caller_agent_struct_materializes_and_executes_without_supplied_backends() {
+async fn caller_agent_struct_materializes_and_executes_without_supplied_backends()
+-> Result<(), Box<dyn std::error::Error>> {
     let memory = Arc::new(Memory::default());
     let peer = Peer::new(1);
     peer.expect_prompt("reply exactly", "caller response");
@@ -512,22 +513,34 @@ async fn caller_agent_struct_materializes_and_executes_without_supplied_backends
         vec![AgentSpec::new("writer".into(), "r1".into(), peer.agent())],
         vec![Cases::agents()],
     ))
-    .await
-    .unwrap();
-    let workspace = app.create_workspace(Cases::config()).await.unwrap();
-    assert_eq!(peer.creations(), 1);
-    let workflow = workspace.workflow("agent".parse().unwrap()).await.unwrap();
-    let run = workflow.start(ExecutionOptions::default()).await.unwrap();
-    let terminal = Cases::bounded(run.wait()).await.unwrap();
+    .await?;
+    let outcome = async {
+        let workspace = app.create_workspace(Cases::config()).await?;
+        let creations = peer.creations();
+        let workflow = workspace.workflow("agent".parse()?).await?;
+        let run = workflow.start(ExecutionOptions::default()).await?;
+        Ok::<_, Box<dyn std::error::Error>>((
+            creations,
+            tokio::time::timeout(Duration::from_secs(8), run.wait()).await??,
+        ))
+    }
+    .await;
+    let cleanup = app.shutdown(Cases::shutdown()).await;
+    if let Err(error) = &cleanup {
+        eprintln!("App shutdown: {error}");
+    }
+    let (creations, terminal) = outcome?;
+    cleanup?;
+    assert_eq!(creations, 1);
     assert!(matches!(terminal.status, RunStatus::Succeeded));
     assert_eq!(terminal.state.values()["answer"], "caller response");
     peer.assert_drained();
     assert_eq!(peer.prompts(), ["reply exactly"]);
-    app.shutdown(Cases::shutdown()).await.unwrap();
     assert_eq!(peer.shutdowns(), 1);
     assert!(
         matches!(agents_kit::AgentBackend::info(&peer.agent()).await,Err(error) if error.kind()==agents_kit::error::ErrorKind::Closed)
     );
+    Ok(())
 }
 #[tokio::test]
 async fn exhaustive_agent_workspace_conversation_enum_paths_preserve_associated_children() {

@@ -55,14 +55,7 @@ impl StateNamespace {
 
     /// Borrows the namespace.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use storage_kit::state::record::StateNamespace;
-    /// let namespace = StateNamespace::new("workflow")?;
-    /// assert_eq!(namespace.as_str(), "workflow");
-    /// # Ok::<(), storage_kit::StateStoreError>(())
-    /// ```
+    /// See [`StateNamespace`] for a complete construction example.
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
@@ -137,14 +130,7 @@ impl StateKeyPrefix {
 
     /// Borrows the prefix.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use storage_kit::state::record::StateKeyPrefix;
-    /// let prefix = StateKeyPrefix::new("run/")?;
-    /// assert_eq!(prefix.as_str(), "run/");
-    /// # Ok::<(), storage_kit::StateStoreError>(())
-    /// ```
+    /// See [`StateKeyPrefix`] for a complete construction example.
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
@@ -202,14 +188,7 @@ impl StateKey {
 
     /// Returns the namespace.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use storage_kit::state::record::StateKey;
-    /// let key = StateKey::new("workflow", "run/1")?;
-    /// assert_eq!(key.namespace().as_str(), "workflow");
-    /// # Ok::<(), storage_kit::StateStoreError>(())
-    /// ```
+    /// See [`StateKey`] for a complete construction example.
     #[must_use]
     pub fn namespace(&self) -> &StateNamespace {
         &self.namespace
@@ -217,14 +196,7 @@ impl StateKey {
 
     /// Returns the namespace-local key.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use storage_kit::state::record::StateKey;
-    /// let key = StateKey::new("workflow", "run/1")?;
-    /// assert_eq!(key.key(), "run/1");
-    /// # Ok::<(), storage_kit::StateStoreError>(())
-    /// ```
+    /// See [`StateKey`] for a complete construction example.
     #[must_use]
     pub fn key(&self) -> &str {
         &self.key
@@ -556,14 +528,7 @@ impl StateListRequest {
 
     /// Returns the namespace.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use storage_kit::state::record::StateListRequest;
-    /// let request = StateListRequest::new("workflow")?;
-    /// assert_eq!(request.namespace().as_str(), "workflow");
-    /// # Ok::<(), storage_kit::StateStoreError>(())
-    /// ```
+    /// See [`StateListRequest`] for a complete construction example.
     #[must_use]
     pub fn namespace(&self) -> &StateNamespace {
         &self.namespace
@@ -571,15 +536,7 @@ impl StateListRequest {
 
     /// Returns the optional typed prefix.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use storage_kit::state::record::{StateKeyPrefix, StateListRequest};
-    /// let prefix = StateKeyPrefix::new("run/")?;
-    /// let request = StateListRequest::new("workflow")?.with_key_prefix(prefix.clone());
-    /// assert_eq!(request.key_prefix(), Some(&prefix));
-    /// # Ok::<(), storage_kit::StateStoreError>(())
-    /// ```
+    /// See [`StateListRequest`] for a complete construction example.
     #[must_use]
     pub fn key_prefix(&self) -> Option<&StateKeyPrefix> {
         self.prefix.as_ref()
@@ -587,14 +544,7 @@ impl StateListRequest {
 
     /// Returns the optional prefix string.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use storage_kit::state::record::StateListRequest;
-    /// let request = StateListRequest::new("workflow")?;
-    /// assert_eq!(request.prefix(), None);
-    /// # Ok::<(), storage_kit::StateStoreError>(())
-    /// ```
+    /// See [`StateListRequest`] for a complete construction example.
     #[must_use]
     pub fn prefix(&self) -> Option<&str> {
         self.prefix.as_ref().map(StateKeyPrefix::as_str)
@@ -602,14 +552,7 @@ impl StateListRequest {
 
     /// Returns the page size.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use storage_kit::state::record::StateListRequest;
-    /// let request = StateListRequest::new("workflow")?.with_limit(12)?;
-    /// assert_eq!(request.limit(), 12);
-    /// # Ok::<(), storage_kit::StateStoreError>(())
-    /// ```
+    /// See [`StateListRequest`] for a complete construction example.
     #[must_use]
     pub fn limit(&self) -> usize {
         self.limit
@@ -617,14 +560,7 @@ impl StateListRequest {
 
     /// Returns the optional cursor.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use storage_kit::state::record::StateListRequest;
-    /// let request = StateListRequest::new("workflow")?.start_after("run/1")?;
-    /// assert_eq!(request.start_after_key(), Some("run/1"));
-    /// # Ok::<(), storage_kit::StateStoreError>(())
-    /// ```
+    /// See [`StateListRequest`] for a complete construction example.
     #[must_use]
     pub fn start_after_key(&self) -> Option<&str> {
         self.start_after.as_deref()

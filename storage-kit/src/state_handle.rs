@@ -617,19 +617,7 @@ impl StateStoreBackend for StateStoreInner {
 /// settles rollback cleanup, while an admitted commit retains finalization
 /// authority even if its reply is lost.
 ///
-/// # Examples
-///
-/// ```
-/// use storage_kit::{StateStore, StateStoreBackend, StateTransactionBackend};
-/// use storage_kit::state::config::{StateStoreConfig, LanceStateStoreConfig};
-/// # tokio::runtime::Runtime::new()?.block_on(async {
-/// let store = StateStore::connect(StateStoreConfig::lance(LanceStateStoreConfig::memory())).await?;
-/// let transaction = store.begin_transaction().await?;
-/// transaction.rollback().await?;
-/// # Ok::<(), storage_kit::StateStoreError>(())
-/// # })?;
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// ```
+/// See [`StateStoreBackend::begin_transaction`] for construction and rollback.
 pub struct StateTransaction {
     inner: StateTransactionInner,
 }
@@ -915,13 +903,7 @@ impl StateStoreError {
     /// Use this category only when the transaction did not publish its mutations.
     /// Do not convert every concurrent timeout or transport failure into conflict.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use storage_kit::{StateStoreError};
-    /// let error = StateStoreError::transaction_conflict("commit", "concurrent write");
-    /// assert!(matches!(error, StateStoreError::TransactionConflict { .. }));
-    /// ```
+    /// See [`StateStoreError`] for an executable example.
     pub fn transaction_conflict(operation: impl Into<String>, message: impl Into<String>) -> Self {
         Self::TransactionConflict {
             operation: operation.into(),

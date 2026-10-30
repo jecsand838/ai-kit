@@ -68,6 +68,7 @@ const INTERACTION_CLEANUP_TIMEOUT: Duration = Duration::from_secs(1);
 /// struct DoubleResult { value: i64 }
 /// # #[tokio::main(flavor = "current_thread")]
 /// # async fn main() -> Result<(), ToolError> {
+/// let config = McpServerConfig::new("127.0.0.1:8000".parse().unwrap(), "/mcp", "page")?;
 /// let source = Arc::new(Toolset::local(vec![ToolRegistration::typed(
 ///     "double", |input: DoubleArgs| async move {
 ///         let value = input.value.checked_mul(2).ok_or(ToolError::InvalidArguments {
@@ -76,7 +77,6 @@ const INTERACTION_CLEANUP_TIMEOUT: Duration = Duration::from_secs(1);
 ///         Ok(DoubleResult { value })
 ///     },
 /// )?])?);
-/// let config = McpServerConfig::new("127.0.0.1:8000".parse().unwrap(), "/mcp", "page")?;
 /// let server = McpServer::start(Arc::clone(&source), config).await;
 /// let observed = async { match server {
 ///     Ok(server) => {
@@ -97,10 +97,16 @@ const INTERACTION_CLEANUP_TIMEOUT: Duration = Duration::from_secs(1);
 ///                 Ok::<(), ToolError>(())
 ///             }.await;
 ///             let client_closed = client.shutdown().await;
+///             if let Err(error) = &client_closed {
+///                 eprintln!("Cleanup failed: {error}");
+///             }
 ///             invoked?;
 ///             client_closed
 ///         }.await;
 ///         let serving_closed = server.shutdown().await; // Consumes and joins serving.
+///         if let Err(error) = &serving_closed {
+///             eprintln!("Cleanup failed: {error}");
+///         }
 ///         client_work?;
 ///         serving_closed?;
 ///         assert_eq!(source.list_tools().await?.len(), 1); // Source remains usable.
@@ -110,6 +116,9 @@ const INTERACTION_CLEANUP_TIMEOUT: Duration = Duration::from_secs(1);
 /// }
 /// }.await;
 /// let source_closed = source.shutdown().await;
+/// if let Err(error) = &source_closed {
+///     eprintln!("Cleanup failed: {error}");
+/// }
 /// observed?;
 /// source_closed?;
 /// # Ok(())
@@ -129,24 +138,7 @@ impl McpServer {
     /// This example binds a real loopback endpoint and requires an available port.
     /// Keep the Tokio runtime driven through both independently owned cleanup operations.
     ///
-    /// ```no_run
-    /// # #[tokio::main(flavor = "current_thread")]
-    /// # async fn main() -> Result<(), tools_kit::ToolError> {
-    /// use std::sync::Arc;
-    /// use tools_kit::{Toolset, ToolsetBackend, mcp::{McpServer, McpServerConfig}};
-    /// let tools = Arc::new(Toolset::local(Vec::new())?);
-    /// let config = McpServerConfig::new("127.0.0.1:8000".parse().unwrap(), "/mcp", "page")?;
-    /// let result = McpServer::start(Arc::clone(&tools), config).await;
-    /// let stopped = match result {
-    ///     Ok(server) => server.shutdown().await,
-    ///     Err(error) => Err(error),
-    /// };
-    /// let source_closed = tools.shutdown().await;
-    /// stopped?;
-    /// source_closed?;
-    /// # Ok(())
-    /// # }
-    /// ```
+    /// See [`McpServer`] for the complete client/server/source cleanup sequence.
     ///
     /// # Errors
     ///
@@ -214,25 +206,7 @@ impl McpServer {
     ///
     /// Returns the retained server cleanup failure, including timeout or handler-cleanup failure. A timeout leaves cleanup owned rather than aborting it.
     ///
-    /// # Examples
-    ///
-    /// ```no_run
-    ///
-    /// # #[tokio::main(flavor = "current_thread")]
-    /// # async fn main() -> Result<(), tools_kit::ToolError> {
-    /// use std::sync::Arc;
-    /// use tools_kit::{Toolset, ToolsetBackend, mcp::{McpServer, McpServerConfig}};
-    /// let tools = Arc::new(Toolset::local(Vec::new())?);
-    /// let config = McpServerConfig::new("127.0.0.1:8000".parse().unwrap(), "/mcp", "page")?;
-    /// let server = McpServer::start(Arc::clone(&tools), config).await?;
-    /// let stopped = server.shutdown().await;
-    /// let source_closed = tools.shutdown().await;
-    /// stopped?;
-    /// source_closed?;
-    ///
-    /// # Ok(())
-    /// # }
-    /// ```
+    /// See [`McpServer`] for the complete client/server/source cleanup sequence.
     ///
     pub async fn shutdown(self) -> Result<(), ToolError> {
         self.serving.shutdown().await

@@ -65,38 +65,7 @@ pub trait LifecycleHooks: Send + Sync + 'static {
     /// earlier execution failure as the structured cause of `WorkflowFailure::Hook`;
     /// a post-commit hook error does not roll back an accepted native commit.
     ///
-    /// # Example
-    ///
-    /// ```
-    /// use app_kit::{AppError, workflow::{LifecycleEvent, LifecycleHooks}};
-    /// use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
-    /// struct CountEvents(Arc<AtomicUsize>);
-    /// impl LifecycleHooks for CountEvents {
-    ///     fn observe(&self, event: &LifecycleEvent<'_>) -> Result<(), AppError> {
-    ///         if matches!(event, LifecycleEvent::ExecuteStarted { .. }) {
-    ///             self.0.fetch_add(1, Ordering::SeqCst);
-    ///         }
-    ///         Ok(())
-    ///     }
-    ///     fn observe_async<'a>(&'a self, event: &'a LifecycleEvent<'a>)
-    ///         -> impl std::future::Future<Output = Result<(), AppError>> + Send + 'a {
-    ///         async move {
-    ///             if matches!(event, LifecycleEvent::ExecuteStarted { .. }) {
-    ///                 self.0.fetch_add(10, Ordering::SeqCst);
-    ///             }
-    ///             Ok(())
-    ///         }
-    ///     }
-    /// }
-    /// let run = "run_8a7c251e-b5b8-4d9e-8f0b-123456789abc".parse()?;
-    /// let event = LifecycleEvent::ExecuteStarted {
-    ///     run: &run, occurrence: "00000000000040008000000000000001",
-    /// };
-    /// let count = Arc::new(AtomicUsize::new(0));
-    /// CountEvents(Arc::clone(&count)).observe(&event)?;
-    /// assert_eq!(count.load(Ordering::SeqCst), 1);
-    /// # Ok::<(), AppError>(())
-    /// ```
+    /// See [the complete lifecycle hook implementation](LifecycleHooks).
     fn observe(&self, _event: &LifecycleEvent<'_>) -> Result<(), AppError> {
         Ok(())
     }
@@ -109,40 +78,7 @@ pub trait LifecycleHooks: Send + Sync + 'static {
     /// earlier execution failure as the structured cause of `WorkflowFailure::Hook`;
     /// a post-commit hook error does not roll back an accepted native commit.
     ///
-    /// # Example
-    ///
-    /// ```
-    /// use app_kit::{AppError, workflow::{LifecycleEvent, LifecycleHooks}};
-    /// use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
-    /// struct CountEvents(Arc<AtomicUsize>);
-    /// impl LifecycleHooks for CountEvents {
-    ///     fn observe(&self, event: &LifecycleEvent<'_>) -> Result<(), AppError> {
-    ///         if matches!(event, LifecycleEvent::ExecuteStarted { .. }) {
-    ///             self.0.fetch_add(1, Ordering::SeqCst);
-    ///         }
-    ///         Ok(())
-    ///     }
-    ///     fn observe_async<'a>(&'a self, event: &'a LifecycleEvent<'a>)
-    ///         -> impl std::future::Future<Output = Result<(), AppError>> + Send + 'a {
-    ///         async move {
-    ///             if matches!(event, LifecycleEvent::ExecuteStarted { .. }) {
-    ///                 self.0.fetch_add(10, Ordering::SeqCst);
-    ///             }
-    ///             Ok(())
-    ///         }
-    ///     }
-    /// }
-    /// let run = "run_8a7c251e-b5b8-4d9e-8f0b-123456789abc".parse()?;
-    /// let event = LifecycleEvent::ExecuteStarted {
-    ///     run: &run, occurrence: "00000000000040008000000000000001",
-    /// };
-    /// let count = Arc::new(AtomicUsize::new(0));
-    /// let hooks = CountEvents(Arc::clone(&count));
-    /// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-    /// runtime.block_on(hooks.observe_async(&event))?;
-    /// assert_eq!(count.load(Ordering::SeqCst), 10);
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See [the complete lifecycle hook implementation](LifecycleHooks).
     fn observe_async<'a>(
         &'a self,
         _event: &'a LifecycleEvent<'a>,

@@ -30,11 +30,20 @@
 
 //! # Execute, observe, restore and delete
 //!
-//! This local workflow admits a paused run, explicitly drives its lazy execution,
-//! and then reads immutable history. Merely obtaining a run snapshot does not
-//! advance a prepared run. Restore copies a retained checkpoint into another paused
-//! run; deletion removes only the selected terminal history, not its independent
-//! copy. The example needs no credentials, Agent value or subprocess.
+//! After the [introductory workflow](crate#local-workflow), use these operations
+//! for explicit control and retained results:
+//!
+//! - Prepare a paused run, then drive
+//!   [`WorkflowRun::execution`](crate::workflow::WorkflowRun::execution);
+//!   reading a snapshot alone never advances it.
+//! - Page immutable [`WorkflowRun::history`](crate::workflow::WorkflowRun::history)
+//!   at a fixed cutoff.
+//! - [`Workflow::restore`] copies a checkpoint into an independent paused run;
+//!   [`WorkflowRun::delete`](crate::workflow::WorkflowRun::delete) removes only
+//!   the selected run's retained history.
+//!
+//! The complete example below joins these three tasks without credentials, an
+//! Agent value or a subprocess.
 //!
 //! ```
 //! use agents_kit::Agent;
@@ -75,11 +84,13 @@
 //!     assert_eq!(terminal.state.values()["count"], 1);
 //!     assert_eq!(committed_actions, 1);
 //!
+//!     // Read history in bounded pages.
 //!     let first = run.history(None, NonZeroUsize::new(1).unwrap()).await?;
 //!     assert_eq!(first.checkpoints[0].sequence, 0);
 //!     let cursor = first.next.expect("the action has a later checkpoint");
 //!     let later = run.history(Some(cursor), NonZeroUsize::new(10).unwrap()).await?;
 //!     assert!(later.checkpoints.iter().any(|checkpoint| checkpoint.action_ordinal == Some(0)));
+//!     // Restore an independent run, then remove both histories explicitly.
 //!     let mut copy = workflow.restore(RestoreOptions {
 //!         source: RunSelector::Latest(run.id().clone()), checkpoint: CheckpointSelector::Action(0),
 //!         overrides: WorkflowState::default(), position: ResumePosition::AfterCompleted, fallback: None,
@@ -98,6 +109,7 @@
 //!     Ok::<(), Box<dyn std::error::Error>>(())
 //! }.await;
 //! let cleanup = app.shutdown(Shutdown::CancelAndDrain { timeout: Duration::from_secs(5) }).await;
+//! if let Err(error) = &cleanup { eprintln!("App shutdown: {error}"); }
 //! outcome?; // An execution error remains primary if shutdown also reports an error.
 //! cleanup?;
 //! # Ok::<(), Box<dyn std::error::Error>>(())
@@ -314,48 +326,7 @@ pub trait StateTyping: Send + Sync + 'static {
     ///
     /// Return an error when the state cannot be represented as `Self::Data`.
     ///
-    /// # Example
-    ///
-    /// ```
-    /// use app_kit::{AppError, workflow::{StateTyping, StateChange, WorkflowState}};
-    /// use serde_json::{Map, Value};
-    /// struct Counter;
-    /// impl StateTyping for Counter {
-    ///     type Data = i64;
-    ///     fn construct_data(&self, state: &WorkflowState) -> Result<i64, AppError> {
-    ///         state.values().get("count").and_then(Value::as_i64)
-    ///             .ok_or_else(|| AppError::InvalidInput("count must be an integer".into()))
-    ///     }
-    ///     fn construct_state(&self, count: &i64) -> Result<WorkflowState, AppError> {
-    ///         WorkflowState::new(Map::from_iter([("count".into(), Value::from(*count))]))
-    ///     }
-    ///     fn validate_pre(&self, _state: &WorkflowState, change: &StateChange) -> Result<(), AppError> {
-    ///         if let StateChange::Increment { values } = change {
-    ///             if values.iter().any(|(_, delta)| delta.as_i64().is_some_and(|value| value < 0)) {
-    ///                 return Err(AppError::InvalidInput("count cannot decrease".into()));
-    ///             }
-    ///         }
-    ///         Ok(())
-    ///     }
-    ///     fn validate_post(&self, before: &WorkflowState, after: &WorkflowState, _change: &StateChange) -> Result<(), AppError> {
-    ///         if self.construct_data(after)? < self.construct_data(before)? {
-    ///             return Err(AppError::InvalidInput("count cannot decrease".into()));
-    ///         }
-    ///         Ok(())
-    ///     }
-    ///     fn validate_state(&self, state: &WorkflowState) -> Result<(), AppError> {
-    ///         if self.construct_data(state)? < 0 {
-    ///             return Err(AppError::InvalidInput("count must be nonnegative".into()));
-    ///         }
-    ///         Ok(())
-    ///     }
-    /// }
-    /// let before = Counter.construct_state(&2)?;
-    /// let change = StateChange::Increment { values: vec![("count".into(), Value::from(1))] };
-    /// let after = before.apply(&change, &Counter)?;
-    /// assert_eq!(Counter.construct_data(&after)?, 3);
-    /// # Ok::<(), AppError>(())
-    /// ```
+    /// See [the complete typing implementation](StateTyping).
     fn construct_data(&self, state: &WorkflowState) -> Result<Self::Data, AppError>;
     /// Reconstructs workflow values from caller data.
     ///
@@ -363,49 +334,7 @@ pub trait StateTyping: Send + Sync + 'static {
     ///
     /// Return an error when caller data cannot produce a valid workflow state.
     ///
-    /// # Example
-    ///
-    /// ```
-    /// use app_kit::{AppError, workflow::{StateTyping, StateChange, WorkflowState}};
-    /// use serde_json::{Map, Value};
-    /// struct Counter;
-    /// impl StateTyping for Counter {
-    ///     type Data = i64;
-    ///     fn construct_data(&self, state: &WorkflowState) -> Result<i64, AppError> {
-    ///         state.values().get("count").and_then(Value::as_i64)
-    ///             .ok_or_else(|| AppError::InvalidInput("count must be an integer".into()))
-    ///     }
-    ///     fn construct_state(&self, count: &i64) -> Result<WorkflowState, AppError> {
-    ///         WorkflowState::new(Map::from_iter([("count".into(), Value::from(*count))]))
-    ///     }
-    ///     fn validate_pre(&self, _state: &WorkflowState, change: &StateChange) -> Result<(), AppError> {
-    ///         if let StateChange::Increment { values } = change {
-    ///             if values.iter().any(|(_, delta)| delta.as_i64().is_some_and(|value| value < 0)) {
-    ///                 return Err(AppError::InvalidInput("count cannot decrease".into()));
-    ///             }
-    ///         }
-    ///         Ok(())
-    ///     }
-    ///     fn validate_post(&self, before: &WorkflowState, after: &WorkflowState, _change: &StateChange) -> Result<(), AppError> {
-    ///         if self.construct_data(after)? < self.construct_data(before)? {
-    ///             return Err(AppError::InvalidInput("count cannot decrease".into()));
-    ///         }
-    ///         Ok(())
-    ///     }
-    ///     fn validate_state(&self, state: &WorkflowState) -> Result<(), AppError> {
-    ///         if self.construct_data(state)? < 0 {
-    ///             return Err(AppError::InvalidInput("count must be nonnegative".into()));
-    ///         }
-    ///         Ok(())
-    ///     }
-    /// }
-    /// let before = Counter.construct_state(&2)?;
-    /// let change = StateChange::Increment { values: vec![("count".into(), Value::from(1))] };
-    /// let after = before.apply(&change, &Counter)?;
-    /// let reconstructed = Counter.construct_state(&3)?;
-    /// assert_eq!(reconstructed, after);
-    /// # Ok::<(), AppError>(())
-    /// ```
+    /// See [the complete typing implementation](StateTyping).
     fn construct_state(&self, data: &Self::Data) -> Result<WorkflowState, AppError>;
     /// Validates an operation before any candidate mutation.
     ///
@@ -414,51 +343,7 @@ pub trait StateTyping: Send + Sync + 'static {
     /// Return an error to reject the complete primitive operation before candidate
     /// mutation. The default accepts it; Merge and Subset do not invoke this method.
     ///
-    /// # Example
-    ///
-    /// ```
-    /// use app_kit::{AppError, workflow::{StateTyping, StateChange, WorkflowState}};
-    /// use serde_json::{Map, Value};
-    /// struct Counter;
-    /// impl StateTyping for Counter {
-    ///     type Data = i64;
-    ///     fn construct_data(&self, state: &WorkflowState) -> Result<i64, AppError> {
-    ///         state.values().get("count").and_then(Value::as_i64)
-    ///             .ok_or_else(|| AppError::InvalidInput("count must be an integer".into()))
-    ///     }
-    ///     fn construct_state(&self, count: &i64) -> Result<WorkflowState, AppError> {
-    ///         WorkflowState::new(Map::from_iter([("count".into(), Value::from(*count))]))
-    ///     }
-    ///     fn validate_pre(&self, _state: &WorkflowState, change: &StateChange) -> Result<(), AppError> {
-    ///         if let StateChange::Increment { values } = change {
-    ///             if values.iter().any(|(_, delta)| delta.as_i64().is_some_and(|value| value < 0)) {
-    ///                 return Err(AppError::InvalidInput("count cannot decrease".into()));
-    ///             }
-    ///         }
-    ///         Ok(())
-    ///     }
-    ///     fn validate_post(&self, before: &WorkflowState, after: &WorkflowState, _change: &StateChange) -> Result<(), AppError> {
-    ///         if self.construct_data(after)? < self.construct_data(before)? {
-    ///             return Err(AppError::InvalidInput("count cannot decrease".into()));
-    ///         }
-    ///         Ok(())
-    ///     }
-    ///     fn validate_state(&self, state: &WorkflowState) -> Result<(), AppError> {
-    ///         if self.construct_data(state)? < 0 {
-    ///             return Err(AppError::InvalidInput("count must be nonnegative".into()));
-    ///         }
-    ///         Ok(())
-    ///     }
-    /// }
-    /// let before = Counter.construct_state(&2)?;
-    /// let change = StateChange::Increment { values: vec![("count".into(), Value::from(1))] };
-    /// let after = before.apply(&change, &Counter)?;
-    /// Counter.validate_pre(&before, &change)?;
-    /// let decreasing = StateChange::Increment { values: vec![("count".into(), Value::from(-1))] };
-    /// assert!(Counter.validate_pre(&before, &decreasing).is_err());
-    /// assert_eq!(before.values()["count"], 2);
-    /// # Ok::<(), AppError>(())
-    /// ```
+    /// See [the complete typing implementation](StateTyping).
     fn validate_pre(&self, _state: &WorkflowState, _change: &StateChange) -> Result<(), AppError> {
         Ok(())
     }
@@ -470,51 +355,7 @@ pub trait StateTyping: Send + Sync + 'static {
     /// original state remains unchanged. The default accepts it; Merge and Subset
     /// do not invoke this method.
     ///
-    /// # Example
-    ///
-    /// ```
-    /// use app_kit::{AppError, workflow::{StateTyping, StateChange, WorkflowState}};
-    /// use serde_json::{Map, Value};
-    /// struct Counter;
-    /// impl StateTyping for Counter {
-    ///     type Data = i64;
-    ///     fn construct_data(&self, state: &WorkflowState) -> Result<i64, AppError> {
-    ///         state.values().get("count").and_then(Value::as_i64)
-    ///             .ok_or_else(|| AppError::InvalidInput("count must be an integer".into()))
-    ///     }
-    ///     fn construct_state(&self, count: &i64) -> Result<WorkflowState, AppError> {
-    ///         WorkflowState::new(Map::from_iter([("count".into(), Value::from(*count))]))
-    ///     }
-    ///     fn validate_pre(&self, _state: &WorkflowState, change: &StateChange) -> Result<(), AppError> {
-    ///         if let StateChange::Increment { values } = change {
-    ///             if values.iter().any(|(_, delta)| delta.as_i64().is_some_and(|value| value < 0)) {
-    ///                 return Err(AppError::InvalidInput("count cannot decrease".into()));
-    ///             }
-    ///         }
-    ///         Ok(())
-    ///     }
-    ///     fn validate_post(&self, before: &WorkflowState, after: &WorkflowState, _change: &StateChange) -> Result<(), AppError> {
-    ///         if self.construct_data(after)? < self.construct_data(before)? {
-    ///             return Err(AppError::InvalidInput("count cannot decrease".into()));
-    ///         }
-    ///         Ok(())
-    ///     }
-    ///     fn validate_state(&self, state: &WorkflowState) -> Result<(), AppError> {
-    ///         if self.construct_data(state)? < 0 {
-    ///             return Err(AppError::InvalidInput("count must be nonnegative".into()));
-    ///         }
-    ///         Ok(())
-    ///     }
-    /// }
-    /// let before = Counter.construct_state(&2)?;
-    /// let change = StateChange::Increment { values: vec![("count".into(), Value::from(1))] };
-    /// let after = before.apply(&change, &Counter)?;
-    /// Counter.validate_post(&before, &after, &change)?;
-    /// let decreasing = Counter.construct_state(&1)?;
-    /// assert!(Counter.validate_post(&before, &decreasing, &change).is_err());
-    /// assert_eq!(after.values()["count"], 3);
-    /// # Ok::<(), AppError>(())
-    /// ```
+    /// See [the complete typing implementation](StateTyping).
     fn validate_post(
         &self,
         _before: &WorkflowState,
@@ -530,48 +371,7 @@ pub trait StateTyping: Send + Sync + 'static {
     /// Return an error when any full-state invariant is violated. The default accepts
     /// the state; this method also runs for reconstructed Merge/Subset snapshots.
     ///
-    /// # Example
-    ///
-    /// ```
-    /// use app_kit::{AppError, workflow::{StateTyping, StateChange, WorkflowState}};
-    /// use serde_json::{Map, Value};
-    /// struct Counter;
-    /// impl StateTyping for Counter {
-    ///     type Data = i64;
-    ///     fn construct_data(&self, state: &WorkflowState) -> Result<i64, AppError> {
-    ///         state.values().get("count").and_then(Value::as_i64)
-    ///             .ok_or_else(|| AppError::InvalidInput("count must be an integer".into()))
-    ///     }
-    ///     fn construct_state(&self, count: &i64) -> Result<WorkflowState, AppError> {
-    ///         WorkflowState::new(Map::from_iter([("count".into(), Value::from(*count))]))
-    ///     }
-    ///     fn validate_pre(&self, _state: &WorkflowState, change: &StateChange) -> Result<(), AppError> {
-    ///         if let StateChange::Increment { values } = change {
-    ///             if values.iter().any(|(_, delta)| delta.as_i64().is_some_and(|value| value < 0)) {
-    ///                 return Err(AppError::InvalidInput("count cannot decrease".into()));
-    ///             }
-    ///         }
-    ///         Ok(())
-    ///     }
-    ///     fn validate_post(&self, before: &WorkflowState, after: &WorkflowState, _change: &StateChange) -> Result<(), AppError> {
-    ///         if self.construct_data(after)? < self.construct_data(before)? {
-    ///             return Err(AppError::InvalidInput("count cannot decrease".into()));
-    ///         }
-    ///         Ok(())
-    ///     }
-    ///     fn validate_state(&self, state: &WorkflowState) -> Result<(), AppError> {
-    ///         if self.construct_data(state)? < 0 {
-    ///             return Err(AppError::InvalidInput("count must be nonnegative".into()));
-    ///         }
-    ///         Ok(())
-    ///     }
-    /// }
-    /// let before = Counter.construct_state(&2)?;
-    /// let change = StateChange::Increment { values: vec![("count".into(), Value::from(1))] };
-    /// let after = before.apply(&change, &Counter)?;
-    /// assert!(Counter.validate_state(&Counter.construct_state(&-1)?).is_err());
-    /// # Ok::<(), AppError>(())
-    /// ```
+    /// See [the complete typing implementation](StateTyping).
     fn validate_state(&self, _state: &WorkflowState) -> Result<(), AppError> {
         Ok(())
     }
@@ -582,49 +382,7 @@ pub trait StateTyping: Send + Sync + 'static {
     /// The default propagates either conversion error. Successful reconstruction is
     /// sufficient; byte-for-byte or value equality is not required.
     ///
-    /// # Example
-    ///
-    /// ```
-    /// use app_kit::{AppError, workflow::{StateTyping, StateChange, WorkflowState}};
-    /// use serde_json::{Map, Value};
-    /// struct Counter;
-    /// impl StateTyping for Counter {
-    ///     type Data = i64;
-    ///     fn construct_data(&self, state: &WorkflowState) -> Result<i64, AppError> {
-    ///         state.values().get("count").and_then(Value::as_i64)
-    ///             .ok_or_else(|| AppError::InvalidInput("count must be an integer".into()))
-    ///     }
-    ///     fn construct_state(&self, count: &i64) -> Result<WorkflowState, AppError> {
-    ///         WorkflowState::new(Map::from_iter([("count".into(), Value::from(*count))]))
-    ///     }
-    ///     fn validate_pre(&self, _state: &WorkflowState, change: &StateChange) -> Result<(), AppError> {
-    ///         if let StateChange::Increment { values } = change {
-    ///             if values.iter().any(|(_, delta)| delta.as_i64().is_some_and(|value| value < 0)) {
-    ///                 return Err(AppError::InvalidInput("count cannot decrease".into()));
-    ///             }
-    ///         }
-    ///         Ok(())
-    ///     }
-    ///     fn validate_post(&self, before: &WorkflowState, after: &WorkflowState, _change: &StateChange) -> Result<(), AppError> {
-    ///         if self.construct_data(after)? < self.construct_data(before)? {
-    ///             return Err(AppError::InvalidInput("count cannot decrease".into()));
-    ///         }
-    ///         Ok(())
-    ///     }
-    ///     fn validate_state(&self, state: &WorkflowState) -> Result<(), AppError> {
-    ///         if self.construct_data(state)? < 0 {
-    ///             return Err(AppError::InvalidInput("count must be nonnegative".into()));
-    ///         }
-    ///         Ok(())
-    ///     }
-    /// }
-    /// let before = Counter.construct_state(&2)?;
-    /// let change = StateChange::Increment { values: vec![("count".into(), Value::from(1))] };
-    /// let after = before.apply(&change, &Counter)?;
-    /// Counter.validate_roundtrip(&after)?;
-    /// assert_eq!(Counter.construct_data(&after)?, 3);
-    /// # Ok::<(), AppError>(())
-    /// ```
+    /// See [the complete typing implementation](StateTyping).
     fn validate_roundtrip(&self, state: &WorkflowState) -> Result<(), AppError> {
         let data = self.construct_data(state)?;
         self.construct_state(&data).map(|_| ())
@@ -763,41 +521,7 @@ impl WorkflowState {
 
 /// A workflow selected in one application workspace.
 ///
-/// # Example
-///
-/// ```
-/// # use agents_kit::Agent;
-/// # use app_kit::{App, AppConfig, Shutdown, WorkspaceConfig};
-/// # use app_kit::workflow::{CheckpointSelector, ExecutionEvent, ExecutionOptions, RunSelector,
-/// #     RunStatus, WorkflowDefinition, WorkflowState};
-/// # use storage_kit::StateStore;
-/// # use storage_kit::state::config::{LanceStateStoreConfig, StateStoreConfig};
-/// #
-/// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-/// # runtime.block_on(async {
-/// # let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-/// # let definition = WorkflowDefinition::parse(r#"{
-/// #     "schema":"app-kit.workflow/v2", "id":"counter", "revision":"r1",
-/// #     "state":{"count":0}, "required":["count"],
-/// #     "reducers":{"count":"reject_concurrent"}, "entry":"increment",
-/// #     "nodes":[{"id":"increment","step":{"kind":"state","mutations":[
-/// #         {"kind":"increment","target":"count","value":{"kind":"literal","value":1}}
-/// #     ]}}], "routes":{}
-/// # }"#)?;
-/// # let config = AppConfig::<_, Agent>::new(store, Vec::new(), vec![definition]);
-/// # let mut app = App::open(config).await?;
-/// # let mut workspace = app.create_workspace(WorkspaceConfig {
-/// #     name: Some("local counter".into()), root: std::env::current_dir()?,
-/// # }).await?;
-/// # let workflow = workspace.workflow("counter".parse()?).await?;
-/// let run = workflow.start(ExecutionOptions::default()).await?;
-/// assert!(matches!(run.wait().await?.status, RunStatus::Succeeded));
-/// #
-/// # app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }).await?;
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// # })?;
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// ```
+/// See [execution and retained history](crate::workflow#execute-observe-restore-and-delete).
 pub struct Workflow<
     CS: StateStoreBackend,
     A: AgentBackend,
@@ -817,43 +541,7 @@ pub struct Workflow<
 /// borrows it exclusively and returns an owner whose drop does revoke uncommitted
 /// advancement. Use [`Self::cancel`] for durable, monotonic cancellation.
 ///
-/// # Example
-///
-/// ```
-/// # use agents_kit::Agent;
-/// # use app_kit::{App, AppConfig, Shutdown, WorkspaceConfig};
-/// # use app_kit::workflow::{CheckpointSelector, ExecutionEvent, ExecutionOptions, RunSelector,
-/// #     RunStatus, WorkflowDefinition, WorkflowState};
-/// # use storage_kit::StateStore;
-/// # use storage_kit::state::config::{LanceStateStoreConfig, StateStoreConfig};
-/// #
-/// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-/// # runtime.block_on(async {
-/// # let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-/// # let definition = WorkflowDefinition::parse(r#"{
-/// #     "schema":"app-kit.workflow/v2", "id":"counter", "revision":"r1",
-/// #     "state":{"count":0}, "required":["count"],
-/// #     "reducers":{"count":"reject_concurrent"}, "entry":"increment",
-/// #     "nodes":[{"id":"increment","step":{"kind":"state","mutations":[
-/// #         {"kind":"increment","target":"count","value":{"kind":"literal","value":1}}
-/// #     ]}}], "routes":{}
-/// # }"#)?;
-/// # let config = AppConfig::<_, Agent>::new(store, Vec::new(), vec![definition]);
-/// # let mut app = App::open(config).await?;
-/// # let mut workspace = app.create_workspace(WorkspaceConfig {
-/// #     name: Some("local counter".into()), root: std::env::current_dir()?,
-/// # }).await?;
-/// # let workflow = workspace.workflow("counter".parse()?).await?;
-/// # let mut run = workflow.prepare(WorkflowState::default()).await?;
-/// let terminal = run.execution(ExecutionOptions::default()).await?.finish().await?;
-/// assert!(matches!(terminal.status, RunStatus::Succeeded));
-/// assert_eq!(run.snapshot().await?.state.values()["count"], 1);
-/// #
-/// # app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }).await?;
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// # })?;
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// ```
+/// See [execution and retained history](crate::workflow#execute-observe-restore-and-delete).
 pub struct WorkflowRun<
     CS: StateStoreBackend,
     A: AgentBackend,
@@ -1014,33 +702,7 @@ pub struct GraphEdge {
 
 /// An owned graph piece and its graph-local node-name prefix.
 ///
-/// # Example
-///
-/// ```
-/// use app_kit::workflow::WorkflowDefinition;
-/// const SOURCE: &str = r#"{
-///     "schema":"app-kit.workflow/v2", "id":"counter", "revision":"r1",
-///     "state":{"count":0}, "required":["count"],
-///     "reducers":{"count":"reject_concurrent"}, "entry":"increment",
-///     "nodes":[{"id":"increment","step":{"kind":"state","mutations":[
-///         {"kind":"increment","target":"count","value":{"kind":"literal","value":1}}
-///     ]}}], "routes":{}
-/// }"#;
-/// let definition = WorkflowDefinition::parse(SOURCE)?;
-/// use app_kit::workflow::{GraphComposition, GraphConnection, GraphImport};
-/// let composition = GraphComposition {
-///     id: "composed".parse()?, revision: "r1".into(), entry: "a_increment".into(),
-///     imports: vec![
-///         GraphImport { definition, prefix: "a_".into() },
-///         GraphImport { definition: WorkflowDefinition::parse(SOURCE)?, prefix: "b_".into() },
-///     ],
-///     connections: vec![GraphConnection { from: "a_increment".into(), to: "b_increment".into() }],
-/// };
-/// let composed = WorkflowDefinition::compose(composition)?;
-/// assert_eq!(composed.graph().nodes.len(), 2);
-/// assert_eq!(composed.graph().entry, "a_increment");
-/// # Ok::<(), app_kit::AppError>(())
-/// ```
+/// See [`WorkflowDefinition::compose`] for a complete composition example.
 pub struct GraphImport {
     /// Validated definition to import.
     pub definition: WorkflowDefinition,
@@ -1050,33 +712,7 @@ pub struct GraphImport {
 
 /// A default transition appended to an assembled graph.
 ///
-/// # Example
-///
-/// ```
-/// use app_kit::workflow::WorkflowDefinition;
-/// const SOURCE: &str = r#"{
-///     "schema":"app-kit.workflow/v2", "id":"counter", "revision":"r1",
-///     "state":{"count":0}, "required":["count"],
-///     "reducers":{"count":"reject_concurrent"}, "entry":"increment",
-///     "nodes":[{"id":"increment","step":{"kind":"state","mutations":[
-///         {"kind":"increment","target":"count","value":{"kind":"literal","value":1}}
-///     ]}}], "routes":{}
-/// }"#;
-/// let definition = WorkflowDefinition::parse(SOURCE)?;
-/// use app_kit::workflow::{GraphComposition, GraphConnection, GraphImport};
-/// let composition = GraphComposition {
-///     id: "composed".parse()?, revision: "r1".into(), entry: "a_increment".into(),
-///     imports: vec![
-///         GraphImport { definition, prefix: "a_".into() },
-///         GraphImport { definition: WorkflowDefinition::parse(SOURCE)?, prefix: "b_".into() },
-///     ],
-///     connections: vec![GraphConnection { from: "a_increment".into(), to: "b_increment".into() }],
-/// };
-/// let composed = WorkflowDefinition::compose(composition)?;
-/// assert_eq!(composed.graph().nodes.len(), 2);
-/// assert_eq!(composed.graph().entry, "a_increment");
-/// # Ok::<(), app_kit::AppError>(())
-/// ```
+/// See [`WorkflowDefinition::compose`] for a complete composition example.
 pub struct GraphConnection {
     /// Already-prefixed source node identity.
     pub from: String,
@@ -1086,33 +722,7 @@ pub struct GraphConnection {
 
 /// Definitions and explicit connections for one ordinary compiler invocation.
 ///
-/// # Example
-///
-/// ```
-/// use app_kit::workflow::WorkflowDefinition;
-/// const SOURCE: &str = r#"{
-///     "schema":"app-kit.workflow/v2", "id":"counter", "revision":"r1",
-///     "state":{"count":0}, "required":["count"],
-///     "reducers":{"count":"reject_concurrent"}, "entry":"increment",
-///     "nodes":[{"id":"increment","step":{"kind":"state","mutations":[
-///         {"kind":"increment","target":"count","value":{"kind":"literal","value":1}}
-///     ]}}], "routes":{}
-/// }"#;
-/// let definition = WorkflowDefinition::parse(SOURCE)?;
-/// use app_kit::workflow::{GraphComposition, GraphConnection, GraphImport};
-/// let composition = GraphComposition {
-///     id: "composed".parse()?, revision: "r1".into(), entry: "a_increment".into(),
-///     imports: vec![
-///         GraphImport { definition, prefix: "a_".into() },
-///         GraphImport { definition: WorkflowDefinition::parse(SOURCE)?, prefix: "b_".into() },
-///     ],
-///     connections: vec![GraphConnection { from: "a_increment".into(), to: "b_increment".into() }],
-/// };
-/// let composed = WorkflowDefinition::compose(composition)?;
-/// assert_eq!(composed.graph().nodes.len(), 2);
-/// assert_eq!(composed.graph().entry, "a_increment");
-/// # Ok::<(), app_kit::AppError>(())
-/// ```
+/// See [`WorkflowDefinition::compose`] for a complete composition example.
 pub struct GraphComposition {
     /// Identity of the assembled workflow.
     pub id: WorkflowId,
@@ -1285,43 +895,7 @@ pub enum ExecutionEvent {
 
 /// The current caller-visible run truth.
 ///
-/// # Example
-///
-/// ```
-/// # use agents_kit::Agent;
-/// # use app_kit::{App, AppConfig, Shutdown, WorkspaceConfig};
-/// # use app_kit::workflow::{CheckpointSelector, ExecutionEvent, ExecutionOptions, RunSelector,
-/// #     RunStatus, WorkflowDefinition, WorkflowState};
-/// # use storage_kit::StateStore;
-/// # use storage_kit::state::config::{LanceStateStoreConfig, StateStoreConfig};
-/// #
-/// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-/// # runtime.block_on(async {
-/// # let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-/// # let definition = WorkflowDefinition::parse(r#"{
-/// #     "schema":"app-kit.workflow/v2", "id":"counter", "revision":"r1",
-/// #     "state":{"count":0}, "required":["count"],
-/// #     "reducers":{"count":"reject_concurrent"}, "entry":"increment",
-/// #     "nodes":[{"id":"increment","step":{"kind":"state","mutations":[
-/// #         {"kind":"increment","target":"count","value":{"kind":"literal","value":1}}
-/// #     ]}}], "routes":{}
-/// # }"#)?;
-/// # let config = AppConfig::<_, Agent>::new(store, Vec::new(), vec![definition]);
-/// # let mut app = App::open(config).await?;
-/// # let mut workspace = app.create_workspace(WorkspaceConfig {
-/// #     name: Some("local counter".into()), root: std::env::current_dir()?,
-/// # }).await?;
-/// # let workflow = workspace.workflow("counter".parse()?).await?;
-/// # let mut run = workflow.prepare(WorkflowState::default()).await?;
-/// let terminal = run.execution(ExecutionOptions::default()).await?.finish().await?;
-/// assert_eq!(terminal.state.values()["count"], 1);
-/// assert_eq!(terminal.last_action_ordinal, Some(0));
-/// #
-/// # app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }).await?;
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// # })?;
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// ```
+/// See [execution and retained history](crate::workflow#execute-observe-restore-and-delete).
 #[non_exhaustive]
 pub struct RunSnapshot {
     /// Identifies the run.
@@ -1525,40 +1099,7 @@ impl<
 
     /// Returns this workflow's stable identity.
     ///
-    /// # Example
-    ///
-    /// ```
-    /// # use agents_kit::Agent;
-    /// # use app_kit::{App, AppConfig, Shutdown, WorkspaceConfig};
-    /// # use app_kit::workflow::{CheckpointSelector, ExecutionEvent, ExecutionOptions, RunSelector,
-    /// #     RunStatus, WorkflowDefinition, WorkflowState};
-    /// # use storage_kit::StateStore;
-    /// # use storage_kit::state::config::{LanceStateStoreConfig, StateStoreConfig};
-    /// #
-    /// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-    /// # runtime.block_on(async {
-    /// # let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-    /// # let definition = WorkflowDefinition::parse(r#"{
-    /// #     "schema":"app-kit.workflow/v2", "id":"counter", "revision":"r1",
-    /// #     "state":{"count":0}, "required":["count"],
-    /// #     "reducers":{"count":"reject_concurrent"}, "entry":"increment",
-    /// #     "nodes":[{"id":"increment","step":{"kind":"state","mutations":[
-    /// #         {"kind":"increment","target":"count","value":{"kind":"literal","value":1}}
-    /// #     ]}}], "routes":{}
-    /// # }"#)?;
-    /// # let config = AppConfig::<_, Agent>::new(store, Vec::new(), vec![definition]);
-    /// # let mut app = App::open(config).await?;
-    /// # let mut workspace = app.create_workspace(WorkspaceConfig {
-    /// #     name: Some("local counter".into()), root: std::env::current_dir()?,
-    /// # }).await?;
-    /// # let workflow = workspace.workflow("counter".parse()?).await?;
-    /// assert_eq!(workflow.id().to_string(), "counter");
-    /// #
-    /// # app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }).await?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// # })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See [execution and retained history](crate::workflow#execute-observe-restore-and-delete).
     pub fn id(&self) -> &WorkflowId {
         self.runtime.id()
     }
@@ -1576,42 +1117,7 @@ impl<
     /// `Conflict` for stale workspace/revision evidence. Lower/storage failures use
     /// `Integration`; accepted execution failures appear in run status.
     ///
-    /// # Example
-    ///
-    /// ```
-    /// # use agents_kit::Agent;
-    /// # use app_kit::{App, AppConfig, Shutdown, WorkspaceConfig};
-    /// # use app_kit::workflow::{CheckpointSelector, ExecutionEvent, ExecutionOptions, RunSelector,
-    /// #     RunStatus, WorkflowDefinition, WorkflowState};
-    /// # use storage_kit::StateStore;
-    /// # use storage_kit::state::config::{LanceStateStoreConfig, StateStoreConfig};
-    /// #
-    /// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-    /// # runtime.block_on(async {
-    /// # let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-    /// # let definition = WorkflowDefinition::parse(r#"{
-    /// #     "schema":"app-kit.workflow/v2", "id":"counter", "revision":"r1",
-    /// #     "state":{"count":0}, "required":["count"],
-    /// #     "reducers":{"count":"reject_concurrent"}, "entry":"increment",
-    /// #     "nodes":[{"id":"increment","step":{"kind":"state","mutations":[
-    /// #         {"kind":"increment","target":"count","value":{"kind":"literal","value":1}}
-    /// #     ]}}], "routes":{}
-    /// # }"#)?;
-    /// # let config = AppConfig::<_, Agent>::new(store, Vec::new(), vec![definition]);
-    /// # let mut app = App::open(config).await?;
-    /// # let mut workspace = app.create_workspace(WorkspaceConfig {
-    /// #     name: Some("local counter".into()), root: std::env::current_dir()?,
-    /// # }).await?;
-    /// # let workflow = workspace.workflow("counter".parse()?).await?;
-    /// let run = workflow.start(ExecutionOptions::default()).await?;
-    /// let snapshot = run.wait().await?;
-    /// assert_eq!(snapshot.state.values()["count"], 1);
-    /// #
-    /// # app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }).await?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// # })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See [execution and retained history](crate::workflow#execute-observe-restore-and-delete).
     pub async fn start(
         &self,
         options: ExecutionOptions,
@@ -1636,43 +1142,7 @@ impl<
     /// to all succeed. Lower/storage failures use `Integration`; accepted
     /// execution failures appear in run status.
     ///
-    /// # Example
-    ///
-    /// ```
-    /// # use agents_kit::Agent;
-    /// # use app_kit::{App, AppConfig, Shutdown, WorkspaceConfig};
-    /// # use app_kit::workflow::{CheckpointSelector, ExecutionEvent, ExecutionOptions, RunSelector,
-    /// #     RunStatus, WorkflowDefinition, WorkflowState};
-    /// # use storage_kit::StateStore;
-    /// # use storage_kit::state::config::{LanceStateStoreConfig, StateStoreConfig};
-    /// #
-    /// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-    /// # runtime.block_on(async {
-    /// # let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-    /// # let definition = WorkflowDefinition::parse(r#"{
-    /// #     "schema":"app-kit.workflow/v2", "id":"counter", "revision":"r1",
-    /// #     "state":{"count":0}, "required":["count"],
-    /// #     "reducers":{"count":"reject_concurrent"}, "entry":"increment",
-    /// #     "nodes":[{"id":"increment","step":{"kind":"state","mutations":[
-    /// #         {"kind":"increment","target":"count","value":{"kind":"literal","value":1}}
-    /// #     ]}}], "routes":{}
-    /// # }"#)?;
-    /// # let config = AppConfig::<_, Agent>::new(store, Vec::new(), vec![definition]);
-    /// # let mut app = App::open(config).await?;
-    /// # let mut workspace = app.create_workspace(WorkspaceConfig {
-    /// #     name: Some("local counter".into()), root: std::env::current_dir()?,
-    /// # }).await?;
-    /// # let workflow = workspace.workflow("counter".parse()?).await?;
-    /// let run = workflow.prepare(WorkflowState::default()).await?;
-    /// let checkpoint = run.checkpoint(CheckpointSelector::Sequence(0)).await?;
-    /// assert_eq!(checkpoint.state.values()["count"], 0);
-    /// assert!(checkpoint.action_ordinal.is_none());
-    /// #
-    /// # app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }).await?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// # })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See [execution and retained history](crate::workflow#execute-observe-restore-and-delete).
     pub async fn prepare(
         &self,
         state: WorkflowState,
@@ -1694,53 +1164,7 @@ impl<
     /// `Conflict` when the selected boundary is unsafe to copy. Sealing/revocation
     /// returns `Closed`; inconsistent history or storage failures return `Integration`.
     ///
-    /// # Example
-    ///
-    /// ```
-    /// # use agents_kit::Agent;
-    /// # use app_kit::{App, AppConfig, Shutdown, WorkspaceConfig};
-    /// # use app_kit::workflow::{CheckpointSelector, ExecutionEvent, ExecutionOptions, RunSelector,
-    /// #     RunStatus, WorkflowDefinition, WorkflowState};
-    /// # use storage_kit::StateStore;
-    /// # use storage_kit::state::config::{LanceStateStoreConfig, StateStoreConfig};
-    /// #
-    /// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-    /// # runtime.block_on(async {
-    /// # let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-    /// # let definition = WorkflowDefinition::parse(r#"{
-    /// #     "schema":"app-kit.workflow/v2", "id":"counter", "revision":"r1",
-    /// #     "state":{"count":0}, "required":["count"],
-    /// #     "reducers":{"count":"reject_concurrent"}, "entry":"increment",
-    /// #     "nodes":[{"id":"increment","step":{"kind":"state","mutations":[
-    /// #         {"kind":"increment","target":"count","value":{"kind":"literal","value":1}}
-    /// #     ]}}], "routes":{}
-    /// # }"#)?;
-    /// # let config = AppConfig::<_, Agent>::new(store, Vec::new(), vec![definition]);
-    /// # let mut app = App::open(config).await?;
-    /// # let mut workspace = app.create_workspace(WorkspaceConfig {
-    /// #     name: Some("local counter".into()), root: std::env::current_dir()?,
-    /// # }).await?;
-    /// # let workflow = workspace.workflow("counter".parse()?).await?;
-    /// # let mut run = workflow.prepare(WorkflowState::default()).await?;
-    /// let terminal = run.execution(ExecutionOptions::default()).await?.finish().await?;
-    /// use app_kit::workflow::{RestoreOptions, ResumePosition};
-    /// let options = RestoreOptions {
-    ///     source: RunSelector::Latest(run.id().clone()),
-    ///     checkpoint: CheckpointSelector::Action(0),
-    ///     overrides: WorkflowState::default(), position: ResumePosition::AfterCompleted,
-    ///     fallback: None,
-    /// };
-    /// let copy = workflow.restore(options).await?;
-    /// assert_ne!(copy.id(), run.id());
-    /// let copied = copy.checkpoint(CheckpointSelector::Sequence(0)).await?;
-    /// assert_eq!(copied.state.values()["count"], 1);
-    /// assert_eq!(&copied.lineage.as_ref().unwrap().source, run.id());
-    /// #
-    /// # app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }).await?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// # })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See [execution and retained history](crate::workflow#execute-observe-restore-and-delete).
     pub async fn restore(
         &self,
         options: RestoreOptions,
@@ -1758,43 +1182,7 @@ impl<
     /// selected run/occurrence is absent, or `Closed` for sealed scope. Exact selection
     /// never falls back to Latest; inconsistent retained evidence is `Integration`.
     ///
-    /// # Example
-    ///
-    /// ```
-    /// # use agents_kit::Agent;
-    /// # use app_kit::{App, AppConfig, Shutdown, WorkspaceConfig};
-    /// # use app_kit::workflow::{CheckpointSelector, ExecutionEvent, ExecutionOptions, RunSelector,
-    /// #     RunStatus, WorkflowDefinition, WorkflowState};
-    /// # use storage_kit::StateStore;
-    /// # use storage_kit::state::config::{LanceStateStoreConfig, StateStoreConfig};
-    /// #
-    /// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-    /// # runtime.block_on(async {
-    /// # let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-    /// # let definition = WorkflowDefinition::parse(r#"{
-    /// #     "schema":"app-kit.workflow/v2", "id":"counter", "revision":"r1",
-    /// #     "state":{"count":0}, "required":["count"],
-    /// #     "reducers":{"count":"reject_concurrent"}, "entry":"increment",
-    /// #     "nodes":[{"id":"increment","step":{"kind":"state","mutations":[
-    /// #         {"kind":"increment","target":"count","value":{"kind":"literal","value":1}}
-    /// #     ]}}], "routes":{}
-    /// # }"#)?;
-    /// # let config = AppConfig::<_, Agent>::new(store, Vec::new(), vec![definition]);
-    /// # let mut app = App::open(config).await?;
-    /// # let mut workspace = app.create_workspace(WorkspaceConfig {
-    /// #     name: Some("local counter".into()), root: std::env::current_dir()?,
-    /// # }).await?;
-    /// # let workflow = workspace.workflow("counter".parse()?).await?;
-    /// # let mut run = workflow.prepare(WorkflowState::default()).await?;
-    /// let id = run.id().clone();
-    /// let reopened = workflow.open_run(RunSelector::Latest(id.clone())).await?;
-    /// assert_eq!(reopened.id(), &id);
-    /// #
-    /// # app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }).await?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// # })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See [execution and retained history](crate::workflow#execute-observe-restore-and-delete).
     pub async fn open_run(
         &self,
         selector: RunSelector,
@@ -1816,43 +1204,7 @@ impl<
     /// for an unavailable cursor, and `Closed` or `Integration` for revoked or
     /// unreadable scope.
     ///
-    /// # Example
-    ///
-    /// ```
-    /// # use agents_kit::Agent;
-    /// # use app_kit::{App, AppConfig, Shutdown, WorkspaceConfig};
-    /// # use app_kit::workflow::{CheckpointSelector, ExecutionEvent, ExecutionOptions, RunSelector,
-    /// #     RunStatus, WorkflowDefinition, WorkflowState};
-    /// # use storage_kit::StateStore;
-    /// # use storage_kit::state::config::{LanceStateStoreConfig, StateStoreConfig};
-    /// #
-    /// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-    /// # runtime.block_on(async {
-    /// # let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-    /// # let definition = WorkflowDefinition::parse(r#"{
-    /// #     "schema":"app-kit.workflow/v2", "id":"counter", "revision":"r1",
-    /// #     "state":{"count":0}, "required":["count"],
-    /// #     "reducers":{"count":"reject_concurrent"}, "entry":"increment",
-    /// #     "nodes":[{"id":"increment","step":{"kind":"state","mutations":[
-    /// #         {"kind":"increment","target":"count","value":{"kind":"literal","value":1}}
-    /// #     ]}}], "routes":{}
-    /// # }"#)?;
-    /// # let config = AppConfig::<_, Agent>::new(store, Vec::new(), vec![definition]);
-    /// # let mut app = App::open(config).await?;
-    /// # let mut workspace = app.create_workspace(WorkspaceConfig {
-    /// #     name: Some("local counter".into()), root: std::env::current_dir()?,
-    /// # }).await?;
-    /// # let workflow = workspace.workflow("counter".parse()?).await?;
-    /// # let mut run = workflow.prepare(WorkflowState::default()).await?;
-    /// let runs = workflow.list_runs(None, std::num::NonZeroUsize::new(10).unwrap()).await?;
-    /// assert_eq!(runs.len(), 1);
-    /// assert_eq!(&runs[0].id, run.id());
-    /// #
-    /// # app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }).await?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// # })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See [execution and retained history](crate::workflow#execute-observe-restore-and-delete).
     pub async fn list_runs(
         &self,
         after: Option<RunSelector>,
@@ -1874,41 +1226,7 @@ impl<
 {
     /// Returns this run's stable identity.
     ///
-    /// # Example
-    ///
-    /// ```
-    /// # use agents_kit::Agent;
-    /// # use app_kit::{App, AppConfig, Shutdown, WorkspaceConfig};
-    /// # use app_kit::workflow::{CheckpointSelector, ExecutionEvent, ExecutionOptions, RunSelector,
-    /// #     RunStatus, WorkflowDefinition, WorkflowState};
-    /// # use storage_kit::StateStore;
-    /// # use storage_kit::state::config::{LanceStateStoreConfig, StateStoreConfig};
-    /// #
-    /// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-    /// # runtime.block_on(async {
-    /// # let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-    /// # let definition = WorkflowDefinition::parse(r#"{
-    /// #     "schema":"app-kit.workflow/v2", "id":"counter", "revision":"r1",
-    /// #     "state":{"count":0}, "required":["count"],
-    /// #     "reducers":{"count":"reject_concurrent"}, "entry":"increment",
-    /// #     "nodes":[{"id":"increment","step":{"kind":"state","mutations":[
-    /// #         {"kind":"increment","target":"count","value":{"kind":"literal","value":1}}
-    /// #     ]}}], "routes":{}
-    /// # }"#)?;
-    /// # let config = AppConfig::<_, Agent>::new(store, Vec::new(), vec![definition]);
-    /// # let mut app = App::open(config).await?;
-    /// # let mut workspace = app.create_workspace(WorkspaceConfig {
-    /// #     name: Some("local counter".into()), root: std::env::current_dir()?,
-    /// # }).await?;
-    /// # let workflow = workspace.workflow("counter".parse()?).await?;
-    /// # let mut run = workflow.prepare(WorkflowState::default()).await?;
-    /// assert_eq!(run.snapshot().await?.id, *run.id());
-    /// #
-    /// # app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }).await?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// # })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See [execution and retained history](crate::workflow#execute-observe-restore-and-delete).
     pub fn id(&self) -> &RunId {
         self.runtime.id()
     }
@@ -1936,42 +1254,7 @@ impl<
     /// `Busy` if advancement or admission is already owned, `Conflict` for stale
     /// authority, and `Closed` after revocation. Storage failures use `Integration`.
     ///
-    /// # Example
-    ///
-    /// ```
-    /// # use agents_kit::Agent;
-    /// # use app_kit::{App, AppConfig, Shutdown, WorkspaceConfig};
-    /// # use app_kit::workflow::{CheckpointSelector, ExecutionEvent, ExecutionOptions, RunSelector,
-    /// #     RunStatus, WorkflowDefinition, WorkflowState};
-    /// # use storage_kit::StateStore;
-    /// # use storage_kit::state::config::{LanceStateStoreConfig, StateStoreConfig};
-    /// #
-    /// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-    /// # runtime.block_on(async {
-    /// # let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-    /// # let definition = WorkflowDefinition::parse(r#"{
-    /// #     "schema":"app-kit.workflow/v2", "id":"counter", "revision":"r1",
-    /// #     "state":{"count":0}, "required":["count"],
-    /// #     "reducers":{"count":"reject_concurrent"}, "entry":"increment",
-    /// #     "nodes":[{"id":"increment","step":{"kind":"state","mutations":[
-    /// #         {"kind":"increment","target":"count","value":{"kind":"literal","value":1}}
-    /// #     ]}}], "routes":{}
-    /// # }"#)?;
-    /// # let config = AppConfig::<_, Agent>::new(store, Vec::new(), vec![definition]);
-    /// # let mut app = App::open(config).await?;
-    /// # let mut workspace = app.create_workspace(WorkspaceConfig {
-    /// #     name: Some("local counter".into()), root: std::env::current_dir()?,
-    /// # }).await?;
-    /// # let workflow = workspace.workflow("counter".parse()?).await?;
-    /// # let mut run = workflow.prepare(WorkflowState::default()).await?;
-    /// let terminal = run.execution(ExecutionOptions::default()).await?.finish().await?;
-    /// assert_eq!(run.snapshot().await?.checkpoint, terminal.checkpoint);
-    /// #
-    /// # app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }).await?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// # })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See [execution and retained history](crate::workflow#execute-observe-restore-and-delete).
     pub async fn execution(
         &mut self,
         options: ExecutionOptions,
@@ -1987,43 +1270,7 @@ impl<
     /// for absent retained evidence, or `Integration` for inconsistent or unreadable
     /// records. A newer App generation can invalidate this handle.
     ///
-    /// # Example
-    ///
-    /// ```
-    /// # use agents_kit::Agent;
-    /// # use app_kit::{App, AppConfig, Shutdown, WorkspaceConfig};
-    /// # use app_kit::workflow::{CheckpointSelector, ExecutionEvent, ExecutionOptions, RunSelector,
-    /// #     RunStatus, WorkflowDefinition, WorkflowState};
-    /// # use storage_kit::StateStore;
-    /// # use storage_kit::state::config::{LanceStateStoreConfig, StateStoreConfig};
-    /// #
-    /// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-    /// # runtime.block_on(async {
-    /// # let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-    /// # let definition = WorkflowDefinition::parse(r#"{
-    /// #     "schema":"app-kit.workflow/v2", "id":"counter", "revision":"r1",
-    /// #     "state":{"count":0}, "required":["count"],
-    /// #     "reducers":{"count":"reject_concurrent"}, "entry":"increment",
-    /// #     "nodes":[{"id":"increment","step":{"kind":"state","mutations":[
-    /// #         {"kind":"increment","target":"count","value":{"kind":"literal","value":1}}
-    /// #     ]}}], "routes":{}
-    /// # }"#)?;
-    /// # let config = AppConfig::<_, Agent>::new(store, Vec::new(), vec![definition]);
-    /// # let mut app = App::open(config).await?;
-    /// # let mut workspace = app.create_workspace(WorkspaceConfig {
-    /// #     name: Some("local counter".into()), root: std::env::current_dir()?,
-    /// # }).await?;
-    /// # let workflow = workspace.workflow("counter".parse()?).await?;
-    /// # let mut run = workflow.prepare(WorkflowState::default()).await?;
-    /// let snapshot = run.snapshot().await?;
-    /// assert_eq!(snapshot.checkpoint, 0);
-    /// assert!(matches!(snapshot.status, RunStatus::Paused));
-    /// #
-    /// # app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }).await?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// # })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See [execution and retained history](crate::workflow#execute-observe-restore-and-delete).
     pub async fn snapshot(&self) -> Result<RunSnapshot, AppError> {
         self.runtime.snapshot().await
     }
@@ -2041,45 +1288,7 @@ impl<
     /// An explicit missing sequence/action is `NotFound`; action ordinals are distinct
     /// from checkpoint sequences and select the latest matching saved observation.
     ///
-    /// # Example
-    ///
-    /// ```
-    /// # use agents_kit::Agent;
-    /// # use app_kit::{App, AppConfig, Shutdown, WorkspaceConfig};
-    /// # use app_kit::workflow::{CheckpointSelector, ExecutionEvent, ExecutionOptions, RunSelector,
-    /// #     RunStatus, WorkflowDefinition, WorkflowState};
-    /// # use storage_kit::StateStore;
-    /// # use storage_kit::state::config::{LanceStateStoreConfig, StateStoreConfig};
-    /// #
-    /// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-    /// # runtime.block_on(async {
-    /// # let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-    /// # let definition = WorkflowDefinition::parse(r#"{
-    /// #     "schema":"app-kit.workflow/v2", "id":"counter", "revision":"r1",
-    /// #     "state":{"count":0}, "required":["count"],
-    /// #     "reducers":{"count":"reject_concurrent"}, "entry":"increment",
-    /// #     "nodes":[{"id":"increment","step":{"kind":"state","mutations":[
-    /// #         {"kind":"increment","target":"count","value":{"kind":"literal","value":1}}
-    /// #     ]}}], "routes":{}
-    /// # }"#)?;
-    /// # let config = AppConfig::<_, Agent>::new(store, Vec::new(), vec![definition]);
-    /// # let mut app = App::open(config).await?;
-    /// # let mut workspace = app.create_workspace(WorkspaceConfig {
-    /// #     name: Some("local counter".into()), root: std::env::current_dir()?,
-    /// # }).await?;
-    /// # let workflow = workspace.workflow("counter".parse()?).await?;
-    /// # let mut run = workflow.prepare(WorkflowState::default()).await?;
-    /// let terminal = run.execution(ExecutionOptions::default()).await?.finish().await?;
-    /// let initial = run.checkpoint(CheckpointSelector::Sequence(0)).await?;
-    /// let action = run.checkpoint(CheckpointSelector::Action(0)).await?;
-    /// assert_eq!(initial.state.values()["count"], 0);
-    /// assert_eq!(action.state.values()["count"], 1);
-    /// #
-    /// # app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }).await?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// # })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See [execution and retained history](crate::workflow#execute-observe-restore-and-delete).
     pub async fn checkpoint(&self, selector: CheckpointSelector) -> Result<Checkpoint, AppError> {
         self.runtime.checkpoint(selector).await
     }
@@ -2098,45 +1307,7 @@ impl<
     /// An excessive page limit or a cursor from another run/occurrence/generation is
     /// `InvalidInput`. A captured cutoff never includes later appended checkpoints.
     ///
-    /// # Example
-    ///
-    /// ```
-    /// # use agents_kit::Agent;
-    /// # use app_kit::{App, AppConfig, Shutdown, WorkspaceConfig};
-    /// # use app_kit::workflow::{CheckpointSelector, ExecutionEvent, ExecutionOptions, RunSelector,
-    /// #     RunStatus, WorkflowDefinition, WorkflowState};
-    /// # use storage_kit::StateStore;
-    /// # use storage_kit::state::config::{LanceStateStoreConfig, StateStoreConfig};
-    /// #
-    /// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-    /// # runtime.block_on(async {
-    /// # let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-    /// # let definition = WorkflowDefinition::parse(r#"{
-    /// #     "schema":"app-kit.workflow/v2", "id":"counter", "revision":"r1",
-    /// #     "state":{"count":0}, "required":["count"],
-    /// #     "reducers":{"count":"reject_concurrent"}, "entry":"increment",
-    /// #     "nodes":[{"id":"increment","step":{"kind":"state","mutations":[
-    /// #         {"kind":"increment","target":"count","value":{"kind":"literal","value":1}}
-    /// #     ]}}], "routes":{}
-    /// # }"#)?;
-    /// # let config = AppConfig::<_, Agent>::new(store, Vec::new(), vec![definition]);
-    /// # let mut app = App::open(config).await?;
-    /// # let mut workspace = app.create_workspace(WorkspaceConfig {
-    /// #     name: Some("local counter".into()), root: std::env::current_dir()?,
-    /// # }).await?;
-    /// # let workflow = workspace.workflow("counter".parse()?).await?;
-    /// # let mut run = workflow.prepare(WorkflowState::default()).await?;
-    /// let terminal = run.execution(ExecutionOptions::default()).await?.finish().await?;
-    /// let page = run.history(None, std::num::NonZeroUsize::new(1).unwrap()).await?;
-    /// assert_eq!(page.checkpoints[0].sequence, 0);
-    /// let next = run.history(page.next, std::num::NonZeroUsize::new(100).unwrap()).await?;
-    /// assert!(next.checkpoints.iter().all(|checkpoint| checkpoint.sequence > 0));
-    /// #
-    /// # app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }).await?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// # })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See [execution and retained history](crate::workflow#execute-observe-restore-and-delete).
     pub async fn history(
         &self,
         after: Option<HistoryCursor>,
@@ -2157,44 +1328,7 @@ impl<
     /// revocation. Storage failures use `Integration`. A successful seal survives
     /// observer loss and deletion resumes in bounded pages after reopen.
     ///
-    /// # Example
-    ///
-    /// ```
-    /// # use agents_kit::Agent;
-    /// # use app_kit::{App, AppConfig, Shutdown, WorkspaceConfig};
-    /// # use app_kit::workflow::{CheckpointSelector, ExecutionEvent, ExecutionOptions, RunSelector,
-    /// #     RunStatus, WorkflowDefinition, WorkflowState};
-    /// # use storage_kit::StateStore;
-    /// # use storage_kit::state::config::{LanceStateStoreConfig, StateStoreConfig};
-    /// #
-    /// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-    /// # runtime.block_on(async {
-    /// # let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-    /// # let definition = WorkflowDefinition::parse(r#"{
-    /// #     "schema":"app-kit.workflow/v2", "id":"counter", "revision":"r1",
-    /// #     "state":{"count":0}, "required":["count"],
-    /// #     "reducers":{"count":"reject_concurrent"}, "entry":"increment",
-    /// #     "nodes":[{"id":"increment","step":{"kind":"state","mutations":[
-    /// #         {"kind":"increment","target":"count","value":{"kind":"literal","value":1}}
-    /// #     ]}}], "routes":{}
-    /// # }"#)?;
-    /// # let config = AppConfig::<_, Agent>::new(store, Vec::new(), vec![definition]);
-    /// # let mut app = App::open(config).await?;
-    /// # let mut workspace = app.create_workspace(WorkspaceConfig {
-    /// #     name: Some("local counter".into()), root: std::env::current_dir()?,
-    /// # }).await?;
-    /// # let workflow = workspace.workflow("counter".parse()?).await?;
-    /// # let mut run = workflow.prepare(WorkflowState::default()).await?;
-    /// let terminal = run.execution(ExecutionOptions::default()).await?.finish().await?;
-    /// let id = run.id().clone();
-    /// run.delete(terminal.checkpoint).await?;
-    /// assert!(matches!(workflow.open_run(RunSelector::Latest(id)).await, Err(app_kit::AppError::NotFound(_))));
-    /// #
-    /// # app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }).await?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// # })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See [execution and retained history](crate::workflow#execute-observe-restore-and-delete).
     pub async fn delete(&mut self, expected_checkpoint: u64) -> Result<(), AppError> {
         self.runtime.delete(expected_checkpoint).await
     }
@@ -2211,42 +1345,7 @@ impl<
     /// for absent retained evidence, or `Integration` for inconsistent or unreadable
     /// records. A newer App generation can invalidate this handle.
     ///
-    /// # Example
-    ///
-    /// ```
-    /// # use agents_kit::Agent;
-    /// # use app_kit::{App, AppConfig, Shutdown, WorkspaceConfig};
-    /// # use app_kit::workflow::{CheckpointSelector, ExecutionEvent, ExecutionOptions, RunSelector,
-    /// #     RunStatus, WorkflowDefinition, WorkflowState};
-    /// # use storage_kit::StateStore;
-    /// # use storage_kit::state::config::{LanceStateStoreConfig, StateStoreConfig};
-    /// #
-    /// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-    /// # runtime.block_on(async {
-    /// # let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-    /// # let definition = WorkflowDefinition::parse(r#"{
-    /// #     "schema":"app-kit.workflow/v2", "id":"counter", "revision":"r1",
-    /// #     "state":{"count":0}, "required":["count"],
-    /// #     "reducers":{"count":"reject_concurrent"}, "entry":"increment",
-    /// #     "nodes":[{"id":"increment","step":{"kind":"state","mutations":[
-    /// #         {"kind":"increment","target":"count","value":{"kind":"literal","value":1}}
-    /// #     ]}}], "routes":{}
-    /// # }"#)?;
-    /// # let config = AppConfig::<_, Agent>::new(store, Vec::new(), vec![definition]);
-    /// # let mut app = App::open(config).await?;
-    /// # let mut workspace = app.create_workspace(WorkspaceConfig {
-    /// #     name: Some("local counter".into()), root: std::env::current_dir()?,
-    /// # }).await?;
-    /// # let workflow = workspace.workflow("counter".parse()?).await?;
-    /// let background = workflow.start(ExecutionOptions::default()).await?;
-    /// let observed = background.wait().await?;
-    /// assert!(matches!(observed.status, RunStatus::Succeeded));
-    /// #
-    /// # app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }).await?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// # })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See [execution and retained history](crate::workflow#execute-observe-restore-and-delete).
     pub async fn wait(&self) -> Result<RunSnapshot, AppError> {
         self.runtime.wait().await
     }
@@ -2282,17 +1381,23 @@ impl<
     /// # }"#)?;
     /// # let config = AppConfig::<_, Agent>::new(store, Vec::new(), vec![definition]);
     /// # let mut app = App::open(config).await?;
-    /// # let mut workspace = app.create_workspace(WorkspaceConfig {
-    /// #     name: Some("local counter".into()), root: std::env::current_dir()?,
-    /// # }).await?;
-    /// # let workflow = workspace.workflow("counter".parse()?).await?;
-    /// # let mut run = workflow.prepare(WorkflowState::default()).await?;
-    /// let before = run.snapshot().await?;
-    /// run.cancel(before.checkpoint).await?;
-    /// let cancelled = run.wait().await?;
-    /// assert!(matches!(cancelled.status, RunStatus::Cancelled));
-    /// #
-    /// # app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }).await?;
+    /// # let outcome = async {
+    /// #     let mut workspace = app.create_workspace(WorkspaceConfig {
+    /// #         name: Some("local counter".into()), root: std::env::current_dir()?,
+    /// #     }).await?;
+    /// #     let workflow = workspace.workflow("counter".parse()?).await?;
+    /// #     let mut run = workflow.prepare(WorkflowState::default()).await?;
+    ///     let before = run.snapshot().await?;
+    ///     run.cancel(before.checkpoint).await?;
+    ///     let cancelled = run.wait().await?;
+    ///     assert!(matches!(cancelled.status, RunStatus::Cancelled));
+    ///     #
+    /// #     Ok::<(), Box<dyn std::error::Error>>(())
+    /// # }.await;
+    /// # let cleanup = app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }).await;
+    /// # if let Err(error) = &cleanup { eprintln!("App shutdown: {error}"); }
+    /// # outcome?;
+    /// # cleanup?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// # })?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -2335,20 +1440,26 @@ impl<
     /// # }"#)?;
     /// # let config = AppConfig::<_, Agent>::new(store, Vec::new(), vec![definition]);
     /// # let mut app = App::open(config).await?;
-    /// # let mut workspace = app.create_workspace(WorkspaceConfig {
-    /// #     name: Some("local counter".into()), root: std::env::current_dir()?,
-    /// # }).await?;
-    /// # let workflow = workspace.workflow("counter".parse()?).await?;
-    /// use app_kit::workflow::{Interaction, Resolution};
-    /// let run = workflow.start(ExecutionOptions::default()).await?;
-    /// let waiting = run.wait().await?;
-    /// let Interaction::Input { sequence, generation, .. } = waiting.interactions[0] else {
-    ///     panic!("the input workflow must request a value");
-    /// };
-    /// run.resolve(sequence, generation, Resolution::Input(serde_json::json!("ownership"))).await?;
-    /// assert_eq!(run.wait().await?.state.values()["answer"], "ownership");
-    /// #
-    /// # app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }).await?;
+    /// # let outcome = async {
+    /// #     let mut workspace = app.create_workspace(WorkspaceConfig {
+    /// #         name: Some("local counter".into()), root: std::env::current_dir()?,
+    /// #     }).await?;
+    /// #     let workflow = workspace.workflow("counter".parse()?).await?;
+    ///     use app_kit::workflow::{Interaction, Resolution};
+    ///     let run = workflow.start(ExecutionOptions::default()).await?;
+    ///     let waiting = run.wait().await?;
+    ///     let Interaction::Input { sequence, generation, .. } = waiting.interactions[0] else {
+    ///         panic!("the input workflow must request a value");
+    ///     };
+    ///     run.resolve(sequence, generation, Resolution::Input(serde_json::json!("ownership"))).await?;
+    ///     assert_eq!(run.wait().await?.state.values()["answer"], "ownership");
+    ///     #
+    /// #     Ok::<(), Box<dyn std::error::Error>>(())
+    /// # }.await;
+    /// # let cleanup = app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }).await;
+    /// # if let Err(error) = &cleanup { eprintln!("App shutdown: {error}"); }
+    /// # outcome?;
+    /// # cleanup?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// # })?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())

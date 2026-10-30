@@ -52,14 +52,7 @@ pub struct ToolInteractionId(String);
 impl ToolInteractionId {
     /// Creates a fresh opaque interaction id.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use tools_kit::interaction::ToolInteractionId;
-    /// let id = ToolInteractionId::new();
-    /// let encoded = serde_json::to_value(&id).unwrap();
-    /// assert_eq!(encoded.as_str(), Some(id.as_str()));
-    /// ```
+    /// See [`crate::interaction::ToolInteractionId`] for a complete example.
     ///
     #[must_use]
     pub fn new() -> Self {
@@ -68,14 +61,7 @@ impl ToolInteractionId {
 
     /// Borrows the serialized interaction id.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use tools_kit::interaction::ToolInteractionId;
-    /// let id = ToolInteractionId::new();
-    /// let encoded = serde_json::to_value(&id).unwrap();
-    /// assert_eq!(encoded.as_str(), Some(id.as_str()));
-    /// ```
+    /// See [`crate::interaction::ToolInteractionId`] for a complete example.
     ///
     #[must_use]
     pub fn as_str(&self) -> &str {
@@ -94,7 +80,12 @@ impl Default for ToolInteractionId {
 /// # Examples
 ///
 /// ```
-/// use tools_kit::{declaration::ToolName, interaction::{ToolInteractionId, ToolInteractionKind, ToolInteractionRequest, ToolInteractionResponse}};
+/// use tools_kit::{
+///     declaration::ToolName,
+///     interaction::{
+///         ToolInteractionId, ToolInteractionKind, ToolInteractionRequest, ToolInteractionResponse,
+///     },
+/// };
 /// let request = ToolInteractionRequest {
 ///     id: ToolInteractionId::new(), tool_name: ToolName::new("ask")?,
 ///     call_id: Some("call-1".into()), prompt: "Which city?".into(),

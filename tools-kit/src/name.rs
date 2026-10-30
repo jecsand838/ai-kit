@@ -180,16 +180,7 @@ impl ToolName {
     /// Returns an error when the rendered name is empty, too long, or contains
     /// characters outside the Kit's portable tool-name subset.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use tools_kit::declaration::ToolName;
-    /// let name = ToolName::new("lookup_record")?;
-    /// assert_eq!(name.as_str(), "lookup_record");
-    /// assert!(ToolName::new("bad name").is_err());
-    ///
-    /// # Ok::<(), tools_kit::ToolError>(())
-    /// ```
+    /// See [`crate::declaration::ToolName`] for a complete example.
     ///
     pub fn new(value: impl Into<String>) -> Result<Self, ToolError> {
         Self::local(value)
@@ -221,16 +212,7 @@ impl ToolName {
 
     /// Returns the provider-safe rendered name.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use tools_kit::declaration::ToolName;
-    /// let name = ToolName::new("lookup_record")?;
-    /// assert_eq!(name.as_str(), "lookup_record");
-    /// assert!(ToolName::new("bad name").is_err());
-    ///
-    /// # Ok::<(), tools_kit::ToolError>(())
-    /// ```
+    /// See [`crate::declaration::ToolName`] for a complete example.
     ///
     #[must_use]
     pub fn as_str(&self) -> &str {

@@ -23,10 +23,7 @@ const DEFAULT_OPERATION_TIMEOUT_MS: u64 = 5_000;
 ///
 /// ```rust
 /// let location = storage_kit::state::config::SqliteStateStoreLocation::Memory;
-/// if !location.is_memory() {
-///     return Err("expected memory location".into());
-/// }
-/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// assert!(location.is_memory());
 /// ```
 pub enum SqliteStateStoreLocation {
     /// Uses a process-local in-memory database.
@@ -38,15 +35,7 @@ pub enum SqliteStateStoreLocation {
 impl SqliteStateStoreLocation {
     /// Returns true for an in-memory location.
     ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// let location = storage_kit::state::config::SqliteStateStoreLocation::Memory;
-    /// if !location.is_memory() {
-    ///     return Err("expected memory location".into());
-    /// }
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See [`SqliteStateStoreLocation`] for an executable example.
     #[must_use]
     pub fn is_memory(&self) -> bool {
         match self {
@@ -263,15 +252,7 @@ impl SqliteStateStoreConfig {
 
     /// Returns the local SQLite location.
     ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// let config = storage_kit::state::config::SqliteStateStoreConfig::memory();
-    /// if !config.location().is_memory() {
-    ///     return Err("expected memory location".into());
-    /// }
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See [`Self::memory`] for an executable example.
     #[must_use]
     pub fn location(&self) -> &SqliteStateStoreLocation {
         &self.location

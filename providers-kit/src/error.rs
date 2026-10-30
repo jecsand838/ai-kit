@@ -1055,7 +1055,13 @@ impl RemoteFailure {
     ///
     /// ```
     /// use providers_kit::error::{RemoteFailure, NativeErrorDetails, ErrorKind, ClassificationBasis};
-    /// let failure = RemoteFailure::new(ErrorKind::NotFound, NativeErrorDetails { message: Some("private detail".into()), ..Default::default() })?;
+    /// let failure = RemoteFailure::new(
+    ///     ErrorKind::NotFound,
+    ///     NativeErrorDetails {
+    ///         message: Some("private detail".into()),
+    ///         ..Default::default()
+    ///     },
+    /// )?;
     /// assert_eq!(failure.kind(), ErrorKind::NotFound);
     /// assert_eq!(failure.classification_basis(), ClassificationBasis::Explicit);
     /// assert_eq!(failure.native_details().message.as_deref(), Some("private detail"));
@@ -1076,18 +1082,7 @@ impl RemoteFailure {
 
     /// Returns the same portable classification vocabulary used by [`KitError`].
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::error::{RemoteFailure, NativeErrorDetails, ErrorKind, ClassificationBasis};
-    /// let failure = RemoteFailure::new(ErrorKind::NotFound, NativeErrorDetails { message: Some("private detail".into()), ..Default::default() })?;
-    /// assert_eq!(failure.kind(), ErrorKind::NotFound);
-    /// assert_eq!(failure.classification_basis(), ClassificationBasis::Explicit);
-    /// assert_eq!(failure.native_details().message.as_deref(), Some("private detail"));
-    /// assert!(!format!("{failure:?}").contains("private detail"));
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::error::RemoteFailure::new`] for a complete example.
     ///
     pub fn kind(&self) -> ErrorKind {
         self.category.kind()
@@ -1095,18 +1090,7 @@ impl RemoteFailure {
 
     /// Returns the evidence used for classification, independently of the retained body.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::error::{RemoteFailure, NativeErrorDetails, ErrorKind, ClassificationBasis};
-    /// let failure = RemoteFailure::new(ErrorKind::NotFound, NativeErrorDetails { message: Some("private detail".into()), ..Default::default() })?;
-    /// assert_eq!(failure.kind(), ErrorKind::NotFound);
-    /// assert_eq!(failure.classification_basis(), ClassificationBasis::Explicit);
-    /// assert_eq!(failure.native_details().message.as_deref(), Some("private detail"));
-    /// assert!(!format!("{failure:?}").contains("private detail"));
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::error::RemoteFailure::new`] for a complete example.
     ///
     pub fn classification_basis(&self) -> ClassificationBasis {
         self.basis
@@ -1114,18 +1098,7 @@ impl RemoteFailure {
 
     /// Explicitly exposes potentially sensitive native evidence.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::error::{RemoteFailure, NativeErrorDetails, ErrorKind, ClassificationBasis};
-    /// let failure = RemoteFailure::new(ErrorKind::NotFound, NativeErrorDetails { message: Some("private detail".into()), ..Default::default() })?;
-    /// assert_eq!(failure.kind(), ErrorKind::NotFound);
-    /// assert_eq!(failure.classification_basis(), ClassificationBasis::Explicit);
-    /// assert_eq!(failure.native_details().message.as_deref(), Some("private detail"));
-    /// assert!(!format!("{failure:?}").contains("private detail"));
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::error::RemoteFailure::new`] for a complete example.
     ///
     pub fn native_details(&self) -> &NativeErrorDetails {
         &self.details
@@ -1472,7 +1445,13 @@ impl KitError {
     ///
     /// ```
     /// use providers_kit::error::{RemoteFailure, NativeErrorDetails, ErrorKind, ClassificationBasis};
-    /// let failure = RemoteFailure::new(ErrorKind::NotFound, NativeErrorDetails { message: Some("private detail".into()), ..Default::default() })?;
+    /// let failure = RemoteFailure::new(
+    ///     ErrorKind::NotFound,
+    ///     NativeErrorDetails {
+    ///         message: Some("private detail".into()),
+    ///         ..Default::default()
+    ///     },
+    /// )?;
     /// use providers_kit::error::{KitError, Operation, ErrorPhase};
     /// let error = KitError::from_remote(failure, Operation::FileInfo, ErrorPhase::ReadBody);
     /// assert_eq!(error.kind(), ErrorKind::NotFound);
@@ -1632,7 +1611,11 @@ impl KitError {
     /// ```
     /// use providers_kit::error::{KitError, ErrorKind, ErrorPhase, Operation};
     /// let error = KitError::new(ErrorKind::Closed, Operation::Generate, ErrorPhase::Lifecycle);
-    /// let details = providers_kit::error::ResponseDetails::Json { category: providers_kit::error::JsonErrorCategory::Syntax, line: 1, column: 2 };
+    /// let details = providers_kit::error::ResponseDetails::Json {
+    ///     category: providers_kit::error::JsonErrorCategory::Syntax,
+    ///     line: 1,
+    ///     column: 2,
+    /// };
     /// let error = error.with_response_details(details);
     /// assert!(error.response_details().is_some());
     /// ```

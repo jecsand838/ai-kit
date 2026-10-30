@@ -25,7 +25,10 @@ use crate::{
 ///
 /// ```
 /// use tools_kit::{declaration::{ToolInfo, ToolName}, schema::JsonSchema};
-/// let info = ToolInfo::new(ToolName::new("ping")?, JsonSchema::strict(serde_json::json!({"type":"object"})));
+/// let info = ToolInfo::new(
+///     ToolName::new("ping")?,
+///     JsonSchema::strict(serde_json::json!({"type":"object"})),
+/// );
 /// assert!(info.output_schema.is_none());
 ///
 /// # Ok::<(), tools_kit::ToolError>(())
@@ -57,15 +60,7 @@ pub struct ToolInfo {
 impl ToolInfo {
     /// Creates a complete declaration with no optional metadata.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use tools_kit::{declaration::{ToolInfo, ToolName}, schema::JsonSchema};
-    /// let info = ToolInfo::new(ToolName::new("ping")?, JsonSchema::strict(serde_json::json!({"type":"object"})));
-    /// assert!(info.output_schema.is_none());
-    ///
-    /// # Ok::<(), tools_kit::ToolError>(())
-    /// ```
+    /// See [`crate::declaration::ToolInfo`] for a complete example.
     ///
     #[must_use]
     pub fn new(name: ToolName, input_schema: JsonSchema) -> Self {
@@ -150,7 +145,10 @@ pub struct ToolAnnotations {
 ///
 /// ```
 /// use tools_kit::declaration::ToolIcon;
-/// let icon = ToolIcon { uri: "https://example.com/icon.png".into(), mime_type: Some("image/png".into()) };
+/// let icon = ToolIcon {
+///     uri: "https://example.com/icon.png".into(),
+///     mime_type: Some("image/png".into()),
+/// };
 /// assert_eq!(icon.mime_type.as_deref(), Some("image/png"));
 /// ```
 ///

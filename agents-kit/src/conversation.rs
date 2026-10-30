@@ -65,69 +65,80 @@
 //!         vec![WorkspaceRoot::new(cwd, WorkspaceRootAccess::ReadWrite)?],
 //!         WorkspaceExecutionPolicy::new(WorkspaceSandboxMode::FullAccess, WorkspaceNetworkAccess::Enabled))?;
 //!     let workspace = agent.new_workspace(NewWorkspace::new("review", context, WorkspaceDefaults::empty())?).await?;
-//!     let conversation = workspace.new_conversation(NewConversation::new(None, None, vec![])?).await?;
 //!     let work = async {
-//!         let mut notifications = conversation.notification_stream()?;
-//!         let request = PromptRequest::new("Call inspect_status, then describe its outcome.")?
-//!             .with_tool_selection(ToolSelection::Required)?
-//!             .with_timeout(Duration::from_secs(90))?;
-//!         let mut output = conversation.prompt_stream(request).await?;
-//!         let completion = tokio::time::timeout(Duration::from_secs(90), async {
-//!             loop {
-//!                 tokio::select! {
-//!                     event = output.recv() => match event {
-//!                         Some(Ok(PromptEvent::OutputDelta { text })) => print!("{text}"),
-//!                         Some(Ok(PromptEvent::Completed(response))) => break Ok(response),
-//!                         Some(Err(error)) => break Err(error),
-//!                         None => break Err(agents_kit::KitError::protocol("completion is missing")),
-//!                     },
-//!                     event = notifications.recv() => {
-//!                         let event = event.ok_or_else(|| agents_kit::KitError::closed("notification stream ended"))??;
-//!                         match event.kind() {
-//!                             ConversationNotificationKind::Interaction { title, body, .. } => {
-//!                                 println!("Decision requested: {title}: {body}");
-//!                                 conversation.resolve_notification(event.id().clone(),
-//!                                     NotificationResolution::Deny { reason: "No action approved by this example".into() }).await?;
+//!         let conversation = workspace.new_conversation(NewConversation::new(None, None, vec![])?).await?;
+//!         let work = async {
+//!             let mut notifications = conversation.notification_stream()?;
+//!             let request = PromptRequest::new("Call inspect_status, then describe its outcome.")?
+//!                 .with_tool_selection(ToolSelection::Required)?
+//!                 .with_timeout(Duration::from_secs(90))?;
+//!             let mut output = conversation.prompt_stream(request).await?;
+//!             let completion = tokio::time::timeout(Duration::from_secs(90), async {
+//!                 loop {
+//!                     tokio::select! {
+//!                         event = output.recv() => match event {
+//!                             Some(Ok(PromptEvent::OutputDelta { text })) => print!("{text}"),
+//!                             Some(Ok(PromptEvent::Completed(response))) => break Ok(response),
+//!                             Some(Err(error)) => break Err(error),
+//!                             None => break Err(agents_kit::KitError::protocol("completion is missing")),
+//!                         },
+//!                         event = notifications.recv() => {
+//!                             let event = event.ok_or_else(|| agents_kit::KitError::closed("notification stream ended"))??;
+//!                             match event.kind() {
+//!                                 ConversationNotificationKind::Interaction { title, body, .. } => {
+//!                                     println!("Decision requested: {title}: {body}");
+//!                                     conversation.resolve_notification(event.id().clone(),
+//!                                         NotificationResolution::Deny { reason: "No action approved by this example".into() }).await?;
+//!                                 }
+//!                                 _ => println!("Observed passive notification {}", event.id()),
 //!                             }
-//!                             _ => println!("Observed passive notification {}", event.id()),
 //!                         }
 //!                     }
 //!                 }
-//!             }
-//!         }).await.map_err(|_| agents_kit::KitError::timeout("caller observation deadline"))??;
-//!         assert!(output.recv().await.is_none());
-//!         assert!(!completion.output().trim().is_empty());
-//!         println!("Authoritative answer: {}", completion.output());
+//!             }).await.map_err(|_| agents_kit::KitError::timeout("caller observation deadline"))??;
+//!             assert!(output.recv().await.is_none());
+//!             assert!(!completion.output().trim().is_empty());
+//!             println!("Authoritative answer: {}", completion.output());
 //!
-//!         // Admission succeeds before cancellation. Dropping `output` would not cancel.
-//!         let mut cancelled = conversation.prompt_stream(PromptRequest::new("Explain the task in detail.")?
-//!             .with_tool_selection(ToolSelection::None)?
-//!             .with_timeout(Duration::from_secs(90))?).await?;
-//!         conversation.abort().await?;
-//!         let terminal = tokio::time::timeout(Duration::from_secs(90), async {
-//!             loop {
-//!                 match cancelled.recv().await {
-//!                     Some(Ok(PromptEvent::OutputDelta { .. })) => {}
-//!                     Some(Ok(PromptEvent::Completed(_))) => break Ok(()), // completion may win the race
-//!                     Some(Err(error)) if error.kind() == agents_kit::error::ErrorKind::Cancelled => break Ok(()),
-//!                     Some(Err(error)) => break Err(error),
-//!                     None => break Err(agents_kit::KitError::protocol("cancellation terminal is missing")),
+//!             // Admission succeeds before cancellation. Dropping `output` would not cancel.
+//!             let mut cancelled = conversation.prompt_stream(PromptRequest::new("Explain the task in detail.")?
+//!                 .with_tool_selection(ToolSelection::None)?
+//!                 .with_timeout(Duration::from_secs(90))?).await?;
+//!             conversation.abort().await?;
+//!             let terminal = tokio::time::timeout(Duration::from_secs(90), async {
+//!                 loop {
+//!                     match cancelled.recv().await {
+//!                         Some(Ok(PromptEvent::OutputDelta { .. })) => {}
+//!                         Some(Ok(PromptEvent::Completed(_))) => break Ok(()), // completion may win the race
+//!                         Some(Err(error)) if error.kind() == agents_kit::error::ErrorKind::Cancelled => break Ok(()),
+//!                         Some(Err(error)) => break Err(error),
+//!                         None => break Err(agents_kit::KitError::protocol("cancellation terminal is missing")),
+//!                     }
 //!                 }
-//!             }
-//!         }).await.map_err(|_| agents_kit::KitError::timeout("cancellation observation deadline"))?;
-//!         terminal?;
-//!         Ok::<(), agents_kit::KitError>(())
+//!             }).await.map_err(|_| agents_kit::KitError::timeout("cancellation observation deadline"))?;
+//!             terminal?;
+//!             Ok::<(), agents_kit::KitError>(())
+//!         }.await;
+//!         let close = conversation.close().await; // also settles work after observation failure
+//!         match (work, close) {
+//!             (Err(primary), Err(cleanup)) => Err(primary.with_supplementary(cleanup)),
+//!             (Err(error), _) | (_, Err(error)) => Err(error),
+//!             (Ok(()), Ok(())) => Ok(()),
+//!         }
 //!     }.await;
-//!     let close = conversation.close().await; // also settles work after observation failure
-//!     let workspace_close = workspace.close().await;
-//!     work?;
-//!     close?;
-//!     workspace_close?;
-//!     Ok::<(), Box<dyn std::error::Error>>(())
+//!     let close = workspace.close().await; // also runs if conversation creation failed
+//!     match (work, close) {
+//!         (Err(primary), Err(cleanup)) => Err(primary.with_supplementary(cleanup)),
+//!         (Err(error), _) | (_, Err(error)) => Err(error),
+//!         (Ok(()), Ok(())) => Ok(()),
+//!     }
 //! }.await;
 //! let shutdown = agent.shutdown().await;
-//! outcome?;
-//! shutdown?;
+//! match (outcome, shutdown) {
+//!     (Err(primary), Err(cleanup)) => Err(primary.with_supplementary(cleanup)),
+//!     (Err(error), _) | (_, Err(error)) => Err(error),
+//!     (Ok(()), Ok(())) => Ok(()),
+//! }?;
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! # })?;
 //! # Ok::<(), Box<dyn std::error::Error>>(())
@@ -211,48 +222,21 @@ impl ConversationInfo {
 
     /// Returns the portable conversation identifier.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use agents_kit::conversation::ConversationInfo;
-    /// let id = "conversation_00000000000000000000000000000000".parse()?;
-    /// let workspace = "workspace_00000000000000000000000000000000".parse()?;
-    /// let info = ConversationInfo::new(id, workspace, Some("Review".into()))?;
-    /// assert!(info.id().as_str().starts_with("conversation_"));
-    /// # Ok::<(), agents_kit::KitError>(())
-    /// ```
+    /// See [`ConversationInfo`] for a complete example.
     pub fn id(&self) -> &ConversationId {
         &self.id
     }
 
     /// Returns the portable identifier of the owning workspace.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use agents_kit::conversation::ConversationInfo;
-    /// let id = "conversation_00000000000000000000000000000000".parse()?;
-    /// let workspace = "workspace_00000000000000000000000000000000".parse()?;
-    /// let info = ConversationInfo::new(id, workspace, Some("Review".into()))?;
-    /// assert!(info.workspace_id().as_str().starts_with("workspace_"));
-    /// # Ok::<(), agents_kit::KitError>(())
-    /// ```
+    /// See [`ConversationInfo`] for a complete example.
     pub fn workspace_id(&self) -> &WorkspaceId {
         &self.workspace_id
     }
 
     /// Returns the configured title, when present.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use agents_kit::conversation::ConversationInfo;
-    /// let id = "conversation_00000000000000000000000000000000".parse()?;
-    /// let workspace = "workspace_00000000000000000000000000000000".parse()?;
-    /// let info = ConversationInfo::new(id, workspace, Some("Review".into()))?;
-    /// assert_eq!(info.title(), Some("Review"));
-    /// # Ok::<(), agents_kit::KitError>(())
-    /// ```
+    /// See [`ConversationInfo`] for a complete example.
     pub fn title(&self) -> Option<&str> {
         self.title.as_deref()
     }
@@ -335,48 +319,21 @@ impl NewConversation {
 
     /// Returns the requested title, when present.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use agents_kit::conversation::NewConversation;
-    /// let request = NewConversation::new(Some("Review".into()), None, Vec::new())?;
-    /// assert_eq!(request.title(), Some("Review"));
-    /// assert!(request.defaults().is_none());
-    /// assert!(request.knowledge_sources().is_empty());
-    /// # Ok::<(), agents_kit::KitError>(())
-    /// ```
+    /// See [`NewConversation`] for a complete example.
     pub fn title(&self) -> Option<&str> {
         self.title.as_deref()
     }
 
     /// Returns conversation-level default overrides, when present.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use agents_kit::conversation::NewConversation;
-    /// let request = NewConversation::new(Some("Review".into()), None, Vec::new())?;
-    /// assert_eq!(request.title(), Some("Review"));
-    /// assert!(request.defaults().is_none());
-    /// assert!(request.knowledge_sources().is_empty());
-    /// # Ok::<(), agents_kit::KitError>(())
-    /// ```
+    /// See [`NewConversation`] for a complete example.
     pub fn defaults(&self) -> Option<&WorkspaceDefaults> {
         self.defaults.as_ref()
     }
 
     /// Returns the initial managed-knowledge sources.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use agents_kit::conversation::NewConversation;
-    /// let request = NewConversation::new(Some("Review".into()), None, Vec::new())?;
-    /// assert_eq!(request.title(), Some("Review"));
-    /// assert!(request.defaults().is_none());
-    /// assert!(request.knowledge_sources().is_empty());
-    /// # Ok::<(), agents_kit::KitError>(())
-    /// ```
+    /// See [`NewConversation`] for a complete example.
     pub fn knowledge_sources(&self) -> &[KnowledgeSource] {
         &self.knowledge_sources
     }
@@ -384,86 +341,95 @@ impl NewConversation {
 
 /// Public implementation contract for one live portable conversation.
 ///
-/// A caller workspace returns its own concrete conversation implementation through
+/// A caller workspace returns its own concrete conversation through
 /// [`WorkspaceBackend::Conversation`](crate::WorkspaceBackend::Conversation).
-/// Runtime composition can instead use a caller-owned exhaustive enum hierarchy.
 /// Prompting reaches a terminal portable result, abort joins active work, and close
-/// permanently closes the durable conversation.
+/// permanently closes the durable conversation. Runtime composition may use an
+/// exhaustive caller-owned enum hierarchy.
 ///
-/// # Examples
+/// # Runnable caller example
 ///
-/// Local construction and metadata use no provider requests. The runtime stays
-/// alive through consuming conversation, workspace and Agent cleanup.
+/// This small test double accepts one prompt and one file path. It demonstrates
+/// portable consumption without a service or database; it is not a durable agent.
+/// Notification and interaction methods return explicit Unsupported errors;
+/// request assertions make the fixture's expected inputs visible. The streaming
+/// response is caller-authored, not fabricated deltas from a supplied backend.
 ///
 /// ```
-/// # use agents_kit::{AgentBackend, AgentBuilder, AgentStorage, WorkspaceBackend, ConversationBackend};
-/// # use agents_kit::config::{AgentConfig, CustomAgentConfig, CustomLoopLimits, CustomToolApproval};
-/// # use agents_kit::{model::ModelSelector, tool::ToolSelection};
-/// # use agents_kit::workspace::{NewWorkspace, WorkspaceContext, WorkspaceDefaults, WorkspaceRoot, WorkspaceRootAccess, WorkspaceExecutionPolicy, WorkspaceSandboxMode, WorkspaceNetworkAccess};
-/// # use agents_kit::conversation::NewConversation;
-/// # use providers_kit::{Provider, ProviderConfig, config::{ProviderKind, OllamaConfig, TransportConfig}};
-/// # use storage_kit::{StateStore, state::config::{StateStoreConfig, LanceStateStoreConfig}};
-/// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-/// # runtime.block_on(async {
-/// #     let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-/// #     let custom = CustomAgentConfig::new(ModelSelector::new("exact-model")?, ToolSelection::None,
-/// #         CustomLoopLimits::new(4, 0, 1)?, CustomToolApproval::Deny)?;
-/// #     let config = AgentConfig::new(custom.into(), std::time::Duration::from_secs(10), std::num::NonZeroUsize::MIN)?;
-/// #     let provider = Provider::from_config(ProviderConfig::new(
-/// #         ProviderKind::Ollama(OllamaConfig::local()), TransportConfig::default()))?;
-/// #     let agent = AgentBuilder::create(config, AgentStorage::new(store)).with_provider(provider).build().await?;
-/// #     let cwd = std::env::current_dir()?;
-/// #     let context = WorkspaceContext::new(cwd.clone(), vec![WorkspaceRoot::new(cwd, WorkspaceRootAccess::ReadOnly)?],
-/// #         WorkspaceExecutionPolicy::new(WorkspaceSandboxMode::ReadOnly, WorkspaceNetworkAccess::Disabled))?;
-/// #     let workspace = agent.new_workspace(NewWorkspace::new("docs", context, WorkspaceDefaults::empty())?).await?;
-/// #     let conversation = workspace.new_conversation(NewConversation::new(Some("Review".into()), None, Vec::new())?).await?;
-/// let info = conversation.info().await?;
-/// assert_eq!(info.id(), &conversation.id());
-/// #     conversation.close().await?;
-/// #     workspace.close().await?;
-/// #     agent.shutdown().await?;
-/// #     Ok::<(), Box<dyn std::error::Error>>(())
+/// use std::path::{Path, PathBuf};
+/// use agents_kit::{ConversationBackend, KitError};
+/// use agents_kit::conversation::{ConversationInfo, FileRead};
+/// use agents_kit::identity::{ConversationId, NotificationId, WorkspaceId};
+/// use agents_kit::notification::{ConversationNotificationReceiver, NotificationResolution};
+/// use agents_kit::prompt::{PromptEvent, PromptRequest, PromptResponse, PromptStream};
+///
+/// struct ScriptedConversation {
+///     id: ConversationId,
+///     workspace: WorkspaceId,
+/// }
+/// impl ConversationBackend for ScriptedConversation {
+///     fn id(&self) -> ConversationId { self.id.clone() }
+///     async fn info(&self) -> Result<ConversationInfo, KitError> {
+///         ConversationInfo::new(self.id(), self.workspace.clone(), Some("Example".into()))
+///     }
+///     async fn prompt(&self, request: PromptRequest) -> Result<PromptResponse, KitError> {
+///         assert_eq!(request.text(), "Status?");
+///         Ok(PromptResponse::new("ready".into(), None))
+///     }
+///     async fn prompt_stream(&self, request: PromptRequest) -> Result<PromptStream, KitError> {
+///         assert_eq!(request.text(), "Status?");
+///         Ok(PromptStream::from_stream(futures_util::stream::iter([
+///             Ok(PromptEvent::OutputDelta { text: "ready".into() }),
+///             Ok(PromptEvent::Completed(PromptResponse::new("ready".into(), None))),
+///         ])))
+///     }
+///     async fn read_file(&self, path: PathBuf) -> Result<FileRead, KitError> {
+///         assert_eq!(path, Path::new("status.txt"));
+///         FileRead::from_bytes(path, b"ready\n".to_vec())
+///     }
+///     // No background work or durable interaction exists in this fixture.
+///     async fn abort(&self) -> Result<(), KitError> { Ok(()) }
+///     fn notification_stream(&self) -> Result<ConversationNotificationReceiver, KitError> {
+///         Err(KitError::unsupported("this fixture has no notifications"))
+///     }
+///     async fn resolve_notification(&self, _: NotificationId, _: NotificationResolution)
+///         -> Result<(), KitError> {
+///         Err(KitError::unsupported("this fixture has no interactions"))
+///     }
+///     async fn close(self) -> Result<(), KitError> { Ok(()) }
+/// }
+/// # tokio::runtime::Builder::new_current_thread().build()?.block_on(async {
+/// let conversation = ScriptedConversation {
+///     id: "conversation_00000000000000000000000000000001".parse()?,
+///     workspace: "workspace_00000000000000000000000000000001".parse()?,
+/// };
+/// let outcome = async {
+///     assert_eq!(conversation.info().await?.id(), &conversation.id());
+///     assert_eq!(conversation.prompt(PromptRequest::new("Status?")?).await?.output(), "ready");
+///     let mut output = conversation.prompt_stream(PromptRequest::new("Status?")?).await?;
+///     assert!(matches!(output.recv().await.transpose()?,
+///         Some(PromptEvent::OutputDelta { text }) if text == "ready"));
+///     assert!(matches!(output.recv().await.transpose()?,
+///         Some(PromptEvent::Completed(response)) if response.output() == "ready"));
+///     assert!(output.recv().await.is_none());
+///     assert!(output.recv().await.is_none());
+///     assert_eq!(conversation.read_file("status.txt".into()).await?.text(), Some("ready\n"));
+///     conversation.abort().await?;
+///     Ok::<(), KitError>(())
+/// }.await;
+/// let cleanup = conversation.close().await;
+/// match (outcome, cleanup) {
+///     (Err(primary), Err(cleanup)) => Err(primary.with_supplementary(cleanup)),
+///     (Err(error), _) | (_, Err(error)) => Err(error),
+///     (Ok(()), Ok(())) => Ok(()),
+/// }
 /// # })?;
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 pub trait ConversationBackend: Send + Sync + 'static {
     /// Returns the durable portable conversation identity.
     ///
-    /// # Examples
-    ///
-    /// This local Custom conversation uses memory Lance and performs no inference.
-    ///
-    /// ```
-    /// # use agents_kit::{AgentBackend, AgentBuilder, AgentStorage, WorkspaceBackend, ConversationBackend};
-    /// # use agents_kit::config::{AgentConfig, CustomAgentConfig, CustomLoopLimits, CustomToolApproval};
-    /// # use agents_kit::{model::ModelSelector, tool::ToolSelection};
-    /// # use agents_kit::workspace::{NewWorkspace, WorkspaceContext, WorkspaceDefaults, WorkspaceRoot, WorkspaceRootAccess, WorkspaceExecutionPolicy, WorkspaceSandboxMode, WorkspaceNetworkAccess};
-    /// # use agents_kit::conversation::NewConversation;
-    /// # use providers_kit::{Provider, ProviderConfig, config::{ProviderKind, OllamaConfig, TransportConfig}};
-    /// # use storage_kit::{StateStore, state::config::{StateStoreConfig, LanceStateStoreConfig}};
-    /// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-    /// # runtime.block_on(async {
-    /// #     let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-    /// #     let custom = CustomAgentConfig::new(ModelSelector::new("exact-model")?, ToolSelection::None,
-    /// #         CustomLoopLimits::new(4, 0, 1)?, CustomToolApproval::Deny)?;
-    /// #     let config = AgentConfig::new(custom.into(), std::time::Duration::from_secs(10), std::num::NonZeroUsize::MIN)?;
-    /// #     let provider = Provider::from_config(ProviderConfig::new(
-    /// #         ProviderKind::Ollama(OllamaConfig::local()), TransportConfig::default()))?;
-    /// #     let agent = AgentBuilder::create(config, AgentStorage::new(store)).with_provider(provider).build().await?;
-    /// #     let cwd = std::env::current_dir()?;
-    /// #     let context = WorkspaceContext::new(cwd.clone(), vec![WorkspaceRoot::new(cwd, WorkspaceRootAccess::ReadOnly)?],
-    /// #         WorkspaceExecutionPolicy::new(WorkspaceSandboxMode::ReadOnly, WorkspaceNetworkAccess::Disabled))?;
-    /// #     let workspace = agent.new_workspace(NewWorkspace::new("docs", context, WorkspaceDefaults::empty())?).await?;
-    /// #     let conversation = workspace.new_conversation(NewConversation::new(Some("Review".into()), None, Vec::new())?).await?;
-    /// let id = conversation.id();
-    /// assert!(id.as_str().starts_with("conversation_"));
-    /// #     conversation.close().await?;
-    /// #     workspace.close().await?;
-    /// #     agent.shutdown().await?;
-    /// #     Ok::<(), Box<dyn std::error::Error>>(())
-    /// # })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See the runnable caller implementation on [`ConversationBackend`]. Supplied backends retain their own runtime and storage prerequisites.
     fn id(&self) -> ConversationId;
 
     /// Reads the current descriptive conversation state.
@@ -472,42 +438,7 @@ pub trait ConversationBackend: Send + Sync + 'static {
     ///
     /// Returns `Closed` for a terminal handle, `Conflict` for stale ownership/revision, or a typed storage/backend failure.
     ///
-    /// # Examples
-    ///
-    /// This local Custom conversation uses memory Lance and performs no inference.
-    ///
-    /// ```
-    /// # use agents_kit::{AgentBackend, AgentBuilder, AgentStorage, WorkspaceBackend, ConversationBackend};
-    /// # use agents_kit::config::{AgentConfig, CustomAgentConfig, CustomLoopLimits, CustomToolApproval};
-    /// # use agents_kit::{model::ModelSelector, tool::ToolSelection};
-    /// # use agents_kit::workspace::{NewWorkspace, WorkspaceContext, WorkspaceDefaults, WorkspaceRoot, WorkspaceRootAccess, WorkspaceExecutionPolicy, WorkspaceSandboxMode, WorkspaceNetworkAccess};
-    /// # use agents_kit::conversation::NewConversation;
-    /// # use providers_kit::{Provider, ProviderConfig, config::{ProviderKind, OllamaConfig, TransportConfig}};
-    /// # use storage_kit::{StateStore, state::config::{StateStoreConfig, LanceStateStoreConfig}};
-    /// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-    /// # runtime.block_on(async {
-    /// #     let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-    /// #     let custom = CustomAgentConfig::new(ModelSelector::new("exact-model")?, ToolSelection::None,
-    /// #         CustomLoopLimits::new(4, 0, 1)?, CustomToolApproval::Deny)?;
-    /// #     let config = AgentConfig::new(custom.into(), std::time::Duration::from_secs(10), std::num::NonZeroUsize::MIN)?;
-    /// #     let provider = Provider::from_config(ProviderConfig::new(
-    /// #         ProviderKind::Ollama(OllamaConfig::local()), TransportConfig::default()))?;
-    /// #     let agent = AgentBuilder::create(config, AgentStorage::new(store)).with_provider(provider).build().await?;
-    /// #     let cwd = std::env::current_dir()?;
-    /// #     let context = WorkspaceContext::new(cwd.clone(), vec![WorkspaceRoot::new(cwd, WorkspaceRootAccess::ReadOnly)?],
-    /// #         WorkspaceExecutionPolicy::new(WorkspaceSandboxMode::ReadOnly, WorkspaceNetworkAccess::Disabled))?;
-    /// #     let workspace = agent.new_workspace(NewWorkspace::new("docs", context, WorkspaceDefaults::empty())?).await?;
-    /// #     let conversation = workspace.new_conversation(NewConversation::new(Some("Review".into()), None, Vec::new())?).await?;
-    /// let info = conversation.info().await?;
-    /// assert_eq!(info.id(), &conversation.id());
-    /// assert_eq!(info.title(), Some("Review"));
-    /// #     conversation.close().await?;
-    /// #     workspace.close().await?;
-    /// #     agent.shutdown().await?;
-    /// #     Ok::<(), Box<dyn std::error::Error>>(())
-    /// # })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See the runnable caller implementation on [`ConversationBackend`]. Supplied backends retain their own runtime and storage prerequisites.
     fn info(&self) -> impl Future<Output = Result<ConversationInfo, KitError>> + Send + '_;
 
     /// Runs one foreground prompt through its terminal portable result.
@@ -518,19 +449,7 @@ pub trait ConversationBackend: Send + Sync + 'static {
     ///
     /// Returns `InvalidInput`/`Unsupported` before acceptance for invalid or unsupported requests, `Busy` when admission is occupied, or typed cancellation, deadline, conflict, storage, and backend failures. After ambiguous acceptance, do not blindly retry: cancellation/reconciliation retains the generation fence until settlement.
     ///
-    /// # Examples
-    ///
-    /// Requires a constructed live conversation and its configured native process or provider.
-    ///
-    /// ```no_run
-    /// use agents_kit::{ConversationBackend, KitError};
-    /// async fn example<C: ConversationBackend>(conversation: &C) -> Result<(), KitError> {
-    ///     let request = agents_kit::prompt::PromptRequest::new("Describe the current task")?;
-    ///     let response = conversation.prompt(request).await?;
-    ///     println!("{}", response.output());
-    ///     Ok(())
-    /// }
-    /// ```
+    /// See the runnable caller implementation on [`ConversationBackend`]. Supplied backends retain their own runtime and storage prerequisites.
     fn prompt(
         &self,
         request: PromptRequest,
@@ -547,24 +466,7 @@ pub trait ConversationBackend: Send + Sync + 'static {
     ///
     /// Returns `Unsupported` when the backend has no genuine incremental route, or the same admission failures as `prompt`. After admission, the stream carries terminal failures; premature source EOF is a protocol failure.
     ///
-    /// # Examples
-    ///
-    /// Requires a constructed live conversation and its configured native process or provider.
-    ///
-    /// ```no_run
-    /// use agents_kit::{ConversationBackend, KitError};
-    /// async fn example<C: ConversationBackend>(conversation: &C) -> Result<(), KitError> {
-    ///     use agents_kit::prompt::{PromptRequest, PromptEvent};
-    ///     let mut stream = conversation.prompt_stream(PromptRequest::new("Describe the current task")?).await?;
-    ///     while let Some(event) = stream.recv().await {
-    ///         match event? {
-    ///             PromptEvent::OutputDelta { text } => print!("{text}"),
-    ///             PromptEvent::Completed(response) => println!("\nFinal: {}", response.output()),
-    ///         }
-    ///     }
-    ///     Ok(())
-    /// }
-    /// ```
+    /// The runnable [`ConversationBackend`] example consumes real caller-stream events. [`PromptStream`] also demonstrates terminal validation; the [native interaction recipe](crate::conversation) requires a configured service.
     fn prompt_stream(
         &self,
         _request: PromptRequest,
@@ -584,41 +486,7 @@ pub trait ConversationBackend: Send + Sync + 'static {
     ///
     /// Returns a typed cancellation, timeout, conflict, lifecycle, or backend failure. Ambiguous cancellation retains recovery ownership; an error does not prove remote work stopped.
     ///
-    /// # Examples
-    ///
-    /// This local Custom conversation uses memory Lance and performs no inference.
-    ///
-    /// ```
-    /// # use agents_kit::{AgentBackend, AgentBuilder, AgentStorage, WorkspaceBackend, ConversationBackend};
-    /// # use agents_kit::config::{AgentConfig, CustomAgentConfig, CustomLoopLimits, CustomToolApproval};
-    /// # use agents_kit::{model::ModelSelector, tool::ToolSelection};
-    /// # use agents_kit::workspace::{NewWorkspace, WorkspaceContext, WorkspaceDefaults, WorkspaceRoot, WorkspaceRootAccess, WorkspaceExecutionPolicy, WorkspaceSandboxMode, WorkspaceNetworkAccess};
-    /// # use agents_kit::conversation::NewConversation;
-    /// # use providers_kit::{Provider, ProviderConfig, config::{ProviderKind, OllamaConfig, TransportConfig}};
-    /// # use storage_kit::{StateStore, state::config::{StateStoreConfig, LanceStateStoreConfig}};
-    /// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-    /// # runtime.block_on(async {
-    /// #     let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-    /// #     let custom = CustomAgentConfig::new(ModelSelector::new("exact-model")?, ToolSelection::None,
-    /// #         CustomLoopLimits::new(4, 0, 1)?, CustomToolApproval::Deny)?;
-    /// #     let config = AgentConfig::new(custom.into(), std::time::Duration::from_secs(10), std::num::NonZeroUsize::MIN)?;
-    /// #     let provider = Provider::from_config(ProviderConfig::new(
-    /// #         ProviderKind::Ollama(OllamaConfig::local()), TransportConfig::default()))?;
-    /// #     let agent = AgentBuilder::create(config, AgentStorage::new(store)).with_provider(provider).build().await?;
-    /// #     let cwd = std::env::current_dir()?;
-    /// #     let context = WorkspaceContext::new(cwd.clone(), vec![WorkspaceRoot::new(cwd, WorkspaceRootAccess::ReadOnly)?],
-    /// #         WorkspaceExecutionPolicy::new(WorkspaceSandboxMode::ReadOnly, WorkspaceNetworkAccess::Disabled))?;
-    /// #     let workspace = agent.new_workspace(NewWorkspace::new("docs", context, WorkspaceDefaults::empty())?).await?;
-    /// #     let conversation = workspace.new_conversation(NewConversation::new(Some("Review".into()), None, Vec::new())?).await?;
-    /// // Idle abort is local and does not make a model request.
-    /// conversation.abort().await?;
-    /// #     conversation.close().await?;
-    /// #     workspace.close().await?;
-    /// #     agent.shutdown().await?;
-    /// #     Ok::<(), Box<dyn std::error::Error>>(())
-    /// # })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See the runnable caller implementation on [`ConversationBackend`]. Supplied backends retain their own runtime and storage prerequisites.
     fn abort(&self) -> impl Future<Output = Result<(), KitError>> + Send + '_;
 
     /// Reads a validated workspace-relative file through the implementation.
@@ -629,20 +497,7 @@ pub trait ConversationBackend: Send + Sync + 'static {
     ///
     /// Returns `InvalidInput` for a nonportable relative path, `Unsupported` for a route unable to preserve exact bytes/policy, or a typed revision, lifecycle, storage, or native read failure. An untyped native rejection is not evidence of `NotFound`.
     ///
-    /// # Examples
-    ///
-    /// Requires a constructed live conversation and its configured native process or provider.
-    ///
-    /// ```no_run
-    /// use agents_kit::{ConversationBackend, KitError};
-    /// async fn example<C: ConversationBackend>(conversation: &C) -> Result<(), KitError> {
-    ///     let file = conversation.read_file("README.md".into()).await?;
-    ///     assert_eq!(file.path(), std::path::Path::new("README.md"));
-    ///     let size = file.text().map(str::len).or_else(|| file.bytes().map(<[u8]>::len));
-    ///     assert!(size.is_some());
-    ///     Ok(())
-    /// }
-    /// ```
+    /// See the runnable caller implementation on [`ConversationBackend`]. Supplied backends retain their own runtime and storage prerequisites.
     fn read_file(
         &self,
         path: PathBuf,
@@ -654,43 +509,7 @@ pub trait ConversationBackend: Send + Sync + 'static {
     ///
     /// Returns `Busy` while another receiver owns the lease, `Closed` for a closed handle, or a typed admission failure. Later durable delivery failures are yielded by `recv`.
     ///
-    /// # Examples
-    ///
-    /// This local Custom conversation uses memory Lance and performs no inference.
-    ///
-    /// ```
-    /// # use agents_kit::{AgentBackend, AgentBuilder, AgentStorage, WorkspaceBackend, ConversationBackend};
-    /// # use agents_kit::config::{AgentConfig, CustomAgentConfig, CustomLoopLimits, CustomToolApproval};
-    /// # use agents_kit::{model::ModelSelector, tool::ToolSelection};
-    /// # use agents_kit::workspace::{NewWorkspace, WorkspaceContext, WorkspaceDefaults, WorkspaceRoot, WorkspaceRootAccess, WorkspaceExecutionPolicy, WorkspaceSandboxMode, WorkspaceNetworkAccess};
-    /// # use agents_kit::conversation::NewConversation;
-    /// # use providers_kit::{Provider, ProviderConfig, config::{ProviderKind, OllamaConfig, TransportConfig}};
-    /// # use storage_kit::{StateStore, state::config::{StateStoreConfig, LanceStateStoreConfig}};
-    /// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-    /// # runtime.block_on(async {
-    /// #     let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-    /// #     let custom = CustomAgentConfig::new(ModelSelector::new("exact-model")?, ToolSelection::None,
-    /// #         CustomLoopLimits::new(4, 0, 1)?, CustomToolApproval::Deny)?;
-    /// #     let config = AgentConfig::new(custom.into(), std::time::Duration::from_secs(10), std::num::NonZeroUsize::MIN)?;
-    /// #     let provider = Provider::from_config(ProviderConfig::new(
-    /// #         ProviderKind::Ollama(OllamaConfig::local()), TransportConfig::default()))?;
-    /// #     let agent = AgentBuilder::create(config, AgentStorage::new(store)).with_provider(provider).build().await?;
-    /// #     let cwd = std::env::current_dir()?;
-    /// #     let context = WorkspaceContext::new(cwd.clone(), vec![WorkspaceRoot::new(cwd, WorkspaceRootAccess::ReadOnly)?],
-    /// #         WorkspaceExecutionPolicy::new(WorkspaceSandboxMode::ReadOnly, WorkspaceNetworkAccess::Disabled))?;
-    /// #     let workspace = agent.new_workspace(NewWorkspace::new("docs", context, WorkspaceDefaults::empty())?).await?;
-    /// #     let conversation = workspace.new_conversation(NewConversation::new(Some("Review".into()), None, Vec::new())?).await?;
-    /// let receiver = conversation.notification_stream()?;
-    /// drop(receiver); // release without acknowledging anything
-    /// let replacement = conversation.notification_stream()?;
-    /// drop(replacement);
-    /// #     conversation.close().await?;
-    /// #     workspace.close().await?;
-    /// #     agent.shutdown().await?;
-    /// #     Ok::<(), Box<dyn std::error::Error>>(())
-    /// # })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See [`ConversationNotificationReceiver`] for executable caller-stream delivery, and the [native interaction recipe](crate::conversation) for durable delivery.
     fn notification_stream(&self) -> Result<ConversationNotificationReceiver, KitError>;
 
     /// Submits a resolution for an unresolved portable notification.
@@ -699,21 +518,7 @@ pub trait ConversationBackend: Send + Sync + 'static {
     ///
     /// Returns `InvalidInput` for an invalid resolution, `NotFound` for an unknown notification, or typed lifecycle, conflict, storage, and native resolution failures. Intent is durable before dispatch; known or ambiguous acceptance is never blindly resent.
     ///
-    /// # Examples
-    ///
-    /// Requires a constructed live conversation and its configured native process or provider.
-    ///
-    /// ```no_run
-    /// use agents_kit::{ConversationBackend, KitError};
-    /// async fn example<C: ConversationBackend>(conversation: &C, id: agents_kit::identity::NotificationId) -> Result<(), KitError> {
-    ///     use agents_kit::notification::NotificationResolution;
-    ///     // The caller has inspected this pending approval and chosen denial.
-    ///     conversation.resolve_notification(id, NotificationResolution::Deny {
-    ///         reason: "Outside the approved task".into(),
-    ///     }).await?;
-    ///     Ok(())
-    /// }
-    /// ```
+    /// See [`NotificationResolution`] for resolution values and the [native interaction recipe](crate::conversation) for resolving an admitted interaction. Caller implementations are exercised by the [direct hierarchy tests](https://github.com/jecsand838/ai-kit/blob/main/agents-kit/tests/mock_hierarchy/mod.rs) without a service.
     fn resolve_notification(
         &self,
         id: NotificationId,
@@ -728,39 +533,7 @@ pub trait ConversationBackend: Send + Sync + 'static {
     ///
     /// Returns a typed cancellation, reconciliation, storage, or cleanup failure. The handle remains consumed on failure; durable recovery obligations remain authoritative.
     ///
-    /// # Examples
-    ///
-    /// This local Custom conversation uses memory Lance and performs no inference.
-    ///
-    /// ```
-    /// # use agents_kit::{AgentBackend, AgentBuilder, AgentStorage, WorkspaceBackend, ConversationBackend};
-    /// # use agents_kit::config::{AgentConfig, CustomAgentConfig, CustomLoopLimits, CustomToolApproval};
-    /// # use agents_kit::{model::ModelSelector, tool::ToolSelection};
-    /// # use agents_kit::workspace::{NewWorkspace, WorkspaceContext, WorkspaceDefaults, WorkspaceRoot, WorkspaceRootAccess, WorkspaceExecutionPolicy, WorkspaceSandboxMode, WorkspaceNetworkAccess};
-    /// # use agents_kit::conversation::NewConversation;
-    /// # use providers_kit::{Provider, ProviderConfig, config::{ProviderKind, OllamaConfig, TransportConfig}};
-    /// # use storage_kit::{StateStore, state::config::{StateStoreConfig, LanceStateStoreConfig}};
-    /// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-    /// # runtime.block_on(async {
-    /// #     let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-    /// #     let custom = CustomAgentConfig::new(ModelSelector::new("exact-model")?, ToolSelection::None,
-    /// #         CustomLoopLimits::new(4, 0, 1)?, CustomToolApproval::Deny)?;
-    /// #     let config = AgentConfig::new(custom.into(), std::time::Duration::from_secs(10), std::num::NonZeroUsize::MIN)?;
-    /// #     let provider = Provider::from_config(ProviderConfig::new(
-    /// #         ProviderKind::Ollama(OllamaConfig::local()), TransportConfig::default()))?;
-    /// #     let agent = AgentBuilder::create(config, AgentStorage::new(store)).with_provider(provider).build().await?;
-    /// #     let cwd = std::env::current_dir()?;
-    /// #     let context = WorkspaceContext::new(cwd.clone(), vec![WorkspaceRoot::new(cwd, WorkspaceRootAccess::ReadOnly)?],
-    /// #         WorkspaceExecutionPolicy::new(WorkspaceSandboxMode::ReadOnly, WorkspaceNetworkAccess::Disabled))?;
-    /// #     let workspace = agent.new_workspace(NewWorkspace::new("docs", context, WorkspaceDefaults::empty())?).await?;
-    /// #     let conversation = workspace.new_conversation(NewConversation::new(Some("Review".into()), None, Vec::new())?).await?;
-    /// conversation.close().await?; // consuming terminal cleanup
-    /// #     workspace.close().await?;
-    /// #     agent.shutdown().await?;
-    /// #     Ok::<(), Box<dyn std::error::Error>>(())
-    /// # })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See the runnable caller implementation on [`ConversationBackend`]. Supplied backends retain their own runtime and storage prerequisites.
     fn close(self) -> impl Future<Output = Result<(), KitError>> + Send
     where
         Self: Sized;
@@ -768,40 +541,7 @@ pub trait ConversationBackend: Send + Sync + 'static {
 
 /// Opaque live handle for one portable conversation.
 ///
-/// # Examples
-///
-/// Local Custom construction needs no running provider until a prompt is submitted.
-///
-/// ```
-/// # use agents_kit::{AgentBackend, AgentBuilder, AgentStorage, WorkspaceBackend, ConversationBackend};
-/// # use agents_kit::config::{AgentConfig, CustomAgentConfig, CustomLoopLimits, CustomToolApproval};
-/// # use agents_kit::{model::ModelSelector, tool::ToolSelection};
-/// # use agents_kit::workspace::{NewWorkspace, WorkspaceContext, WorkspaceDefaults, WorkspaceRoot, WorkspaceRootAccess, WorkspaceExecutionPolicy, WorkspaceSandboxMode, WorkspaceNetworkAccess};
-/// # use agents_kit::conversation::NewConversation;
-/// # use providers_kit::{Provider, ProviderConfig, config::{ProviderKind, OllamaConfig, TransportConfig}};
-/// # use storage_kit::{StateStore, state::config::{StateStoreConfig, LanceStateStoreConfig}};
-/// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-/// # runtime.block_on(async {
-/// #     let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-/// #     let custom = CustomAgentConfig::new(ModelSelector::new("exact-model")?, ToolSelection::None,
-/// #         CustomLoopLimits::new(4, 0, 1)?, CustomToolApproval::Deny)?;
-/// #     let config = AgentConfig::new(custom.into(), std::time::Duration::from_secs(10), std::num::NonZeroUsize::MIN)?;
-/// #     let provider = Provider::from_config(ProviderConfig::new(
-/// #         ProviderKind::Ollama(OllamaConfig::local()), TransportConfig::default()))?;
-/// #     let agent = AgentBuilder::create(config, AgentStorage::new(store)).with_provider(provider).build().await?;
-/// #     let cwd = std::env::current_dir()?;
-/// #     let context = WorkspaceContext::new(cwd.clone(), vec![WorkspaceRoot::new(cwd, WorkspaceRootAccess::ReadOnly)?],
-/// #         WorkspaceExecutionPolicy::new(WorkspaceSandboxMode::ReadOnly, WorkspaceNetworkAccess::Disabled))?;
-/// #     let workspace = agent.new_workspace(NewWorkspace::new("docs", context, WorkspaceDefaults::empty())?).await?;
-/// #     let conversation = workspace.new_conversation(NewConversation::new(Some("Review".into()), None, Vec::new())?).await?;
-/// assert_eq!(conversation.info().await?.title(), Some("Review"));
-/// #     conversation.close().await?;
-/// #     workspace.close().await?;
-/// #     agent.shutdown().await?;
-/// #     Ok::<(), Box<dyn std::error::Error>>(())
-/// # })?;
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// ```
+/// See [`ConversationBackend`] and the [native interaction recipe](crate::conversation) for usage.
 pub struct Conversation<
     S: StateStoreBackend = storage_kit::StateStore,
     D: DatabaseBackend = storage_kit::Database,

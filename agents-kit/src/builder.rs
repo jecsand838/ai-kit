@@ -34,32 +34,7 @@ use storage_kit::{Database, DatabaseBackend, StateStore, StateStoreBackend};
 /// The local example uses memory Lance and a passively constructed Provider. It
 /// selects an exact model without verifying a running service or generating output.
 ///
-/// # Examples
-///
-/// ```
-/// use std::{num::NonZeroUsize, time::Duration};
-/// use agents_kit::{AgentBackend, AgentBuilder, AgentStorage};
-/// use agents_kit::config::{AgentConfig, CustomAgentConfig, CustomLoopLimits, CustomToolApproval};
-/// use agents_kit::{model::ModelSelector, tool::ToolSelection};
-/// use providers_kit::{Provider, ProviderConfig, config::{OllamaConfig, ProviderKind, TransportConfig}};
-/// use storage_kit::{StateStore, state::config::{LanceStateStoreConfig, StateStoreConfig}};
-/// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-/// # runtime.block_on(async {
-/// let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-/// let storage = AgentStorage::new(store);
-/// let custom = CustomAgentConfig::new(ModelSelector::new("exact-model")?, ToolSelection::None,
-///     CustomLoopLimits::new(4, 0, 1)?, CustomToolApproval::Deny)?;
-/// let config = AgentConfig::new(custom.into(), Duration::from_secs(10), NonZeroUsize::MIN)?;
-/// let provider_config = ProviderConfig::new(ProviderKind::Ollama(OllamaConfig::local()), TransportConfig::default());
-/// let provider = Provider::from_config(provider_config.clone())?;
-/// // This constructs local owners and selects a model; it makes no generation request.
-/// let agent = AgentBuilder::create(config, storage).with_provider(provider).build().await?;
-/// assert!(agent.list_workspaces().await?.is_empty());
-/// agent.shutdown().await?;
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// # })?;
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// ```
+/// See the [construction example](crate) and [`Self::reopen`] for durable reopen.
 pub struct AgentBuilder<
     S: StateStoreBackend = StateStore,
     D: DatabaseBackend = Database,
@@ -86,32 +61,7 @@ impl<S: StateStoreBackend> AgentBuilder<S, Database, providers_kit::Provider> {
     /// a fresh durable identity. Storage is required up front and retains its exact
     /// associated transaction type. For an existing identity use [`Self::reopen`].
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use std::{num::NonZeroUsize, time::Duration};
-    /// use agents_kit::{AgentBackend, AgentBuilder, AgentStorage};
-    /// use agents_kit::config::{AgentConfig, CustomAgentConfig, CustomLoopLimits, CustomToolApproval};
-    /// use agents_kit::{model::ModelSelector, tool::ToolSelection};
-    /// use providers_kit::{Provider, ProviderConfig, config::{OllamaConfig, ProviderKind, TransportConfig}};
-    /// use storage_kit::{StateStore, state::config::{LanceStateStoreConfig, StateStoreConfig}};
-    /// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-    /// # runtime.block_on(async {
-    /// let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-    /// let storage = AgentStorage::new(store);
-    /// let custom = CustomAgentConfig::new(ModelSelector::new("exact-model")?, ToolSelection::None,
-    ///     CustomLoopLimits::new(4, 0, 1)?, CustomToolApproval::Deny)?;
-    /// let config = AgentConfig::new(custom.into(), Duration::from_secs(10), NonZeroUsize::MIN)?;
-    /// let provider_config = ProviderConfig::new(ProviderKind::Ollama(OllamaConfig::local()), TransportConfig::default());
-    /// let provider = Provider::from_config(provider_config.clone())?;
-    /// let builder = AgentBuilder::create(config, storage);
-    /// let agent = builder.with_provider(provider).build().await?;
-    /// assert!(agent.list_workspaces().await?.is_empty());
-    /// agent.shutdown().await?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// # })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See the [construction example](crate). To choose caller-owned lower types, see [`Self::with_provider`] and [`Self::with_toolset`].
     pub fn create(config: AgentConfig, storage: AgentStorage<S>) -> Self {
         Self::create_for_backends::<providers_kit::Provider, tools_kit::Toolset>(config, storage)
     }
@@ -124,35 +74,8 @@ impl<S: StateStoreBackend> AgentBuilder<S, Database, providers_kit::Provider> {
     /// [`Self::with_provider`]. Repeated [`Self::with_toolset`] calls append T2
     /// values to one homogeneous inventory without normalization or a Clone bound.
     ///
-    ///
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use std::{num::NonZeroUsize, time::Duration};
-    /// use agents_kit::{AgentBackend, AgentBuilder, AgentStorage};
-    /// use agents_kit::config::{AgentConfig, CustomAgentConfig, CustomLoopLimits, CustomToolApproval};
-    /// use agents_kit::{model::ModelSelector, tool::ToolSelection};
-    /// use providers_kit::{Provider, ProviderConfig, config::{OllamaConfig, ProviderKind, TransportConfig}};
-    /// use storage_kit::{StateStore, state::config::{LanceStateStoreConfig, StateStoreConfig}};
-    /// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-    /// # runtime.block_on(async {
-    /// let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-    /// let storage = AgentStorage::new(store);
-    /// let custom = CustomAgentConfig::new(ModelSelector::new("exact-model")?, ToolSelection::None,
-    ///     CustomLoopLimits::new(4, 0, 1)?, CustomToolApproval::Deny)?;
-    /// let config = AgentConfig::new(custom.into(), Duration::from_secs(10), NonZeroUsize::MIN)?;
-    /// let provider_config = ProviderConfig::new(ProviderKind::Ollama(OllamaConfig::local()), TransportConfig::default());
-    /// let provider = Provider::from_config(provider_config.clone())?;
-    /// let builder = AgentBuilder::create_for_backends::<Provider, tools_kit::Toolset>(config, storage);
-    /// // Selecting P alone does not supply the provider required by Custom.
-    /// let agent = builder.with_provider(provider).build().await?;
-    /// assert!(agent.list_workspaces().await?.is_empty());
-    /// agent.shutdown().await?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// # })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See [`Self::reopen_for_backends`] for typed creation and reopening.
+    /// [`Self::with_provider`] and [`Self::with_toolset`] accept caller-owned lower types.
     pub fn create_for_backends<P2: ProviderBackend, T2: ToolsetBackend>(
         config: AgentConfig,
         storage: AgentStorage<S>,
@@ -176,33 +99,49 @@ impl<S: StateStoreBackend> AgentBuilder<S, Database, providers_kit::Provider> {
     ///
     /// # Examples
     ///
+    /// This owns one Lance directory and reopens it through a fresh connection. Memory
+    /// stores instead require the same retained storage family. Shutdown is awaited
+    /// before inspection errors are propagated; unsuccessful runs retain their files.
+    ///
     /// ```
     /// use std::{num::NonZeroUsize, time::Duration};
     /// use agents_kit::{AgentBackend, AgentBuilder, AgentStorage};
     /// use agents_kit::config::{AgentConfig, CustomAgentConfig, CustomLoopLimits, CustomToolApproval};
     /// use agents_kit::{model::ModelSelector, tool::ToolSelection};
-    /// use providers_kit::{Provider, ProviderConfig, config::{OllamaConfig, ProviderKind, TransportConfig}};
+    /// use providers_kit::{Provider, ProviderConfig};
+    /// use providers_kit::config::{OllamaConfig, ProviderKind, TransportConfig};
     /// use storage_kit::{StateStore, state::config::{LanceStateStoreConfig, StateStoreConfig}};
-    /// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-    /// # runtime.block_on(async {
-    /// let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-    /// let storage = AgentStorage::new(store);
+    /// let directory = std::env::temp_dir().join(format!("agent-reopen-doc-{}", uuid::Uuid::new_v4()));
+    /// std::fs::create_dir(&directory)?;
+    /// let store_config = StateStoreConfig::lance(LanceStateStoreConfig::directory(&directory));
+    /// # tokio::runtime::Builder::new_current_thread().enable_all().build()?.block_on(async {
     /// let custom = CustomAgentConfig::new(ModelSelector::new("exact-model")?, ToolSelection::None,
     ///     CustomLoopLimits::new(4, 0, 1)?, CustomToolApproval::Deny)?;
     /// let config = AgentConfig::new(custom.into(), Duration::from_secs(10), NonZeroUsize::MIN)?;
-    /// let provider_config = ProviderConfig::new(ProviderKind::Ollama(OllamaConfig::local()), TransportConfig::default());
-    /// let provider = Provider::from_config(provider_config.clone())?;
-    /// let agent = AgentBuilder::create(config.clone(), storage.clone())
-    ///     .with_provider(provider).build().await?;
+    /// let provider_config = ProviderConfig::new(
+    ///     ProviderKind::Ollama(OllamaConfig::local()), TransportConfig::default(),
+    /// );
+    /// let store = StateStore::connect(store_config.clone()).await?;
+    /// let agent = AgentBuilder::create(config.clone(), AgentStorage::new(store))
+    ///     .with_provider(Provider::from_config(provider_config.clone())?).build().await?;
     /// let id = agent.id();
     /// agent.shutdown().await?;
-    /// // Reuse the same storage family, and supply a fresh provider after shutdown.
-    /// let reopened = AgentBuilder::reopen(config, storage, id.clone())
+    ///
+    /// let store = StateStore::connect(store_config).await?;
+    /// let reopened = AgentBuilder::reopen(config, AgentStorage::new(store), id.clone())
     ///     .with_provider(Provider::from_config(provider_config)?).build().await?;
-    /// assert_eq!(reopened.id(), id);
-    /// reopened.shutdown().await?;
+    /// let result = reopened.info().await;
+    /// let cleanup = reopened.shutdown().await;
+    /// let info = match (result, cleanup) {
+    ///     (Ok(info), Ok(())) => Ok(info),
+    ///     (Err(primary), Err(cleanup)) => Err(primary.with_supplementary(cleanup)),
+    ///     (Err(error), _) | (_, Err(error)) => Err(error),
+    /// }?;
+    /// assert_eq!(info.id(), &id);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// # })?;
+    /// // Only successful shutdown and readback permit deleting this owned directory.
+    /// std::fs::remove_dir_all(directory)?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn reopen(config: AgentConfig, storage: AgentStorage<S>, id: AgentId) -> Self {
@@ -215,8 +154,6 @@ impl<S: StateStoreBackend> AgentBuilder<S, Database, providers_kit::Provider> {
     ///
     /// This is the reopening counterpart to [`Self::create_for_backends`]. It
     /// selects no provider value and performs no provider operation.
-    ///
-    ///
     ///
     /// # Examples
     ///
@@ -236,7 +173,9 @@ impl<S: StateStoreBackend> AgentBuilder<S, Database, providers_kit::Provider> {
     /// let config = AgentConfig::new(custom.into(), Duration::from_secs(10), NonZeroUsize::MIN)?;
     /// let provider_config = ProviderConfig::new(ProviderKind::Ollama(OllamaConfig::local()), TransportConfig::default());
     /// let provider = Provider::from_config(provider_config.clone())?;
-    /// let agent = AgentBuilder::create(config.clone(), storage.clone())
+    /// let agent = AgentBuilder::create_for_backends::<Provider, tools_kit::Toolset>(
+    ///     config.clone(), storage.clone(),
+    /// )
     ///     .with_provider(provider).build().await?;
     /// let id = agent.id();
     /// agent.shutdown().await?;
@@ -244,8 +183,9 @@ impl<S: StateStoreBackend> AgentBuilder<S, Database, providers_kit::Provider> {
     ///     config, storage, id.clone(),
     /// );
     /// let reopened = builder.with_provider(Provider::from_config(provider_config)?).build().await?;
-    /// assert_eq!(reopened.id(), id);
+    /// let reopened_id = reopened.id();
     /// reopened.shutdown().await?;
+    /// assert_eq!(reopened_id, id);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// # })?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -272,147 +212,14 @@ impl<S: StateStoreBackend, D: DatabaseBackend, P: ProviderBackend, T: ToolsetBac
     /// it. Codex/OpenCode reject a supplied provider value during build; use typed
     /// construction to select their static provider parameter without a value.
     ///
-    /// # Examples
+    /// See the [construction example](crate).
     ///
-    /// ```
-    /// use std::{num::NonZeroUsize, time::Duration};
-    /// use agents_kit::{AgentBackend, AgentBuilder, AgentStorage};
-    /// use agents_kit::config::{AgentConfig, CustomAgentConfig, CustomLoopLimits, CustomToolApproval};
-    /// use agents_kit::{model::ModelSelector, tool::ToolSelection};
-    /// use providers_kit::{Provider, ProviderConfig, config::{OllamaConfig, ProviderKind, TransportConfig}};
-    /// use storage_kit::{StateStore, state::config::{LanceStateStoreConfig, StateStoreConfig}};
-    /// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-    /// # runtime.block_on(async {
-    /// let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-    /// let storage = AgentStorage::new(store);
-    /// let custom = CustomAgentConfig::new(ModelSelector::new("exact-model")?, ToolSelection::None,
-    ///     CustomLoopLimits::new(4, 0, 1)?, CustomToolApproval::Deny)?;
-    /// let config = AgentConfig::new(custom.into(), Duration::from_secs(10), NonZeroUsize::MIN)?;
-    /// let provider_config = ProviderConfig::new(ProviderKind::Ollama(OllamaConfig::local()), TransportConfig::default());
-    /// let provider = Provider::from_config(provider_config.clone())?;
-    /// let agent = AgentBuilder::create(config, storage)
-    ///     .with_provider(provider).build().await?;
-    /// assert!(agent.list_workspaces().await?.is_empty());
-    /// // Shutdown includes the transferred provider; do not reuse it afterward.
-    /// agent.shutdown().await?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// # })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
-    /// # Direct lower implementations and non-Clone tools
-    ///
-    /// These caller-owned enums deliberately expose only Provider selection and
-    /// generation, and Local tool execution. Other Provider operations retain the
-    /// trait's Unsupported defaults. They delegate actual transport/handler
-    /// semantics, not fabricated success. Agent uses `LocalProvider::Model` and
-    /// `LocalTools::Handler`; neither tool enum implements `Clone`.
-    ///
-    /// This example executes a real Local handler and builds Custom without model
-    /// inference. A prompt would require the exact configured Ollama model. See
-    /// [`providers_kit::ProviderBackend`] and [`tools_kit::ToolsetBackend`] for
-    /// implementing those lower contracts rather than delegating them.
-    ///
-    /// ```
-    /// use std::{convert::Infallible, num::NonZeroUsize, time::Duration};
-    /// use agents_kit::{AgentBackend, AgentBuilder, AgentStorage};
-    /// use agents_kit::config::{AgentConfig, CustomAgentConfig, CustomLoopLimits, CustomToolApproval};
-    /// use agents_kit::{model::ModelSelector, tool::ToolSelection};
-    /// use providers_kit::{Model, ModelBackend, ModelId, Provider, ProviderBackend, ProviderConfig};
-    /// use providers_kit::config::{OllamaConfig, ProviderKind, TransportConfig};
-    /// use providers_kit::generation::{GenerateEventStream, GenerateRequest, GenerateResponse, GenerationContinuation};
-    /// use storage_kit::{StateStore, state::config::{LanceStateStoreConfig, StateStoreConfig}};
-    /// use tools_kit::{ToolError, ToolHandler, ToolHandlerBackend, Toolset, ToolsetBackend};
-    /// use tools_kit::declaration::{ToolInfo, ToolName};
-    /// use tools_kit::execution::{ToolHandlerInput, ToolHandlerOutput, ToolInvocation, ToolResult};
-    /// use tools_kit::{local::ToolRegistration, schema::JsonSchema};
-    ///
-    /// enum LocalProvider { Ollama(Provider) }
-    /// enum LocalModel { Ollama(Model) }
-    /// enum LocalTools { Functions(Toolset) }
-    /// enum LocalHandler { Function(ToolHandler) }
-    /// impl ProviderBackend for LocalProvider {
-    ///     type Model = LocalModel;
-    ///     fn model(&self, id: ModelId) -> Result<Self::Model, providers_kit::KitError> {
-    ///         match self { Self::Ollama(value) => value.model(id).map(LocalModel::Ollama) }
-    ///     }
-    ///     async fn shutdown(&self) -> Result<(), providers_kit::KitError> {
-    ///         match self { Self::Ollama(value) => value.shutdown().await }
-    ///     }
-    /// }
-    /// impl ModelBackend for LocalModel {
-    ///     type Continuation = GenerationContinuation;
-    ///     type Session = Infallible;
-    ///     fn model_id(&self) -> &ModelId {
-    ///         match self { Self::Ollama(value) => value.model_id() }
-    ///     }
-    ///     async fn generate(&self, request: &GenerateRequest<Self::Continuation>)
-    ///         -> Result<GenerateResponse<Self::Continuation>, providers_kit::KitError> {
-    ///         match self { Self::Ollama(value) => value.generate(request).await }
-    ///     }
-    ///     async fn generate_stream(&self, request: &GenerateRequest<Self::Continuation>)
-    ///         -> Result<GenerateEventStream<Self::Continuation>, providers_kit::KitError> {
-    ///         match self { Self::Ollama(value) => value.generate_stream(request).await }
-    ///     }
-    /// }
-    /// impl ToolsetBackend for LocalTools {
-    ///     type Handler = LocalHandler;
-    ///     async fn list_tools(&self) -> Result<Vec<ToolInfo>, ToolError> {
-    ///         match self { Self::Functions(value) => value.list_tools().await }
-    ///     }
-    ///     async fn tool_handler(&self, name: ToolName) -> Result<Self::Handler, ToolError> {
-    ///         match self { Self::Functions(value) => value.tool_handler(name).await.map(LocalHandler::Function) }
-    ///     }
-    ///     async fn shutdown(&self) -> Result<(), ToolError> {
-    ///         match self { Self::Functions(value) => value.shutdown().await }
-    ///     }
-    /// }
-    /// impl ToolHandlerBackend for LocalHandler {
-    ///     async fn step(&mut self, input: ToolHandlerInput) -> Result<ToolHandlerOutput, ToolError> {
-    ///         match self { Self::Function(value) => value.step(input).await }
-    ///     }
-    /// }
-    /// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-    /// # runtime.block_on(async {
-    /// let tools = LocalTools::Functions(Toolset::local(vec![ToolRegistration::function(
-    ///     ToolInfo::new(ToolName::new("ping")?, JsonSchema::strict(serde_json::json!({"type": "object"}))),
-    ///     |_| async { Ok(ToolResult::json(serde_json::json!({"reply": "pong"}))) },
-    /// )])?);
-    /// let direct = async {
-    ///     let mut handler = tools.tool_handler(ToolName::new("ping")?).await?;
-    ///     let output = handler.step(ToolHandlerInput::Invoke(ToolInvocation {
-    ///         call_id: Some("caller-ping".into()), arguments: serde_json::json!({}),
-    ///     })).await?;
-    ///     let ToolHandlerOutput::Completed(result) = output else {
-    ///         return Err(ToolError::Unsupported { operation: "ping must complete without interaction".into() });
-    ///     };
-    ///     assert!(!result.is_error);
-    ///     assert_eq!(result.structured_content, Some(serde_json::json!({"reply": "pong"})));
-    ///     Ok::<(), ToolError>(())
-    /// }.await;
-    /// if let Err(error) = direct {
-    ///     let primary = agents_kit::KitError::from(error);
-    ///     let error = match tools.shutdown().await {
-    ///         Ok(()) => primary,
-    ///         Err(cleanup) => primary.with_supplementary(agents_kit::KitError::from(cleanup)),
-    ///     };
-    ///     return Err(Box::<dyn std::error::Error>::from(error));
-    /// }
-    /// let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-    /// let custom = CustomAgentConfig::new(ModelSelector::new("exact-model")?, ToolSelection::Auto,
-    ///     CustomLoopLimits::new(4, 4, 1)?, CustomToolApproval::Allow)?;
-    /// let config = AgentConfig::new(custom.into(), Duration::from_secs(10), NonZeroUsize::MIN)?;
-    /// let provider = LocalProvider::Ollama(Provider::from_config(ProviderConfig::new(
-    ///     ProviderKind::Ollama(OllamaConfig::local()), TransportConfig::default()))?);
-    /// let agent = AgentBuilder::create_for_backends::<LocalProvider, LocalTools>(config, AgentStorage::new(store))
-    ///     .with_provider(provider).with_toolset(tools).build().await?;
-    /// let outcome = agent.list_workspaces().await;
-    /// let shutdown = agent.shutdown().await; // owns Provider and the non-Clone Toolset
-    /// assert!(outcome?.is_empty());
-    /// shutdown?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// # })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// Direct implementations retain `P::Model` and `T::Handler`; neither `T` nor
+    /// its handler requires Clone. See [`providers_kit::ProviderBackend`] and
+    /// [`tools_kit::ToolsetBackend`] for runnable implementations, and the
+    /// [Custom composition examples](https://github.com/jecsand838/ai-kit/blob/main/agents-kit/tests/custom_mock_composition.rs)
+    /// for their use together with the real agent loop. Other lower operations
+    /// keep their owning trait's explicit unsupported behavior.
     pub fn with_provider<P2: ProviderBackend>(self, provider: P2) -> AgentBuilder<S, D, P2, T> {
         AgentBuilder {
             config: self.config,
@@ -461,9 +268,15 @@ impl<S: StateStoreBackend, D: DatabaseBackend, P: ProviderBackend, T: ToolsetBac
     /// )])?;
     /// let agent = AgentBuilder::create(config, storage)
     ///     .with_toolset(tools).with_provider(provider).build().await?;
-    /// assert!(agent.list_workspaces().await?.is_empty());
-    /// // The accepted Toolset is retained across with_provider and closed by Agent shutdown.
-    /// agent.shutdown().await?;
+    /// let result = agent.list_workspaces().await;
+    /// // Shutdown settles the transferred Toolset and Provider even if listing failed.
+    /// let cleanup = agent.shutdown().await;
+    /// let workspaces = match (result, cleanup) {
+    ///     (Ok(value), Ok(())) => Ok(value),
+    ///     (Err(primary), Err(cleanup)) => Err(primary.with_supplementary(cleanup)),
+    ///     (Err(error), _) | (_, Err(error)) => Err(error),
+    /// }?;
+    /// assert!(workspaces.is_empty());
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// # })?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -481,34 +294,7 @@ impl<S: StateStoreBackend, D: DatabaseBackend, P: ProviderBackend, T: ToolsetBac
     /// public knowledge runtime. Reopen must resupply a compatible Database when the
     /// durable identity requires managed knowledge.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use std::{num::NonZeroUsize, time::Duration};
-    /// use agents_kit::{AgentBackend, AgentBuilder, AgentStorage};
-    /// use agents_kit::config::{AgentConfig, CustomAgentConfig, CustomLoopLimits, CustomToolApproval};
-    /// use agents_kit::{model::ModelSelector, tool::ToolSelection};
-    /// use providers_kit::{Provider, ProviderConfig, config::{OllamaConfig, ProviderKind, TransportConfig}};
-    /// use storage_kit::{StateStore, state::config::{LanceStateStoreConfig, StateStoreConfig}};
-    /// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-    /// # runtime.block_on(async {
-    /// let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-    /// let storage = AgentStorage::new(store);
-    /// let custom = CustomAgentConfig::new(ModelSelector::new("exact-model")?, ToolSelection::None,
-    ///     CustomLoopLimits::new(4, 0, 1)?, CustomToolApproval::Deny)?;
-    /// let config = AgentConfig::new(custom.into(), Duration::from_secs(10), NonZeroUsize::MIN)?;
-    /// let provider_config = ProviderConfig::new(ProviderKind::Ollama(OllamaConfig::local()), TransportConfig::default());
-    /// let provider = Provider::from_config(provider_config.clone())?;
-    /// use storage_kit::{Database, database::config::{DatabaseConfig, LanceConfig}};
-    /// let database = Database::connect(DatabaseConfig::lance(LanceConfig::embedded_path("memory://"))).await?;
-    /// let agent = AgentBuilder::create(config, storage).with_provider(provider)
-    ///     .with_knowledge_database(database).build().await?;
-    /// assert!(agent.list_workspaces().await?.is_empty());
-    /// agent.shutdown().await?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// # })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See [`IngestKnowledgeRequest`](crate::knowledge::IngestKnowledgeRequest) for request construction and the [Custom composition examples](https://github.com/jecsand838/ai-kit/blob/main/agents-kit/tests/custom_mock_composition.rs) for caller-owned knowledge storage.
     pub fn with_knowledge_database<D2: DatabaseBackend>(
         self,
         database: D2,
@@ -563,9 +349,12 @@ impl<S: StateStoreBackend, D: DatabaseBackend, P: ProviderBackend, T: ToolsetBac
     /// let agent = AgentBuilder::create(config, AgentStorage::new(store)).build().await?;
     /// let observed = agent.info().await;
     /// let cleanup = agent.shutdown().await;
-    /// let info = observed?;
+    /// let info = match (observed, cleanup) {
+    ///     (Ok(value), Ok(())) => Ok(value),
+    ///     (Err(primary), Err(cleanup)) => Err(primary.with_supplementary(cleanup)),
+    ///     (Err(error), _) | (_, Err(error)) => Err(error),
+    /// }?;
     /// assert!(!info.id().as_str().is_empty());
-    /// cleanup?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// # })?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())

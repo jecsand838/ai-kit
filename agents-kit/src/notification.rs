@@ -45,20 +45,7 @@ impl ConversationNotification {
     ///
     /// Returns `InvalidInput` for invalid content: blank required text, invalid relative paths, padded labels/titles, or a non-object interaction schema. This value constructor does not persist or publish a notification; the owning conversation validates the full schema before publication.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use agents_kit::notification::{ConversationNotification, ConversationNotificationKind};
-    /// let id = "notification_00000000000000000000000000000000".parse()?;
-    /// let notification = ConversationNotification::new(
-    ///     id, std::time::SystemTime::UNIX_EPOCH,
-    ///     ConversationNotificationKind::Message { text: "Ready".into() },
-    /// )?;
-    /// assert!(notification.id().as_str().starts_with("notification_"));
-    /// assert_eq!(notification.inserted_at(), std::time::SystemTime::UNIX_EPOCH);
-    /// assert!(matches!(notification.kind(), ConversationNotificationKind::Message { text } if text == "Ready"));
-    /// # Ok::<(), agents_kit::KitError>(())
-    /// ```
+    /// See [`ConversationNotification`] for a complete example.
     pub fn new(
         id: NotificationId,
         inserted_at: SystemTime,
@@ -74,60 +61,21 @@ impl ConversationNotification {
 
     /// Returns the durable notification identity.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use agents_kit::notification::{ConversationNotification, ConversationNotificationKind};
-    /// let id = "notification_00000000000000000000000000000000".parse()?;
-    /// let notification = ConversationNotification::new(
-    ///     id, std::time::SystemTime::UNIX_EPOCH,
-    ///     ConversationNotificationKind::Message { text: "Ready".into() },
-    /// )?;
-    /// assert!(notification.id().as_str().starts_with("notification_"));
-    /// assert_eq!(notification.inserted_at(), std::time::SystemTime::UNIX_EPOCH);
-    /// assert!(matches!(notification.kind(), ConversationNotificationKind::Message { text } if text == "Ready"));
-    /// # Ok::<(), agents_kit::KitError>(())
-    /// ```
+    /// See [`ConversationNotification`] for a complete example.
     pub fn id(&self) -> &NotificationId {
         &self.id
     }
 
     /// Returns when the notification entered durable delivery.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use agents_kit::notification::{ConversationNotification, ConversationNotificationKind};
-    /// let id = "notification_00000000000000000000000000000000".parse()?;
-    /// let notification = ConversationNotification::new(
-    ///     id, std::time::SystemTime::UNIX_EPOCH,
-    ///     ConversationNotificationKind::Message { text: "Ready".into() },
-    /// )?;
-    /// assert!(notification.id().as_str().starts_with("notification_"));
-    /// assert_eq!(notification.inserted_at(), std::time::SystemTime::UNIX_EPOCH);
-    /// assert!(matches!(notification.kind(), ConversationNotificationKind::Message { text } if text == "Ready"));
-    /// # Ok::<(), agents_kit::KitError>(())
-    /// ```
+    /// See [`ConversationNotification`] for a complete example.
     pub fn inserted_at(&self) -> SystemTime {
         self.inserted_at
     }
 
     /// Returns the portable notification content.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use agents_kit::notification::{ConversationNotification, ConversationNotificationKind};
-    /// let id = "notification_00000000000000000000000000000000".parse()?;
-    /// let notification = ConversationNotification::new(
-    ///     id, std::time::SystemTime::UNIX_EPOCH,
-    ///     ConversationNotificationKind::Message { text: "Ready".into() },
-    /// )?;
-    /// assert!(notification.id().as_str().starts_with("notification_"));
-    /// assert_eq!(notification.inserted_at(), std::time::SystemTime::UNIX_EPOCH);
-    /// assert!(matches!(notification.kind(), ConversationNotificationKind::Message { text } if text == "Ready"));
-    /// # Ok::<(), agents_kit::KitError>(())
-    /// ```
+    /// See [`ConversationNotification`] for a complete example.
     pub fn kind(&self) -> &ConversationNotificationKind {
         &self.kind
     }
@@ -376,28 +324,7 @@ impl ConversationNotificationReceiver {
     ///
     /// The caller source owns durable ordering, acknowledgment, cancellation safety and cleanup. The wrapper supplies portable delivery and terminal fusion, not a new journal.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use agents_kit::notification::{ConversationNotification, ConversationNotificationKind, ConversationNotificationReceiver};
-    /// let runtime = tokio::runtime::Builder::new_current_thread().build()?;
-    /// runtime.block_on(async {
-    ///     let notification = ConversationNotification::new(
-    ///         "notification_00000000000000000000000000000000".parse()?,
-    ///         std::time::SystemTime::UNIX_EPOCH,
-    ///         ConversationNotificationKind::Message { text: "Ready".into() },
-    ///     )?;
-    ///     let id = notification.id().clone();
-    ///     let mut receiver = ConversationNotificationReceiver::from_stream(
-    ///         futures_util::stream::iter([Ok(notification)]),
-    ///     );
-    ///     assert_eq!(receiver.recv().await.transpose()?.unwrap().id(), &id);
-    ///     assert!(receiver.recv().await.is_none());
-    ///     assert!(receiver.recv().await.is_none());
-    ///     Ok::<(), agents_kit::KitError>(())
-    /// })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See [`ConversationNotificationReceiver`] for a complete example.
     pub fn from_stream<S>(stream: S) -> Self
     where
         S: Stream<Item = Result<ConversationNotification, KitError>> + Send + 'static,
@@ -418,28 +345,7 @@ impl ConversationNotificationReceiver {
     /// this receiver; subsequent calls return `None`. A source EOF also fuses it.
     /// Built-in delivery retains admitted storage work if one awaiting receive is cancelled.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use agents_kit::notification::{ConversationNotification, ConversationNotificationKind, ConversationNotificationReceiver};
-    /// let runtime = tokio::runtime::Builder::new_current_thread().build()?;
-    /// runtime.block_on(async {
-    ///     let notification = ConversationNotification::new(
-    ///         "notification_00000000000000000000000000000000".parse()?,
-    ///         std::time::SystemTime::UNIX_EPOCH,
-    ///         ConversationNotificationKind::Message { text: "Ready".into() },
-    ///     )?;
-    ///     let id = notification.id().clone();
-    ///     let mut receiver = ConversationNotificationReceiver::from_stream(
-    ///         futures_util::stream::iter([Ok(notification)]),
-    ///     );
-    ///     assert_eq!(receiver.recv().await.transpose()?.unwrap().id(), &id);
-    ///     assert!(receiver.recv().await.is_none());
-    ///     assert!(receiver.recv().await.is_none());
-    ///     Ok::<(), agents_kit::KitError>(())
-    /// })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See [`ConversationNotificationReceiver`] for a complete example.
     pub async fn recv(&mut self) -> Option<Result<ConversationNotification, KitError>> {
         if self.terminal {
             return None;

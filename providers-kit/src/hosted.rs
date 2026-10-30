@@ -100,7 +100,11 @@ pub struct HostedWebSearchSource {
 ///
 /// ```
 /// use providers_kit::hosted::HostedWebSearchResult;
-/// let value = HostedWebSearchResult { title: None, url: "https://example.com/source".into(), snippet: Some("excerpt".into()) };
+/// let value = HostedWebSearchResult {
+///     title: None,
+///     url: "https://example.com/source".into(),
+///     snippet: Some("excerpt".into()),
+/// };
 /// assert_eq!(value.url, "https://example.com/source");
 /// ```
 ///
@@ -141,7 +145,13 @@ pub struct HostedExecutableCode {
 ///
 /// ```
 /// use providers_kit::hosted::HostedCodeExecutionResult;
-/// let value = HostedCodeExecutionResult { status: None, logs: None, stdout: Some("2\n".into()), stderr: None, exit_code: Some(0) };
+/// let value = HostedCodeExecutionResult {
+///     status: None,
+///     logs: None,
+///     stdout: Some("2\n".into()),
+///     stderr: None,
+///     exit_code: Some(0),
+/// };
 /// assert_eq!(value.exit_code, Some(0));
 /// ```
 ///
@@ -167,7 +177,12 @@ pub struct HostedCodeExecutionResult {
 ///
 /// ```
 /// use providers_kit::hosted::HostedFileSearchResult;
-/// let value = HostedFileSearchResult { file_id: "file-1".into(), file_name: None, text: Some("excerpt".into()), score: None };
+/// let value = HostedFileSearchResult {
+///     file_id: "file-1".into(),
+///     file_name: None,
+///     text: Some("excerpt".into()),
+///     score: None,
+/// };
 /// assert_eq!(value.file_id, "file-1");
 /// assert_eq!(value.text.as_deref(), Some("excerpt"));
 /// ```

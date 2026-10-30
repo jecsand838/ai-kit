@@ -65,6 +65,9 @@
 //!     Ok::<(), providers_kit::KitError>(())
 //! }).await;
 //! let shutdown = provider.shutdown().await;
+//! if let Err(error) = &shutdown {
+//!     eprintln!("Cleanup failed: {error}");
+//! }
 //! // On timeout/error, retain owned_job_id for later reconciliation. Never infer
 //! // remote deletion or cancellation from shutdown or from dropping this waiter.
 //! work??;
@@ -100,7 +103,10 @@ use crate::generation::{GenerateRequest, GenerateResponse, GenerationContinuatio
 ///
 /// ```
 /// use providers_kit::{batch::BatchInput, generation::{GenerateRequest, Message}};
-/// let row = BatchInput::new("row-1", GenerateRequest::<()>::new(vec![Message::user_text("Summarize")?])?)?;
+/// let row = BatchInput::new(
+///     "row-1",
+///     GenerateRequest::<()>::new(vec![Message::user_text("Summarize")?])?,
+/// )?;
 /// assert_eq!(row.custom_id(), "row-1");
 /// assert_eq!(row.request().messages().len(), 1);
 ///
@@ -137,16 +143,7 @@ impl<C> BatchInput<C> {
     ///
     /// Returns an input error for an empty or whitespace-only correlation id. Submission additionally validates uniqueness across rows.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::{batch::BatchInput, generation::{GenerateRequest, Message}};
-    /// let row = BatchInput::new("row-1", GenerateRequest::<()>::new(vec![Message::user_text("Summarize")?])?)?;
-    /// assert_eq!(row.custom_id(), "row-1");
-    /// assert_eq!(row.request().messages().len(), 1);
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::batch::BatchInput`] for a complete example.
     ///
     pub fn new(
         custom_id: impl Into<String>,
@@ -167,16 +164,7 @@ impl<C> BatchInput<C> {
     #[must_use]
     /// Returns the caller-provided correlation identifier.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::{batch::BatchInput, generation::{GenerateRequest, Message}};
-    /// let row = BatchInput::new("row-1", GenerateRequest::<()>::new(vec![Message::user_text("Summarize")?])?)?;
-    /// assert_eq!(row.custom_id(), "row-1");
-    /// assert_eq!(row.request().messages().len(), 1);
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::batch::BatchInput`] for a complete example.
     ///
     pub fn custom_id(&self) -> &str {
         &self.custom_id
@@ -185,16 +173,7 @@ impl<C> BatchInput<C> {
     #[must_use]
     /// Returns the generation request for this row.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::{batch::BatchInput, generation::{GenerateRequest, Message}};
-    /// let row = BatchInput::new("row-1", GenerateRequest::<()>::new(vec![Message::user_text("Summarize")?])?)?;
-    /// assert_eq!(row.custom_id(), "row-1");
-    /// assert_eq!(row.request().messages().len(), 1);
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::batch::BatchInput`] for a complete example.
     ///
     pub const fn request(&self) -> &GenerateRequest<C> {
         &self.request
@@ -268,7 +247,10 @@ impl<C> BatchSubmitRequest<C> {
     ///
     /// ```
     /// use providers_kit::{batch::BatchInput, generation::{GenerateRequest, Message}};
-    /// let row = BatchInput::new("row-1", GenerateRequest::<()>::new(vec![Message::user_text("Summarize")?])?)?;
+    /// let row = BatchInput::new(
+    ///     "row-1",
+    ///     GenerateRequest::<()>::new(vec![Message::user_text("Summarize")?])?,
+    /// )?;
     /// use providers_kit::batch::BatchSubmitRequest;
     /// let batch = BatchSubmitRequest::Inline { rows: vec![row] };
     /// let mapped: BatchSubmitRequest<String> = batch.try_map_continuation(|()| Ok("state".into()))?;
@@ -359,7 +341,13 @@ pub enum BatchStatus {
 ///
 /// ```
 /// use providers_kit::batch::{BatchJob, BatchStatus};
-/// let job = BatchJob { id: "owned-job".into(), status: BatchStatus::Queued, created_at: None, completed_at: None, usage: None };
+/// let job = BatchJob {
+///     id: "owned-job".into(),
+///     status: BatchStatus::Queued,
+///     created_at: None,
+///     completed_at: None,
+///     usage: None,
+/// };
 /// assert!(matches!(job.status, BatchStatus::Queued));
 /// ```
 ///
@@ -454,7 +442,9 @@ impl<C> BatchResult<C> {
 ///
 /// ```
 /// use providers_kit::batch::BatchListRequest;
-/// let request = BatchListRequest::default().with_limit(std::num::NonZeroUsize::new(10).unwrap()).with_cursor("opaque-next")?;
+/// let request = BatchListRequest::default()
+///     .with_limit(std::num::NonZeroUsize::new(10).unwrap())
+///     .with_cursor("opaque-next")?;
 /// assert_eq!(request.limit().unwrap().get(), 10);
 /// assert_eq!(request.cursor(), Some("opaque-next"));
 ///
@@ -470,16 +460,7 @@ pub struct BatchListRequest {
 impl BatchListRequest {
     /// Sets a non-zero result limit.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::batch::BatchListRequest;
-    /// let request = BatchListRequest::default().with_limit(std::num::NonZeroUsize::new(10).unwrap()).with_cursor("opaque-next")?;
-    /// assert_eq!(request.limit().unwrap().get(), 10);
-    /// assert_eq!(request.cursor(), Some("opaque-next"));
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::batch::BatchListRequest`] for a complete example.
     ///
     #[must_use]
     pub fn with_limit(mut self, limit: NonZeroUsize) -> Self {
@@ -493,16 +474,7 @@ impl BatchListRequest {
     ///
     /// Returns an input error when the cursor is empty or whitespace-only. Nonblank cursor bytes are retained exactly; use only a cursor returned by the same provider operation.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::batch::BatchListRequest;
-    /// let request = BatchListRequest::default().with_limit(std::num::NonZeroUsize::new(10).unwrap()).with_cursor("opaque-next")?;
-    /// assert_eq!(request.limit().unwrap().get(), 10);
-    /// assert_eq!(request.cursor(), Some("opaque-next"));
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::batch::BatchListRequest`] for a complete example.
     ///
     pub fn with_cursor(mut self, cursor: impl Into<String>) -> Result<Self, KitError> {
         let cursor = cursor.into();
@@ -520,16 +492,7 @@ impl BatchListRequest {
 
     /// Returns the requested result limit.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::batch::BatchListRequest;
-    /// let request = BatchListRequest::default().with_limit(std::num::NonZeroUsize::new(10).unwrap()).with_cursor("opaque-next")?;
-    /// assert_eq!(request.limit().unwrap().get(), 10);
-    /// assert_eq!(request.cursor(), Some("opaque-next"));
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::batch::BatchListRequest`] for a complete example.
     ///
     #[must_use]
     pub const fn limit(&self) -> Option<NonZeroUsize> {
@@ -538,16 +501,7 @@ impl BatchListRequest {
 
     /// Returns the provider-native continuation cursor.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use providers_kit::batch::BatchListRequest;
-    /// let request = BatchListRequest::default().with_limit(std::num::NonZeroUsize::new(10).unwrap()).with_cursor("opaque-next")?;
-    /// assert_eq!(request.limit().unwrap().get(), 10);
-    /// assert_eq!(request.cursor(), Some("opaque-next"));
-    ///
-    /// # Ok::<(), providers_kit::KitError>(())
-    /// ```
+    /// See [`crate::batch::BatchListRequest`] for a complete example.
     ///
     #[must_use]
     pub fn cursor(&self) -> Option<&str> {
@@ -560,7 +514,9 @@ impl BatchListRequest {
     ///
     /// ```
     /// use providers_kit::batch::BatchListRequest;
-    /// let request = BatchListRequest::default().with_limit(std::num::NonZeroUsize::new(10).unwrap()).with_cursor("opaque-next")?;
+    /// let request = BatchListRequest::default()
+    ///     .with_limit(std::num::NonZeroUsize::new(10).unwrap())
+    ///     .with_cursor("opaque-next")?;
     /// let (limit, cursor) = request.into_parts();
     /// assert_eq!(limit.unwrap().get(), 10);
     /// assert_eq!(cursor.as_deref(), Some("opaque-next"));

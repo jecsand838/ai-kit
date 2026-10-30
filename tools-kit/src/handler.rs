@@ -12,27 +12,7 @@ use crate::{
 /// result is terminal; a model-visible failure is a completed result with `is_error`.
 /// Import [`ToolHandlerBackend`] to call behavior on the supplied handle.
 ///
-/// # Examples
-///
-/// ```
-///
-/// # #[tokio::main(flavor = "current_thread")]
-/// # async fn main() -> Result<(), tools_kit::ToolError> {
-/// use tools_kit::{declaration::{ToolInfo, ToolName}, schema::JsonSchema};
-/// let info = ToolInfo::new(ToolName::new("ping")?, JsonSchema::strict(serde_json::json!({"type":"object"})));
-/// use tools_kit::{local::ToolRegistration, execution::ToolResult};
-/// let registration = ToolRegistration::function(info, |_| async { Ok(ToolResult::text("pong")) });
-/// use tools_kit::{Toolset, ToolsetBackend, ToolHandlerBackend, execution::{ToolHandlerInput, ToolHandlerOutput, ToolInvocation}};
-/// let tools = Toolset::local(vec![registration])?;
-/// let mut handler = tools.tool_handler(ToolName::new("ping")?).await?;
-/// let result = handler.step(ToolHandlerInput::Invoke(ToolInvocation { call_id: None, arguments: serde_json::json!({}) })).await;
-/// let cleanup = tools.shutdown().await;
-/// assert!(matches!(result?, ToolHandlerOutput::Completed(_)));
-/// cleanup?;
-///
-/// # Ok(())
-/// # }
-/// ```
+/// See [`crate::local::ToolRegistration`] for a complete example.
 ///
 pub trait ToolHandlerBackend: Send + 'static {
     /// Advances the unique handler with an invocation, interaction response,
@@ -42,27 +22,7 @@ pub trait ToolHandlerBackend: Send + 'static {
     ///
     /// Returns [`ToolError`] for invalid transitions, arguments or interaction replies, unsupported behavior, cancellation, closure, transport or protocol failure. An accepted tool-authored failure is returned as a completed error result.
     ///
-    /// # Examples
-    ///
-    /// ```
-    ///
-    /// # #[tokio::main(flavor = "current_thread")]
-    /// # async fn main() -> Result<(), tools_kit::ToolError> {
-    /// use tools_kit::{declaration::{ToolInfo, ToolName}, schema::JsonSchema};
-    /// let info = ToolInfo::new(ToolName::new("ping")?, JsonSchema::strict(serde_json::json!({"type":"object"})));
-    /// use tools_kit::{local::ToolRegistration, execution::ToolResult};
-    /// let registration = ToolRegistration::function(info, |_| async { Ok(ToolResult::text("pong")) });
-    /// use tools_kit::{Toolset, ToolsetBackend, ToolHandlerBackend, execution::{ToolHandlerInput, ToolHandlerOutput, ToolInvocation}};
-    /// let tools = Toolset::local(vec![registration])?;
-    /// let mut handler = tools.tool_handler(ToolName::new("ping")?).await?;
-    /// let result = handler.step(ToolHandlerInput::Invoke(ToolInvocation { call_id: None, arguments: serde_json::json!({}) })).await;
-    /// let cleanup = tools.shutdown().await;
-    /// assert!(matches!(result?, ToolHandlerOutput::Completed(_)));
-    /// cleanup?;
-    ///
-    /// # Ok(())
-    /// # }
-    /// ```
+    /// See [`crate::local::ToolRegistration`] for a complete example.
     ///
     fn step(
         &mut self,
@@ -76,27 +36,7 @@ pub trait ToolHandlerBackend: Send + 'static {
 /// result is terminal; a model-visible failure is a completed result with `is_error`.
 /// Import [`ToolHandlerBackend`] to call behavior on the supplied handle.
 ///
-/// # Examples
-///
-/// ```
-///
-/// # #[tokio::main(flavor = "current_thread")]
-/// # async fn main() -> Result<(), tools_kit::ToolError> {
-/// use tools_kit::{declaration::{ToolInfo, ToolName}, schema::JsonSchema};
-/// let info = ToolInfo::new(ToolName::new("ping")?, JsonSchema::strict(serde_json::json!({"type":"object"})));
-/// use tools_kit::{local::ToolRegistration, execution::ToolResult};
-/// let registration = ToolRegistration::function(info, |_| async { Ok(ToolResult::text("pong")) });
-/// use tools_kit::{Toolset, ToolsetBackend, ToolHandlerBackend, execution::{ToolHandlerInput, ToolHandlerOutput, ToolInvocation}};
-/// let tools = Toolset::local(vec![registration])?;
-/// let mut handler = tools.tool_handler(ToolName::new("ping")?).await?;
-/// let result = handler.step(ToolHandlerInput::Invoke(ToolInvocation { call_id: None, arguments: serde_json::json!({}) })).await;
-/// let cleanup = tools.shutdown().await;
-/// assert!(matches!(result?, ToolHandlerOutput::Completed(_)));
-/// cleanup?;
-///
-/// # Ok(())
-/// # }
-/// ```
+/// See [`crate::local::ToolRegistration`] for a complete example.
 ///
 pub struct ToolHandler {
     inner: InnerToolHandler,

@@ -52,7 +52,9 @@ use crate::{
 /// use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 /// use tools_kit::{ToolError, ToolHandlerBackend, Toolset, ToolsetBackend};
 /// use tools_kit::declaration::{ToolInfo, ToolName};
-/// use tools_kit::execution::{ToolContent, ToolHandlerInput, ToolHandlerOutput, ToolInvocation, ToolResult};
+/// use tools_kit::execution::{
+///     ToolContent, ToolHandlerInput, ToolHandlerOutput, ToolInvocation, ToolResult,
+/// };
 /// use tools_kit::schema::JsonSchema;
 ///
 /// struct EchoTools { info: ToolInfo, closed: Arc<AtomicBool> }
@@ -119,18 +121,28 @@ use crate::{
 ///     closed: Arc::new(AtomicBool::new(false)),
 /// };
 /// let mut direct = concrete.tool_handler(name.clone()).await?;
-/// let input = ToolInvocation { call_id: Some("call-1".into()), arguments: serde_json::json!("unchanged") };
+/// let input = ToolInvocation {
+///     call_id: Some("call-1".into()),
+///     arguments: serde_json::json!("unchanged"),
+/// };
 /// let ToolHandlerOutput::Completed(result) = direct.step(ToolHandlerInput::Invoke(input.clone())).await?
 ///     else { panic!("echo does not interact") };
 /// assert!(!result.is_error);
-/// assert!(matches!(result.content.as_slice(), [ToolContent::Text { text, .. }] if text == "unchanged"));
+/// assert!(
+///     matches!(result.content.as_slice(), [ToolContent::Text { text, .. }] if text == "unchanged")
+/// );
 /// assert!(direct.step(ToolHandlerInput::Invoke(input.clone())).await.is_err());
 /// let tools = Toolset::from_backend(concrete); // Sole public erased ingress.
 /// let mut normalized = tools.tool_handler(name).await?;
 /// let observed = normalized.step(ToolHandlerInput::Invoke(input)).await;
 /// let cleanup = tools.shutdown().await;
+/// if let Err(error) = &cleanup {
+///     eprintln!("Cleanup failed: {error}");
+/// }
 /// let ToolHandlerOutput::Completed(result) = observed? else { panic!("echo does not interact") };
-/// assert!(matches!(result.content.as_slice(), [ToolContent::Text { text, .. }] if text == "unchanged"));
+/// assert!(
+///     matches!(result.content.as_slice(), [ToolContent::Text { text, .. }] if text == "unchanged")
+/// );
 /// cleanup?;
 /// assert!(tools.list_tools().await.is_err());
 /// tools.shutdown().await?;
@@ -148,20 +160,7 @@ pub trait ToolsetBackend: Send + Sync + 'static {
     ///
     /// Returns [`ToolError::Closed`] after sealing, or the underlying inventory failure.
     ///
-    /// # Examples
-    ///
-    /// ```
-    ///
-    /// # #[tokio::main(flavor = "current_thread")]
-    /// # async fn main() -> Result<(), tools_kit::ToolError> {
-    /// use tools_kit::{Toolset, ToolsetBackend};
-    /// let tools = Toolset::local(Vec::new())?;
-    /// assert!(tools.list_tools().await?.is_empty());
-    /// tools.shutdown().await?;
-    ///
-    /// # Ok(())
-    /// # }
-    /// ```
+    /// See [`crate::ToolsetBackend`] for a complete example.
     ///
     fn list_tools(&self) -> impl Future<Output = Result<Vec<ToolInfo>, ToolError>> + Send + '_;
 
@@ -171,27 +170,7 @@ pub trait ToolsetBackend: Send + Sync + 'static {
     ///
     /// Returns an unknown-name error when no declared tool matches, [`ToolError::Closed`] after sealing, or the underlying handler-construction failure.
     ///
-    /// # Examples
-    ///
-    /// ```
-    ///
-    /// # #[tokio::main(flavor = "current_thread")]
-    /// # async fn main() -> Result<(), tools_kit::ToolError> {
-    /// use tools_kit::{declaration::{ToolInfo, ToolName}, schema::JsonSchema};
-    /// let info = ToolInfo::new(ToolName::new("ping")?, JsonSchema::strict(serde_json::json!({"type":"object"})));
-    /// use tools_kit::{local::ToolRegistration, execution::ToolResult};
-    /// let registration = ToolRegistration::function(info, |_| async { Ok(ToolResult::text("pong")) });
-    /// use tools_kit::{Toolset, ToolsetBackend, ToolHandlerBackend, execution::{ToolHandlerInput, ToolHandlerOutput, ToolInvocation}};
-    /// let tools = Toolset::local(vec![registration])?;
-    /// let mut handler = tools.tool_handler(ToolName::new("ping")?).await?;
-    /// let result = handler.step(ToolHandlerInput::Invoke(ToolInvocation { call_id: None, arguments: serde_json::json!({}) })).await;
-    /// let cleanup = tools.shutdown().await;
-    /// assert!(matches!(result?, ToolHandlerOutput::Completed(_)));
-    /// cleanup?;
-    ///
-    /// # Ok(())
-    /// # }
-    /// ```
+    /// See [`crate::local::ToolRegistration`] for a complete example.
     ///
     fn tool_handler(
         &self,
@@ -236,20 +215,7 @@ pub trait ToolsetBackend: Send + Sync + 'static {
 /// Clones share admission and cleanup. Dropping a clone alone does not initiate
 /// asynchronous cleanup; explicitly await [`ToolsetBackend::shutdown`].
 ///
-/// # Examples
-///
-/// ```
-///
-/// # #[tokio::main(flavor = "current_thread")]
-/// # async fn main() -> Result<(), tools_kit::ToolError> {
-/// use tools_kit::{Toolset, ToolsetBackend};
-/// let tools = Toolset::local(Vec::new())?;
-/// assert!(tools.list_tools().await?.is_empty());
-/// tools.shutdown().await?;
-///
-/// # Ok(())
-/// # }
-/// ```
+/// See [`crate::ToolsetBackend`] for a complete example.
 ///
 #[derive(Clone)]
 pub struct Toolset {
@@ -274,20 +240,7 @@ impl Toolset {
     ///
     /// Returns [`ToolError::DuplicateName`] for duplicate names; an empty inventory is valid.
     ///
-    /// # Examples
-    ///
-    /// ```
-    ///
-    /// # #[tokio::main(flavor = "current_thread")]
-    /// # async fn main() -> Result<(), tools_kit::ToolError> {
-    /// use tools_kit::{Toolset, ToolsetBackend};
-    /// let tools = Toolset::local(Vec::new())?;
-    /// assert!(tools.list_tools().await?.is_empty());
-    /// tools.shutdown().await?;
-    ///
-    /// # Ok(())
-    /// # }
-    /// ```
+    /// See [`crate::ToolsetBackend`] for a complete example.
     ///
     pub fn local(registrations: Vec<ToolRegistration>) -> Result<Self, ToolError> {
         Ok(Self::from_local(LocalToolset::build(registrations)?))
@@ -307,12 +260,18 @@ impl Toolset {
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() -> Result<(), tools_kit::ToolError> {
     /// use tools_kit::mcp::{McpClientConfig, McpConnectionConfig};
-    /// let connection = McpConnectionConfig::StreamableHttp { endpoint: "http://127.0.0.1:8000/mcp".parse().unwrap(), headers: Default::default() };
+    /// let connection = McpConnectionConfig::StreamableHttp {
+    ///     endpoint: "http://127.0.0.1:8000/mcp".parse().unwrap(),
+    ///     headers: Default::default(),
+    /// };
     /// let config = McpClientConfig::new(connection);
     /// use tools_kit::{Toolset, ToolsetBackend};
     /// let tools = Toolset::mcp(config).await?;
     /// let inventory = tools.list_tools().await;
     /// let cleanup = tools.shutdown().await;
+    /// if let Err(error) = &cleanup {
+    ///     eprintln!("Cleanup failed: {error}");
+    /// }
     /// let _ = inventory?;
     /// cleanup?;
     ///

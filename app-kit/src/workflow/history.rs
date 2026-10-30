@@ -7,45 +7,7 @@ use crate::{AppError, WorkspaceId};
 
 /// The result of one successfully committed action, distinct from user state.
 ///
-/// # Example
-///
-/// ```
-/// # use agents_kit::Agent;
-/// # use app_kit::{App, AppConfig, Shutdown, WorkspaceConfig};
-/// # use app_kit::workflow::{CheckpointSelector, ExecutionEvent, ExecutionOptions, RunSelector,
-/// #     RunStatus, WorkflowDefinition, WorkflowState};
-/// # use storage_kit::StateStore;
-/// # use storage_kit::state::config::{LanceStateStoreConfig, StateStoreConfig};
-/// #
-/// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-/// # runtime.block_on(async {
-/// # let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-/// # let definition = WorkflowDefinition::parse(r#"{
-/// #     "schema":"app-kit.workflow/v2", "id":"counter", "revision":"r1",
-/// #     "state":{"count":0}, "required":["count"],
-/// #     "reducers":{"count":"reject_concurrent"}, "entry":"increment",
-/// #     "nodes":[{"id":"increment","step":{"kind":"state","mutations":[
-/// #         {"kind":"increment","target":"count","value":{"kind":"literal","value":1}}
-/// #     ]}}], "routes":{}
-/// # }"#)?;
-/// # let config = AppConfig::<_, Agent>::new(store, Vec::new(), vec![definition]);
-/// # let mut app = App::open(config).await?;
-/// # let mut workspace = app.create_workspace(WorkspaceConfig {
-/// #     name: Some("local counter".into()), root: std::env::current_dir()?,
-/// # }).await?;
-/// # let workflow = workspace.workflow("counter".parse()?).await?;
-/// # let mut run = workflow.prepare(WorkflowState::default()).await?;
-/// let terminal = run.execution(ExecutionOptions::default()).await?.finish().await?;
-/// let checkpoint = run.checkpoint(CheckpointSelector::Action(0)).await?;
-/// let outcome = &checkpoint.outcomes[0];
-/// assert_eq!(outcome.node, "increment");
-/// assert_eq!(outcome.ordinal, 0);
-/// #
-/// # app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }).await?;
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// # })?;
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// ```
+/// See [the execution and history workflow](crate::workflow#execute-observe-restore-and-delete).
 #[non_exhaustive]
 #[derive(Clone, Deserialize, PartialEq, Serialize)]
 pub struct ActionOutcome {
@@ -78,44 +40,7 @@ pub enum CheckpointKind {
 
 /// A committed workflow boundary and its original run identity.
 ///
-/// # Example
-///
-/// ```
-/// # use agents_kit::Agent;
-/// # use app_kit::{App, AppConfig, Shutdown, WorkspaceConfig};
-/// # use app_kit::workflow::{CheckpointSelector, ExecutionEvent, ExecutionOptions, RunSelector,
-/// #     RunStatus, WorkflowDefinition, WorkflowState};
-/// # use storage_kit::StateStore;
-/// # use storage_kit::state::config::{LanceStateStoreConfig, StateStoreConfig};
-/// #
-/// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-/// # runtime.block_on(async {
-/// # let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-/// # let definition = WorkflowDefinition::parse(r#"{
-/// #     "schema":"app-kit.workflow/v2", "id":"counter", "revision":"r1",
-/// #     "state":{"count":0}, "required":["count"],
-/// #     "reducers":{"count":"reject_concurrent"}, "entry":"increment",
-/// #     "nodes":[{"id":"increment","step":{"kind":"state","mutations":[
-/// #         {"kind":"increment","target":"count","value":{"kind":"literal","value":1}}
-/// #     ]}}], "routes":{}
-/// # }"#)?;
-/// # let config = AppConfig::<_, Agent>::new(store, Vec::new(), vec![definition]);
-/// # let mut app = App::open(config).await?;
-/// # let mut workspace = app.create_workspace(WorkspaceConfig {
-/// #     name: Some("local counter".into()), root: std::env::current_dir()?,
-/// # }).await?;
-/// # let workflow = workspace.workflow("counter".parse()?).await?;
-/// # let mut run = workflow.prepare(WorkflowState::default()).await?;
-/// let terminal = run.execution(ExecutionOptions::default()).await?.finish().await?;
-/// let checkpoint = run.checkpoint(CheckpointSelector::Action(0)).await?;
-/// assert_eq!(checkpoint.action_ordinal, Some(0));
-/// assert_eq!(checkpoint.position.as_deref(), Some("increment"));
-/// #
-/// # app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }).await?;
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// # })?;
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// ```
+/// See [the execution and history workflow](crate::workflow#execute-observe-restore-and-delete).
 #[non_exhaustive]
 pub struct Checkpoint {
     /// Run containing this committed boundary.
@@ -147,53 +72,7 @@ pub struct Checkpoint {
 
 /// The source boundary from which a fresh run was restored.
 ///
-/// # Example
-///
-/// ```
-/// # use agents_kit::Agent;
-/// # use app_kit::{App, AppConfig, Shutdown, WorkspaceConfig};
-/// # use app_kit::workflow::{CheckpointSelector, ExecutionEvent, ExecutionOptions, RunSelector,
-/// #     RunStatus, WorkflowDefinition, WorkflowState};
-/// # use storage_kit::StateStore;
-/// # use storage_kit::state::config::{LanceStateStoreConfig, StateStoreConfig};
-/// #
-/// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-/// # runtime.block_on(async {
-/// # let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-/// # let definition = WorkflowDefinition::parse(r#"{
-/// #     "schema":"app-kit.workflow/v2", "id":"counter", "revision":"r1",
-/// #     "state":{"count":0}, "required":["count"],
-/// #     "reducers":{"count":"reject_concurrent"}, "entry":"increment",
-/// #     "nodes":[{"id":"increment","step":{"kind":"state","mutations":[
-/// #         {"kind":"increment","target":"count","value":{"kind":"literal","value":1}}
-/// #     ]}}], "routes":{}
-/// # }"#)?;
-/// # let config = AppConfig::<_, Agent>::new(store, Vec::new(), vec![definition]);
-/// # let mut app = App::open(config).await?;
-/// # let mut workspace = app.create_workspace(WorkspaceConfig {
-/// #     name: Some("local counter".into()), root: std::env::current_dir()?,
-/// # }).await?;
-/// # let workflow = workspace.workflow("counter".parse()?).await?;
-/// # let mut run = workflow.prepare(WorkflowState::default()).await?;
-/// let terminal = run.execution(ExecutionOptions::default()).await?.finish().await?;
-/// use app_kit::workflow::{RestoreOptions, ResumePosition};
-/// let options = RestoreOptions {
-///     source: RunSelector::Latest(run.id().clone()),
-///     checkpoint: CheckpointSelector::Action(0),
-///     overrides: WorkflowState::default(), position: ResumePosition::AfterCompleted,
-///     fallback: None,
-/// };
-/// let copy = workflow.restore(options).await?;
-/// assert_ne!(copy.id(), run.id());
-/// let copied = copy.checkpoint(CheckpointSelector::Sequence(0)).await?;
-/// assert_eq!(copied.state.values()["count"], 1);
-/// assert_eq!(&copied.lineage.as_ref().unwrap().source, run.id());
-/// #
-/// # app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }).await?;
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// # })?;
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// ```
+/// See [the execution and history workflow](crate::workflow#execute-observe-restore-and-delete).
 #[non_exhaustive]
 pub struct RunLineage {
     /// Original run; restoring does not overwrite this identity.
@@ -252,53 +131,7 @@ pub enum ResumePosition {
 /// state. A successful restore copies clean state into a fresh paused run, so
 /// later source deletion cannot strand the copy.
 ///
-/// # Example
-///
-/// ```
-/// # use agents_kit::Agent;
-/// # use app_kit::{App, AppConfig, Shutdown, WorkspaceConfig};
-/// # use app_kit::workflow::{CheckpointSelector, ExecutionEvent, ExecutionOptions, RunSelector,
-/// #     RunStatus, WorkflowDefinition, WorkflowState};
-/// # use storage_kit::StateStore;
-/// # use storage_kit::state::config::{LanceStateStoreConfig, StateStoreConfig};
-/// #
-/// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-/// # runtime.block_on(async {
-/// # let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-/// # let definition = WorkflowDefinition::parse(r#"{
-/// #     "schema":"app-kit.workflow/v2", "id":"counter", "revision":"r1",
-/// #     "state":{"count":0}, "required":["count"],
-/// #     "reducers":{"count":"reject_concurrent"}, "entry":"increment",
-/// #     "nodes":[{"id":"increment","step":{"kind":"state","mutations":[
-/// #         {"kind":"increment","target":"count","value":{"kind":"literal","value":1}}
-/// #     ]}}], "routes":{}
-/// # }"#)?;
-/// # let config = AppConfig::<_, Agent>::new(store, Vec::new(), vec![definition]);
-/// # let mut app = App::open(config).await?;
-/// # let mut workspace = app.create_workspace(WorkspaceConfig {
-/// #     name: Some("local counter".into()), root: std::env::current_dir()?,
-/// # }).await?;
-/// # let workflow = workspace.workflow("counter".parse()?).await?;
-/// # let mut run = workflow.prepare(WorkflowState::default()).await?;
-/// let terminal = run.execution(ExecutionOptions::default()).await?.finish().await?;
-/// use app_kit::workflow::{RestoreOptions, ResumePosition};
-/// let options = RestoreOptions {
-///     source: RunSelector::Latest(run.id().clone()),
-///     checkpoint: CheckpointSelector::Action(0),
-///     overrides: WorkflowState::default(), position: ResumePosition::AfterCompleted,
-///     fallback: None,
-/// };
-/// let copy = workflow.restore(options).await?;
-/// assert_ne!(copy.id(), run.id());
-/// let copied = copy.checkpoint(CheckpointSelector::Sequence(0)).await?;
-/// assert_eq!(copied.state.values()["count"], 1);
-/// assert_eq!(&copied.lineage.as_ref().unwrap().source, run.id());
-/// #
-/// # app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }).await?;
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// # })?;
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// ```
+/// See [the execution and history workflow](crate::workflow#execute-observe-restore-and-delete).
 pub struct RestoreOptions {
     /// Original run, which is never overwritten by restore.
     pub source: RunSelector,
@@ -314,44 +147,7 @@ pub struct RestoreOptions {
 
 /// One bounded page of immutable checkpoints in ascending sequence order.
 ///
-/// # Example
-///
-/// ```
-/// # use agents_kit::Agent;
-/// # use app_kit::{App, AppConfig, Shutdown, WorkspaceConfig};
-/// # use app_kit::workflow::{CheckpointSelector, ExecutionEvent, ExecutionOptions, RunSelector,
-/// #     RunStatus, WorkflowDefinition, WorkflowState};
-/// # use storage_kit::StateStore;
-/// # use storage_kit::state::config::{LanceStateStoreConfig, StateStoreConfig};
-/// #
-/// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-/// # runtime.block_on(async {
-/// # let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-/// # let definition = WorkflowDefinition::parse(r#"{
-/// #     "schema":"app-kit.workflow/v2", "id":"counter", "revision":"r1",
-/// #     "state":{"count":0}, "required":["count"],
-/// #     "reducers":{"count":"reject_concurrent"}, "entry":"increment",
-/// #     "nodes":[{"id":"increment","step":{"kind":"state","mutations":[
-/// #         {"kind":"increment","target":"count","value":{"kind":"literal","value":1}}
-/// #     ]}}], "routes":{}
-/// # }"#)?;
-/// # let config = AppConfig::<_, Agent>::new(store, Vec::new(), vec![definition]);
-/// # let mut app = App::open(config).await?;
-/// # let mut workspace = app.create_workspace(WorkspaceConfig {
-/// #     name: Some("local counter".into()), root: std::env::current_dir()?,
-/// # }).await?;
-/// # let workflow = workspace.workflow("counter".parse()?).await?;
-/// # let mut run = workflow.prepare(WorkflowState::default()).await?;
-/// let terminal = run.execution(ExecutionOptions::default()).await?.finish().await?;
-/// let page = run.history(None, std::num::NonZeroUsize::new(100).unwrap()).await?;
-/// assert_eq!(page.checkpoints.first().unwrap().sequence, 0);
-/// assert!(page.next.is_none());
-/// #
-/// # app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }).await?;
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// # })?;
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// ```
+/// See [the execution and history workflow](crate::workflow#execute-observe-restore-and-delete).
 #[non_exhaustive]
 pub struct HistoryPage {
     /// Complete retained checkpoints from the captured head cutoff.
@@ -365,47 +161,7 @@ pub struct HistoryPage {
 /// Serialization preserves its App generation, run creation scope and committed
 /// head cutoff. It is not a native storage cursor and cannot cross run scopes.
 ///
-/// # Example
-///
-/// ```
-/// # use agents_kit::Agent;
-/// # use app_kit::{App, AppConfig, Shutdown, WorkspaceConfig};
-/// # use app_kit::workflow::{CheckpointSelector, ExecutionEvent, ExecutionOptions, RunSelector,
-/// #     RunStatus, WorkflowDefinition, WorkflowState};
-/// # use storage_kit::StateStore;
-/// # use storage_kit::state::config::{LanceStateStoreConfig, StateStoreConfig};
-/// #
-/// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-/// # runtime.block_on(async {
-/// # let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-/// # let definition = WorkflowDefinition::parse(r#"{
-/// #     "schema":"app-kit.workflow/v2", "id":"counter", "revision":"r1",
-/// #     "state":{"count":0}, "required":["count"],
-/// #     "reducers":{"count":"reject_concurrent"}, "entry":"increment",
-/// #     "nodes":[{"id":"increment","step":{"kind":"state","mutations":[
-/// #         {"kind":"increment","target":"count","value":{"kind":"literal","value":1}}
-/// #     ]}}], "routes":{}
-/// # }"#)?;
-/// # let config = AppConfig::<_, Agent>::new(store, Vec::new(), vec![definition]);
-/// # let mut app = App::open(config).await?;
-/// # let mut workspace = app.create_workspace(WorkspaceConfig {
-/// #     name: Some("local counter".into()), root: std::env::current_dir()?,
-/// # }).await?;
-/// # let workflow = workspace.workflow("counter".parse()?).await?;
-/// # let mut run = workflow.prepare(WorkflowState::default()).await?;
-/// let terminal = run.execution(ExecutionOptions::default()).await?.finish().await?;
-/// let page = run.history(None, std::num::NonZeroUsize::new(1).unwrap()).await?;
-/// let cursor = page.next.expect("an action has committed after checkpoint zero");
-/// let encoded = serde_json::to_string(&cursor)?;
-/// let restored = serde_json::from_str(&encoded)?;
-/// let page = run.history(Some(restored), std::num::NonZeroUsize::new(100).unwrap()).await?;
-/// assert!(page.checkpoints.iter().all(|checkpoint| checkpoint.sequence > 0));
-/// #
-/// # app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }).await?;
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// # })?;
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// ```
+/// See [the execution and history workflow](crate::workflow#execute-observe-restore-and-delete).
 #[derive(Clone, Debug)]
 pub struct HistoryCursor {
     workspace: WorkspaceId,

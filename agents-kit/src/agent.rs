@@ -95,219 +95,21 @@ impl AgentInfo {
 /// Public implementation contract for a complete portable agent runtime.
 ///
 /// Built-ins and caller implementations use this behavioral boundary directly.
-/// A caller implementation returns its own concrete [`Workspace`](Self::Workspace)
-/// implementation; runtime composition can instead use a caller-owned exhaustive
-/// enum hierarchy. Accepted work must reach its documented durable terminal state
-/// even if a caller drops the awaiting future. Shutdown seals new work, invalidates
-/// live descendants, and settles accepted cleanup.
+/// A caller implementation returns its own concrete [`Workspace`](Self::Workspace),
+/// whose associated Conversation remains concrete. Runtime selection may use an
+/// exhaustive caller-owned enum hierarchy; no normalization constructor or
+/// independent child type parameter is needed.
 ///
-/// # Examples
+/// Accepted work must reach its documented durable terminal state even if a caller
+/// drops the awaiting future. Shutdown seals new work, invalidates live descendants,
+/// and settles accepted cleanup.
 ///
-/// This local Custom agent uses in-memory Lance and sends no network requests.
-///
-/// ```
-/// # use std::{num::NonZeroUsize, time::Duration};
-/// # use agents_kit::{AgentBackend, AgentBuilder, AgentStorage, WorkspaceBackend};
-/// # use agents_kit::config::{AgentConfig, CustomAgentConfig, CustomLoopLimits, CustomToolApproval};
-/// # use agents_kit::{model::ModelSelector, tool::ToolSelection};
-/// # use providers_kit::{Provider, ProviderConfig, config::{OllamaConfig, ProviderKind, TransportConfig}};
-/// # use storage_kit::{StateStore, state::config::{LanceStateStoreConfig, StateStoreConfig}};
-/// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-/// # runtime.block_on(async {
-/// # let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-/// # let custom = CustomAgentConfig::new(ModelSelector::new("exact-model")?, ToolSelection::None,
-/// #     CustomLoopLimits::new(4, 0, 1)?, CustomToolApproval::Deny)?;
-/// # let config = AgentConfig::new(custom.into(), Duration::from_secs(10), NonZeroUsize::MIN)?;
-/// # let provider = Provider::from_config(ProviderConfig::new(
-/// #     ProviderKind::Ollama(OllamaConfig::local()), TransportConfig::default()))?;
-/// # let agent = AgentBuilder::create(config, AgentStorage::new(store)).with_provider(provider).build().await?;
-/// # let outcome = async {
-/// use agents_kit::identity::AgentInfo;
-/// use agents_kit::KitError;
-/// async fn inspect<A: AgentBackend>(agent: &A) -> Result<AgentInfo, KitError> {
-///     let info = agent.info().await?;
-///     assert_eq!(info.id(), &agent.id());
-///     Ok(info)
-/// }
-/// assert_eq!(inspect(&agent).await?.id(), &agent.id());
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// # }.await;
-/// # let cleanup = agent.shutdown().await;
-/// # outcome?;
-/// # cleanup?;
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// # })?;
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// ```
-/// # Caller-owned concrete composition
-///
-/// This is an illustrative application enum hierarchy, not a new durable engine
-/// or evidence of native capability. It supports one supplied family here and
-/// delegates every operation, including errors and consuming cleanup, to its real
-/// owner. Add another *concrete* family with matching child enum arms when your
-/// application needs it. There is no `Agent::from_backend` ingress, no erased
-/// backend, and no independent Workspace/Conversation type parameter.
-///
-/// The example executes local creation, metadata access and cleanup. The supplied
-/// Custom implementation retains responsibility for persistence, revision fencing,
-/// notifications, prompt admission and shutdown. It performs no model request.
-///
-/// ```
-/// use std::{future::Future, num::NonZeroUsize, path::PathBuf, time::Duration};
-/// use agents_kit::{Agent, AgentBackend, AgentBuilder, AgentStorage, Conversation,
-///     ConversationBackend, KitError, Workspace, WorkspaceBackend};
-/// use agents_kit::config::{AgentConfig, CustomAgentConfig, CustomLoopLimits, CustomToolApproval};
-/// use agents_kit::conversation::{ConversationInfo, FileRead, NewConversation};
-/// use agents_kit::identity::{AgentId, AgentInfo, ConversationId, NotificationId, WorkspaceId};
-/// use agents_kit::knowledge::IngestKnowledgeRequest;
-/// use agents_kit::model::{ModelInfo, ModelSelector};
-/// use agents_kit::notification::{ConversationNotificationReceiver, NotificationResolution};
-/// use agents_kit::prompt::{PromptRequest, PromptResponse, PromptStream};
-/// use agents_kit::tool::{ToolInfo, ToolSelection};
-/// use agents_kit::workspace::{DeleteWorkspaceRequest, NewWorkspace, UpdateWorkspaceRequest,
-///     WorkspaceContext, WorkspaceDefaults, WorkspaceExecutionPolicy, WorkspaceInfo,
-///     WorkspaceNetworkAccess, WorkspaceRoot, WorkspaceRootAccess, WorkspaceSandboxMode,
-///     WorkspaceUpdateReadiness};
-/// use providers_kit::{Provider, ProviderConfig,
-///     config::{OllamaConfig, ProviderKind, TransportConfig}};
-/// use storage_kit::{StateStore,
-///     state::config::{LanceStateStoreConfig, StateStoreConfig}};
-///
-/// enum ApplicationAgent { Supplied(Agent) }
-/// enum ApplicationWorkspace { Supplied(Workspace) }
-/// enum ApplicationConversation { Supplied(Conversation) }
-///
-/// impl AgentBackend for ApplicationAgent {
-///     type Workspace = ApplicationWorkspace;
-///     fn id(&self) -> AgentId {
-///         match self { Self::Supplied(value) => value.id() }
-///     }
-///     async fn info(&self) -> Result<AgentInfo, KitError> {
-///         match self { Self::Supplied(value) => value.info().await }
-///     }
-///     async fn new_workspace(&self, request: NewWorkspace) -> Result<Self::Workspace, KitError> {
-///         match self { Self::Supplied(value) => value.new_workspace(request).await.map(ApplicationWorkspace::Supplied) }
-///     }
-///     async fn list_workspaces(&self) -> Result<Vec<WorkspaceInfo>, KitError> {
-///         match self { Self::Supplied(value) => value.list_workspaces().await }
-///     }
-///     async fn workspace_info(&self, id: WorkspaceId) -> Result<WorkspaceInfo, KitError> {
-///         match self { Self::Supplied(value) => value.workspace_info(id).await }
-///     }
-///     async fn get_workspace(&self, id: WorkspaceId) -> Result<Self::Workspace, KitError> {
-///         match self { Self::Supplied(value) => value.get_workspace(id).await.map(ApplicationWorkspace::Supplied) }
-///     }
-///     fn check_workspace_update(&self, request: &UpdateWorkspaceRequest)
-///         -> impl Future<Output = Result<WorkspaceUpdateReadiness, KitError>> + Send + '_ {
-///         // Construct the delegated future now; it does not borrow the request.
-///         match self { Self::Supplied(value) => value.check_workspace_update(request) }
-///     }
-///     async fn update_workspace(&self, request: UpdateWorkspaceRequest) -> Result<WorkspaceInfo, KitError> {
-///         match self { Self::Supplied(value) => value.update_workspace(request).await }
-///     }
-///     async fn delete_workspace(&self, request: DeleteWorkspaceRequest) -> Result<(), KitError> {
-///         match self { Self::Supplied(value) => value.delete_workspace(request).await }
-///     }
-///     async fn list_models(&self) -> Result<Vec<ModelInfo>, KitError> {
-///         match self { Self::Supplied(value) => value.list_models().await }
-///     }
-///     async fn ingest_knowledge(&self, request: IngestKnowledgeRequest) -> Result<(), KitError> {
-///         match self { Self::Supplied(value) => value.ingest_knowledge(request).await }
-///     }
-///     async fn shutdown(self) -> Result<(), KitError> {
-///         match self { Self::Supplied(value) => value.shutdown().await }
-///     }
-/// }
-/// impl WorkspaceBackend for ApplicationWorkspace {
-///     type Conversation = ApplicationConversation;
-///     fn id(&self) -> WorkspaceId {
-///         match self { Self::Supplied(value) => value.id() }
-///     }
-///     async fn info(&self) -> Result<WorkspaceInfo, KitError> {
-///         match self { Self::Supplied(value) => value.info().await }
-///     }
-///     async fn new_conversation(&self, request: NewConversation) -> Result<Self::Conversation, KitError> {
-///         match self { Self::Supplied(value) => value.new_conversation(request).await.map(ApplicationConversation::Supplied) }
-///     }
-///     async fn list_conversations(&self) -> Result<Vec<ConversationInfo>, KitError> {
-///         match self { Self::Supplied(value) => value.list_conversations().await }
-///     }
-///     async fn conversation_info(&self, id: ConversationId) -> Result<ConversationInfo, KitError> {
-///         match self { Self::Supplied(value) => value.conversation_info(id).await }
-///     }
-///     async fn get_conversation(&self, id: ConversationId) -> Result<Self::Conversation, KitError> {
-///         match self { Self::Supplied(value) => value.get_conversation(id).await.map(ApplicationConversation::Supplied) }
-///     }
-///     async fn list_tools(&self) -> Result<Vec<ToolInfo>, KitError> {
-///         match self { Self::Supplied(value) => value.list_tools().await }
-///     }
-///     async fn ingest_knowledge(&self, request: IngestKnowledgeRequest) -> Result<(), KitError> {
-///         match self { Self::Supplied(value) => value.ingest_knowledge(request).await }
-///     }
-///     async fn close(self) -> Result<(), KitError> {
-///         match self { Self::Supplied(value) => value.close().await }
-///     }
-/// }
-/// impl ConversationBackend for ApplicationConversation {
-///     fn id(&self) -> ConversationId {
-///         match self { Self::Supplied(value) => value.id() }
-///     }
-///     async fn info(&self) -> Result<ConversationInfo, KitError> {
-///         match self { Self::Supplied(value) => value.info().await }
-///     }
-///     async fn prompt(&self, request: PromptRequest) -> Result<PromptResponse, KitError> {
-///         match self { Self::Supplied(value) => value.prompt(request).await }
-///     }
-///     async fn prompt_stream(&self, request: PromptRequest) -> Result<PromptStream, KitError> {
-///         match self { Self::Supplied(value) => value.prompt_stream(request).await }
-///     }
-///     async fn abort(&self) -> Result<(), KitError> {
-///         match self { Self::Supplied(value) => value.abort().await }
-///     }
-///     async fn read_file(&self, path: PathBuf) -> Result<FileRead, KitError> {
-///         match self { Self::Supplied(value) => value.read_file(path).await }
-///     }
-///     fn notification_stream(&self) -> Result<ConversationNotificationReceiver, KitError> {
-///         match self { Self::Supplied(value) => value.notification_stream() }
-///     }
-///     async fn resolve_notification(&self, id: NotificationId, resolution: NotificationResolution) -> Result<(), KitError> {
-///         match self { Self::Supplied(value) => value.resolve_notification(id, resolution).await }
-///     }
-///     async fn close(self) -> Result<(), KitError> {
-///         match self { Self::Supplied(value) => value.close().await }
-///     }
-/// }
-///
-/// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-/// # runtime.block_on(async {
-/// let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-/// let config = AgentConfig::new(CustomAgentConfig::new(ModelSelector::new("exact-model")?,
-///     ToolSelection::None, CustomLoopLimits::new(4, 0, 1)?, CustomToolApproval::Deny)?.into(),
-///     Duration::from_secs(10), NonZeroUsize::MIN)?;
-/// let provider = Provider::from_config(ProviderConfig::new(
-///     ProviderKind::Ollama(OllamaConfig::local()), TransportConfig::default()))?;
-/// let agent = ApplicationAgent::Supplied(AgentBuilder::create(config, AgentStorage::new(store))
-///     .with_provider(provider).build().await?);
-/// let outcome = async {
-///     let cwd = std::env::current_dir()?;
-///     let context = WorkspaceContext::new(cwd.clone(),
-///         vec![WorkspaceRoot::new(cwd, WorkspaceRootAccess::ReadOnly)?],
-///         WorkspaceExecutionPolicy::new(WorkspaceSandboxMode::ReadOnly, WorkspaceNetworkAccess::Disabled))?;
-///     let workspace = agent.new_workspace(NewWorkspace::new("caller", context, WorkspaceDefaults::empty())?).await?;
-///     let conversation = workspace.new_conversation(NewConversation::new(Some("Review".into()), None, vec![])?).await?;
-///     assert_eq!(conversation.info().await?.workspace_id(), &workspace.id());
-///     assert_eq!(workspace.list_conversations().await?.len(), 1);
-///     conversation.close().await?;
-///     workspace.close().await?;
-///     Ok::<(), Box<dyn std::error::Error>>(())
-/// }.await;
-/// let shutdown = agent.shutdown().await;
-/// outcome?;
-/// shutdown?;
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// # })?;
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// ```
+/// Start with the [local construction example](crate) and [`Self::new_workspace`].
+/// For a complete caller-owned hierarchy, the [executable direct-trait examples](https://github.com/jecsand838/ai-kit/blob/main/agents-kit/tests/mock_hierarchy/mod.rs)
+/// cover Agent, associated Workspace and Conversation, exact requests, lifecycle
+/// and errors. Their process-local state is not native durability evidence.
+/// The [Custom composition tests](https://github.com/jecsand838/ai-kit/blob/main/agents-kit/tests/custom_mock_composition.rs)
+/// exercise the real Custom runtime with caller-owned lower implementations.
 pub trait AgentBackend: Send + Sync + 'static {
     /// Concrete workspace implementation produced by this agent.
     type Workspace: crate::WorkspaceBackend;
@@ -317,38 +119,7 @@ pub trait AgentBackend: Send + Sync + 'static {
     /// The identity remains stable across runtime reopen. This value identifies
     /// the durable Agent; it does not expose backend routing or lower resources.
     ///
-    /// # Examples
-    ///
-    /// This local Custom agent uses in-memory Lance and sends no network requests.
-    ///
-    /// ```
-    /// # use std::{num::NonZeroUsize, time::Duration};
-    /// # use agents_kit::{AgentBackend, AgentBuilder, AgentStorage, WorkspaceBackend};
-    /// # use agents_kit::config::{AgentConfig, CustomAgentConfig, CustomLoopLimits, CustomToolApproval};
-    /// # use agents_kit::{model::ModelSelector, tool::ToolSelection};
-    /// # use providers_kit::{Provider, ProviderConfig, config::{OllamaConfig, ProviderKind, TransportConfig}};
-    /// # use storage_kit::{StateStore, state::config::{LanceStateStoreConfig, StateStoreConfig}};
-    /// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-    /// # runtime.block_on(async {
-    /// # let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-    /// # let custom = CustomAgentConfig::new(ModelSelector::new("exact-model")?, ToolSelection::None,
-    /// #     CustomLoopLimits::new(4, 0, 1)?, CustomToolApproval::Deny)?;
-    /// # let config = AgentConfig::new(custom.into(), Duration::from_secs(10), NonZeroUsize::MIN)?;
-    /// # let provider = Provider::from_config(ProviderConfig::new(
-    /// #     ProviderKind::Ollama(OllamaConfig::local()), TransportConfig::default()))?;
-    /// # let agent = AgentBuilder::create(config, AgentStorage::new(store)).with_provider(provider).build().await?;
-    /// # let outcome = async {
-    /// let identity = agent.id();
-    /// assert_eq!(agent.info().await?.id(), &identity);
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// # }.await;
-    /// # let cleanup = agent.shutdown().await;
-    /// # outcome?;
-    /// # cleanup?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// # })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See the [local construction example](crate) and [`Self::new_workspace`] for child ownership.
     fn id(&self) -> AgentId;
 
     /// Loads the current descriptive agent information.
@@ -358,38 +129,7 @@ pub trait AgentBackend: Send + Sync + 'static {
     /// Returns [`KitError`] if the runtime is closed, committed state cannot be
     /// read, or stored facts contradict the portable record contract.
     ///
-    /// # Examples
-    ///
-    /// This local Custom agent uses in-memory Lance and sends no network requests.
-    ///
-    /// ```
-    /// # use std::{num::NonZeroUsize, time::Duration};
-    /// # use agents_kit::{AgentBackend, AgentBuilder, AgentStorage, WorkspaceBackend};
-    /// # use agents_kit::config::{AgentConfig, CustomAgentConfig, CustomLoopLimits, CustomToolApproval};
-    /// # use agents_kit::{model::ModelSelector, tool::ToolSelection};
-    /// # use providers_kit::{Provider, ProviderConfig, config::{OllamaConfig, ProviderKind, TransportConfig}};
-    /// # use storage_kit::{StateStore, state::config::{LanceStateStoreConfig, StateStoreConfig}};
-    /// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-    /// # runtime.block_on(async {
-    /// # let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-    /// # let custom = CustomAgentConfig::new(ModelSelector::new("exact-model")?, ToolSelection::None,
-    /// #     CustomLoopLimits::new(4, 0, 1)?, CustomToolApproval::Deny)?;
-    /// # let config = AgentConfig::new(custom.into(), Duration::from_secs(10), NonZeroUsize::MIN)?;
-    /// # let provider = Provider::from_config(ProviderConfig::new(
-    /// #     ProviderKind::Ollama(OllamaConfig::local()), TransportConfig::default()))?;
-    /// # let agent = AgentBuilder::create(config, AgentStorage::new(store)).with_provider(provider).build().await?;
-    /// # let outcome = async {
-    /// let info = agent.info().await?;
-    /// assert_eq!(info.id(), &agent.id());
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// # }.await;
-    /// # let cleanup = agent.shutdown().await;
-    /// # outcome?;
-    /// # cleanup?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// # })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See the [local construction example](crate) and [`Self::new_workspace`] for child ownership.
     fn info(&self) -> impl Future<Output = Result<AgentInfo, KitError>> + Send + '_;
 
     /// Creates and publishes a workspace from validated portable configuration.
@@ -434,13 +174,38 @@ pub trait AgentBackend: Send + Sync + 'static {
     /// let workspace = agent.new_workspace(
     ///     NewWorkspace::new("review", context, WorkspaceDefaults::empty())?,
     /// ).await?;
-    /// assert_eq!(workspace.info().await?.revision(), 1);
-    /// workspace.close().await?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// use agents_kit::workspace::{UpdateWorkspaceRequest, WorkspaceUpdateReadiness, DeleteWorkspaceRequest};
+    /// let observed = async {
+    ///     let current = workspace.info().await?;
+    ///     assert_eq!(current.revision(), 1);
+    ///     let request = UpdateWorkspaceRequest::new(current.id().clone(), current.revision(),
+    ///         "renamed", current.context().clone(), current.defaults().clone())?;
+    ///     // Preflight observes the still-open workspace runtime.
+    ///     assert_eq!(agent.check_workspace_update(&request).await?, WorkspaceUpdateReadiness::Ready);
+    ///     // Readiness is advisory: it does not reserve or change the revision.
+    ///     assert_eq!(agent.workspace_info(current.id().clone()).await?.revision(), current.revision());
+    ///     Ok::<_, agents_kit::KitError>((current, request))
+    /// }.await;
+    /// let close = workspace.close().await;
+    /// let (current, request) = match (observed, close) {
+    ///     (Ok(value), Ok(())) => Ok(value),
+    ///     (Err(primary), Err(cleanup)) => Err(primary.with_supplementary(cleanup)),
+    ///     (Err(error), _) | (_, Err(error)) => Err(error),
+    /// }?;
+    /// // Revision-checked mutations also accept a quiescent, closed workspace.
+    /// let updated = agent.update_workspace(request).await?;
+    /// assert_eq!(updated.name(), "renamed");
+    /// assert_eq!(updated.revision(), current.revision() + 1);
+    /// agent.delete_workspace(DeleteWorkspaceRequest::new(updated.id().clone(), updated.revision())?).await?;
+    /// assert!(agent.list_workspaces().await?.is_empty());
+    /// # Ok::<(), agents_kit::KitError>(())
     /// # }.await;
     /// # let cleanup = agent.shutdown().await;
-    /// # outcome?;
-    /// # cleanup?;
+    /// # match (outcome, cleanup) {
+    /// #     (Err(primary), Err(cleanup)) => Err(primary.with_supplementary(cleanup)),
+    /// #     (Err(error), _) | (_, Err(error)) => Err(error),
+    /// #     (Ok(()), Ok(())) => Ok(()),
+    /// # }?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// # })?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -460,47 +225,7 @@ pub trait AgentBackend: Send + Sync + 'static {
     /// Returns [`KitError`] for a closed runtime, state-read failure, deadline
     /// expiry, or inconsistent durable inventory.
     ///
-    /// # Examples
-    ///
-    /// This local Custom agent uses in-memory Lance and sends no network requests.
-    ///
-    /// ```
-    /// # use std::{num::NonZeroUsize, time::Duration};
-    /// # use agents_kit::{AgentBackend, AgentBuilder, AgentStorage, WorkspaceBackend};
-    /// # use agents_kit::config::{AgentConfig, CustomAgentConfig, CustomLoopLimits, CustomToolApproval};
-    /// # use agents_kit::{model::ModelSelector, tool::ToolSelection};
-    /// # use providers_kit::{Provider, ProviderConfig, config::{OllamaConfig, ProviderKind, TransportConfig}};
-    /// # use storage_kit::{StateStore, state::config::{LanceStateStoreConfig, StateStoreConfig}};
-    /// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-    /// # runtime.block_on(async {
-    /// # let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-    /// # let custom = CustomAgentConfig::new(ModelSelector::new("exact-model")?, ToolSelection::None,
-    /// #     CustomLoopLimits::new(4, 0, 1)?, CustomToolApproval::Deny)?;
-    /// # let config = AgentConfig::new(custom.into(), Duration::from_secs(10), NonZeroUsize::MIN)?;
-    /// # let provider = Provider::from_config(ProviderConfig::new(
-    /// #     ProviderKind::Ollama(OllamaConfig::local()), TransportConfig::default()))?;
-    /// # let agent = AgentBuilder::create(config, AgentStorage::new(store)).with_provider(provider).build().await?;
-    /// # let outcome = async {
-    /// # use agents_kit::workspace::{NewWorkspace, WorkspaceContext, WorkspaceDefaults,
-    /// #     WorkspaceRoot, WorkspaceRootAccess, WorkspaceExecutionPolicy, WorkspaceSandboxMode, WorkspaceNetworkAccess};
-    /// # let cwd = std::env::current_dir()?;
-    /// # let context = WorkspaceContext::new(cwd.clone(),
-    /// #     vec![WorkspaceRoot::new(cwd, WorkspaceRootAccess::ReadOnly)?],
-    /// #     WorkspaceExecutionPolicy::new(WorkspaceSandboxMode::ReadOnly, WorkspaceNetworkAccess::Disabled))?;
-    /// # let workspace = agent.new_workspace(NewWorkspace::new("review", context, WorkspaceDefaults::empty())?).await?;
-    /// let inventory = agent.list_workspaces().await?;
-    /// assert_eq!(inventory.len(), 1);
-    /// assert_eq!(inventory[0].id(), &workspace.id());
-    /// # workspace.close().await?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// # }.await;
-    /// # let cleanup = agent.shutdown().await;
-    /// # outcome?;
-    /// # cleanup?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// # })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See the [local construction example](crate) and [`Self::new_workspace`] for child ownership.
     fn list_workspaces(
         &self,
     ) -> impl Future<Output = Result<Vec<WorkspaceInfo>, KitError>> + Send + '_;
@@ -515,47 +240,7 @@ pub trait AgentBackend: Send + Sync + 'static {
     /// Returns [`crate::error::ErrorKind::NotFound`] for a missing or foreign id,
     /// or the owning lifecycle, state-read, integrity, or deadline error.
     ///
-    /// # Examples
-    ///
-    /// This local Custom agent uses in-memory Lance and sends no network requests.
-    ///
-    /// ```
-    /// # use std::{num::NonZeroUsize, time::Duration};
-    /// # use agents_kit::{AgentBackend, AgentBuilder, AgentStorage, WorkspaceBackend};
-    /// # use agents_kit::config::{AgentConfig, CustomAgentConfig, CustomLoopLimits, CustomToolApproval};
-    /// # use agents_kit::{model::ModelSelector, tool::ToolSelection};
-    /// # use providers_kit::{Provider, ProviderConfig, config::{OllamaConfig, ProviderKind, TransportConfig}};
-    /// # use storage_kit::{StateStore, state::config::{LanceStateStoreConfig, StateStoreConfig}};
-    /// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-    /// # runtime.block_on(async {
-    /// # let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-    /// # let custom = CustomAgentConfig::new(ModelSelector::new("exact-model")?, ToolSelection::None,
-    /// #     CustomLoopLimits::new(4, 0, 1)?, CustomToolApproval::Deny)?;
-    /// # let config = AgentConfig::new(custom.into(), Duration::from_secs(10), NonZeroUsize::MIN)?;
-    /// # let provider = Provider::from_config(ProviderConfig::new(
-    /// #     ProviderKind::Ollama(OllamaConfig::local()), TransportConfig::default()))?;
-    /// # let agent = AgentBuilder::create(config, AgentStorage::new(store)).with_provider(provider).build().await?;
-    /// # let outcome = async {
-    /// # use agents_kit::workspace::{NewWorkspace, WorkspaceContext, WorkspaceDefaults,
-    /// #     WorkspaceRoot, WorkspaceRootAccess, WorkspaceExecutionPolicy, WorkspaceSandboxMode, WorkspaceNetworkAccess};
-    /// # let cwd = std::env::current_dir()?;
-    /// # let context = WorkspaceContext::new(cwd.clone(),
-    /// #     vec![WorkspaceRoot::new(cwd, WorkspaceRootAccess::ReadOnly)?],
-    /// #     WorkspaceExecutionPolicy::new(WorkspaceSandboxMode::ReadOnly, WorkspaceNetworkAccess::Disabled))?;
-    /// # let workspace = agent.new_workspace(NewWorkspace::new("review", context, WorkspaceDefaults::empty())?).await?;
-    /// let info = agent.workspace_info(workspace.id()).await?;
-    /// assert_eq!(info.name(), "review");
-    /// assert_eq!(info.revision(), 1);
-    /// # workspace.close().await?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// # }.await;
-    /// # let cleanup = agent.shutdown().await;
-    /// # outcome?;
-    /// # cleanup?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// # })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See the [local construction example](crate) and [`Self::new_workspace`] for child ownership.
     fn workspace_info(
         &self,
         id: WorkspaceId,
@@ -573,48 +258,9 @@ pub trait AgentBackend: Send + Sync + 'static {
     /// Returns [`KitError`] for a missing/foreign id, an existing live claim,
     /// closed runtime, incompatible reopen state, dependency failure, or timeout.
     ///
-    /// # Examples
-    ///
-    /// This local Custom agent uses in-memory Lance and sends no network requests.
-    ///
-    /// ```
-    /// # use std::{num::NonZeroUsize, time::Duration};
-    /// # use agents_kit::{AgentBackend, AgentBuilder, AgentStorage, WorkspaceBackend};
-    /// # use agents_kit::config::{AgentConfig, CustomAgentConfig, CustomLoopLimits, CustomToolApproval};
-    /// # use agents_kit::{model::ModelSelector, tool::ToolSelection};
-    /// # use providers_kit::{Provider, ProviderConfig, config::{OllamaConfig, ProviderKind, TransportConfig}};
-    /// # use storage_kit::{StateStore, state::config::{LanceStateStoreConfig, StateStoreConfig}};
-    /// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-    /// # runtime.block_on(async {
-    /// # let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-    /// # let custom = CustomAgentConfig::new(ModelSelector::new("exact-model")?, ToolSelection::None,
-    /// #     CustomLoopLimits::new(4, 0, 1)?, CustomToolApproval::Deny)?;
-    /// # let config = AgentConfig::new(custom.into(), Duration::from_secs(10), NonZeroUsize::MIN)?;
-    /// # let provider = Provider::from_config(ProviderConfig::new(
-    /// #     ProviderKind::Ollama(OllamaConfig::local()), TransportConfig::default()))?;
-    /// # let agent = AgentBuilder::create(config, AgentStorage::new(store)).with_provider(provider).build().await?;
-    /// # let outcome = async {
-    /// # use agents_kit::workspace::{NewWorkspace, WorkspaceContext, WorkspaceDefaults,
-    /// #     WorkspaceRoot, WorkspaceRootAccess, WorkspaceExecutionPolicy, WorkspaceSandboxMode, WorkspaceNetworkAccess};
-    /// # let cwd = std::env::current_dir()?;
-    /// # let context = WorkspaceContext::new(cwd.clone(),
-    /// #     vec![WorkspaceRoot::new(cwd, WorkspaceRootAccess::ReadOnly)?],
-    /// #     WorkspaceExecutionPolicy::new(WorkspaceSandboxMode::ReadOnly, WorkspaceNetworkAccess::Disabled))?;
-    /// # let workspace = agent.new_workspace(NewWorkspace::new("review", context, WorkspaceDefaults::empty())?).await?;
-    /// let id = workspace.id();
-    /// workspace.close().await?;
-    /// let reopened = agent.get_workspace(id.clone()).await?;
-    /// assert_eq!(reopened.id(), id);
-    /// reopened.close().await?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// # }.await;
-    /// # let cleanup = agent.shutdown().await;
-    /// # outcome?;
-    /// # cleanup?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// # })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See [`WorkspaceBackend::new_conversation`](crate::WorkspaceBackend::new_conversation)
+    /// for an inventory and reopen workflow,
+    /// including release of the first workspace claim before lookup.
     fn get_workspace(
         &self,
         id: WorkspaceId,
@@ -633,51 +279,7 @@ pub trait AgentBackend: Send + Sync + 'static {
     /// state/dependency/deadline failure. Dynamic activity is reported as
     /// [`WorkspaceUpdateReadiness::Busy`].
     ///
-    /// # Examples
-    ///
-    /// This local Custom agent uses in-memory Lance and sends no network requests.
-    ///
-    /// ```
-    /// # use std::{num::NonZeroUsize, time::Duration};
-    /// # use agents_kit::{AgentBackend, AgentBuilder, AgentStorage, WorkspaceBackend};
-    /// # use agents_kit::config::{AgentConfig, CustomAgentConfig, CustomLoopLimits, CustomToolApproval};
-    /// # use agents_kit::{model::ModelSelector, tool::ToolSelection};
-    /// # use providers_kit::{Provider, ProviderConfig, config::{OllamaConfig, ProviderKind, TransportConfig}};
-    /// # use storage_kit::{StateStore, state::config::{LanceStateStoreConfig, StateStoreConfig}};
-    /// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-    /// # runtime.block_on(async {
-    /// # let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-    /// # let custom = CustomAgentConfig::new(ModelSelector::new("exact-model")?, ToolSelection::None,
-    /// #     CustomLoopLimits::new(4, 0, 1)?, CustomToolApproval::Deny)?;
-    /// # let config = AgentConfig::new(custom.into(), Duration::from_secs(10), NonZeroUsize::MIN)?;
-    /// # let provider = Provider::from_config(ProviderConfig::new(
-    /// #     ProviderKind::Ollama(OllamaConfig::local()), TransportConfig::default()))?;
-    /// # let agent = AgentBuilder::create(config, AgentStorage::new(store)).with_provider(provider).build().await?;
-    /// # let outcome = async {
-    /// # use agents_kit::workspace::{NewWorkspace, WorkspaceContext, WorkspaceDefaults,
-    /// #     WorkspaceRoot, WorkspaceRootAccess, WorkspaceExecutionPolicy, WorkspaceSandboxMode, WorkspaceNetworkAccess};
-    /// # let cwd = std::env::current_dir()?;
-    /// # let context = WorkspaceContext::new(cwd.clone(),
-    /// #     vec![WorkspaceRoot::new(cwd, WorkspaceRootAccess::ReadOnly)?],
-    /// #     WorkspaceExecutionPolicy::new(WorkspaceSandboxMode::ReadOnly, WorkspaceNetworkAccess::Disabled))?;
-    /// # let workspace = agent.new_workspace(NewWorkspace::new("review", context, WorkspaceDefaults::empty())?).await?;
-    /// use agents_kit::workspace::{UpdateWorkspaceRequest, WorkspaceUpdateReadiness};
-    /// let current = workspace.info().await?;
-    /// let request = UpdateWorkspaceRequest::new(current.id().clone(), current.revision(),
-    ///     "renamed", current.context().clone(), current.defaults().clone())?;
-    /// assert_eq!(agent.check_workspace_update(&request).await?, WorkspaceUpdateReadiness::Ready);
-    /// // Advisory readiness does not change or reserve the durable revision.
-    /// assert_eq!(agent.workspace_info(current.id().clone()).await?.revision(), current.revision());
-    /// workspace.close().await?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// # }.await;
-    /// # let cleanup = agent.shutdown().await;
-    /// # outcome?;
-    /// # cleanup?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// # })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See [`Self::new_workspace`] for a complete creation, revision-check, replacement and deletion workflow.
     fn check_workspace_update(
         &self,
         request: &UpdateWorkspaceRequest,
@@ -698,51 +300,7 @@ pub trait AgentBackend: Send + Sync + 'static {
     /// or precommit dependency/deadline failures. Revision overflow is
     /// [`crate::error::ErrorKind::InvalidState`] and does not change state.
     ///
-    /// # Examples
-    ///
-    /// This local Custom agent uses in-memory Lance and sends no network requests.
-    ///
-    /// ```
-    /// # use std::{num::NonZeroUsize, time::Duration};
-    /// # use agents_kit::{AgentBackend, AgentBuilder, AgentStorage, WorkspaceBackend};
-    /// # use agents_kit::config::{AgentConfig, CustomAgentConfig, CustomLoopLimits, CustomToolApproval};
-    /// # use agents_kit::{model::ModelSelector, tool::ToolSelection};
-    /// # use providers_kit::{Provider, ProviderConfig, config::{OllamaConfig, ProviderKind, TransportConfig}};
-    /// # use storage_kit::{StateStore, state::config::{LanceStateStoreConfig, StateStoreConfig}};
-    /// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-    /// # runtime.block_on(async {
-    /// # let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-    /// # let custom = CustomAgentConfig::new(ModelSelector::new("exact-model")?, ToolSelection::None,
-    /// #     CustomLoopLimits::new(4, 0, 1)?, CustomToolApproval::Deny)?;
-    /// # let config = AgentConfig::new(custom.into(), Duration::from_secs(10), NonZeroUsize::MIN)?;
-    /// # let provider = Provider::from_config(ProviderConfig::new(
-    /// #     ProviderKind::Ollama(OllamaConfig::local()), TransportConfig::default()))?;
-    /// # let agent = AgentBuilder::create(config, AgentStorage::new(store)).with_provider(provider).build().await?;
-    /// # let outcome = async {
-    /// # use agents_kit::workspace::{NewWorkspace, WorkspaceContext, WorkspaceDefaults,
-    /// #     WorkspaceRoot, WorkspaceRootAccess, WorkspaceExecutionPolicy, WorkspaceSandboxMode, WorkspaceNetworkAccess};
-    /// # let cwd = std::env::current_dir()?;
-    /// # let context = WorkspaceContext::new(cwd.clone(),
-    /// #     vec![WorkspaceRoot::new(cwd, WorkspaceRootAccess::ReadOnly)?],
-    /// #     WorkspaceExecutionPolicy::new(WorkspaceSandboxMode::ReadOnly, WorkspaceNetworkAccess::Disabled))?;
-    /// # let workspace = agent.new_workspace(NewWorkspace::new("review", context, WorkspaceDefaults::empty())?).await?;
-    /// use agents_kit::workspace::UpdateWorkspaceRequest;
-    /// let current = workspace.info().await?;
-    /// workspace.close().await?;
-    /// let replacement = UpdateWorkspaceRequest::new(current.id().clone(), current.revision(),
-    ///     "renamed", current.context().clone(), current.defaults().clone())?;
-    /// let updated = agent.update_workspace(replacement).await?;
-    /// assert_eq!(updated.name(), "renamed");
-    /// assert_eq!(updated.revision(), current.revision() + 1);
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// # }.await;
-    /// # let cleanup = agent.shutdown().await;
-    /// # outcome?;
-    /// # cleanup?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// # })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See [`Self::new_workspace`] for a complete creation, revision-check, replacement and deletion workflow.
     fn update_workspace(
         &self,
         request: UpdateWorkspaceRequest,
@@ -761,48 +319,7 @@ pub trait AgentBackend: Send + Sync + 'static {
     /// missing/foreign identity, closed runtime, or precommit state/dependency/
     /// deadline failure.
     ///
-    /// # Examples
-    ///
-    /// This local Custom agent uses in-memory Lance and sends no network requests.
-    ///
-    /// ```
-    /// # use std::{num::NonZeroUsize, time::Duration};
-    /// # use agents_kit::{AgentBackend, AgentBuilder, AgentStorage, WorkspaceBackend};
-    /// # use agents_kit::config::{AgentConfig, CustomAgentConfig, CustomLoopLimits, CustomToolApproval};
-    /// # use agents_kit::{model::ModelSelector, tool::ToolSelection};
-    /// # use providers_kit::{Provider, ProviderConfig, config::{OllamaConfig, ProviderKind, TransportConfig}};
-    /// # use storage_kit::{StateStore, state::config::{LanceStateStoreConfig, StateStoreConfig}};
-    /// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-    /// # runtime.block_on(async {
-    /// # let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-    /// # let custom = CustomAgentConfig::new(ModelSelector::new("exact-model")?, ToolSelection::None,
-    /// #     CustomLoopLimits::new(4, 0, 1)?, CustomToolApproval::Deny)?;
-    /// # let config = AgentConfig::new(custom.into(), Duration::from_secs(10), NonZeroUsize::MIN)?;
-    /// # let provider = Provider::from_config(ProviderConfig::new(
-    /// #     ProviderKind::Ollama(OllamaConfig::local()), TransportConfig::default()))?;
-    /// # let agent = AgentBuilder::create(config, AgentStorage::new(store)).with_provider(provider).build().await?;
-    /// # let outcome = async {
-    /// # use agents_kit::workspace::{NewWorkspace, WorkspaceContext, WorkspaceDefaults,
-    /// #     WorkspaceRoot, WorkspaceRootAccess, WorkspaceExecutionPolicy, WorkspaceSandboxMode, WorkspaceNetworkAccess};
-    /// # let cwd = std::env::current_dir()?;
-    /// # let context = WorkspaceContext::new(cwd.clone(),
-    /// #     vec![WorkspaceRoot::new(cwd, WorkspaceRootAccess::ReadOnly)?],
-    /// #     WorkspaceExecutionPolicy::new(WorkspaceSandboxMode::ReadOnly, WorkspaceNetworkAccess::Disabled))?;
-    /// # let workspace = agent.new_workspace(NewWorkspace::new("review", context, WorkspaceDefaults::empty())?).await?;
-    /// use agents_kit::workspace::DeleteWorkspaceRequest;
-    /// let current = workspace.info().await?;
-    /// workspace.close().await?;
-    /// agent.delete_workspace(DeleteWorkspaceRequest::new(current.id().clone(), current.revision())?).await?;
-    /// assert!(agent.list_workspaces().await?.is_empty());
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// # }.await;
-    /// # let cleanup = agent.shutdown().await;
-    /// # outcome?;
-    /// # cleanup?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// # })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See [`Self::new_workspace`] for a complete creation, revision-check, replacement and deletion workflow.
     fn delete_workspace(
         &self,
         request: DeleteWorkspaceRequest,
@@ -820,19 +337,7 @@ pub trait AgentBackend: Send + Sync + 'static {
     /// selected external data is malformed, the runtime is closed, or a dependency
     /// operation fails or times out. An unavailable inventory is not an empty success.
     ///
-    /// # Examples
-    ///
-    /// This example requires a live Agent with its configured backend and storage
-    /// integrations; it is compiled without starting those services.
-    ///
-    /// ```no_run
-    /// use agents_kit::{AgentBackend, KitError};
-    /// use agents_kit::model::ModelInfo;
-    ///
-    /// async fn available_models<A: AgentBackend>(agent: &A) -> Result<Vec<ModelInfo>, KitError> {
-    ///     agent.list_models().await
-    /// }
-    /// ```
+    /// Caller implementations need no service. The [executable caller hierarchy](https://github.com/jecsand838/ai-kit/blob/main/agents-kit/tests/mock_hierarchy/mod.rs) exercises this contract with direct trait mocks; supplied backends retain their own prerequisites.
     fn list_models(&self) -> impl Future<Output = Result<Vec<ModelInfo>, KitError>> + Send + '_;
 
     /// Replaces the agent-scoped managed-knowledge source set.
@@ -849,21 +354,7 @@ pub trait AgentBackend: Send + Sync + 'static {
     /// knowledge integrations, closed or busy admission, dependency failures, or
     /// timeout. Unsupported scope or backend semantics fail explicitly.
     ///
-    /// # Examples
-    ///
-    /// This example requires a live Agent with its configured backend and storage
-    /// integrations; it is compiled without starting those services.
-    ///
-    /// ```no_run
-    /// use agents_kit::{AgentBackend, KitError};
-    /// use agents_kit::knowledge::IngestKnowledgeRequest;
-    ///
-    /// async fn replace_sources<A: AgentBackend>(agent: &A, request: IngestKnowledgeRequest)
-    ///     -> Result<(), KitError>
-    /// {
-    ///     agent.ingest_knowledge(request).await
-    /// }
-    /// ```
+    /// Caller implementations need no service. The [executable caller hierarchy](https://github.com/jecsand838/ai-kit/blob/main/agents-kit/tests/mock_hierarchy/mod.rs) exercises this contract with direct trait mocks; supplied backends retain their own prerequisites.
     fn ingest_knowledge(
         &self,
         request: IngestKnowledgeRequest,
@@ -882,33 +373,7 @@ pub trait AgentBackend: Send + Sync + 'static {
     /// restored; preserve the primary error and its supplementary cleanup facts
     /// and use durable state for later reconciliation.
     ///
-    /// # Examples
-    ///
-    /// This local Custom agent uses in-memory Lance and sends no network requests.
-    ///
-    /// ```
-    /// # use std::{num::NonZeroUsize, time::Duration};
-    /// # use agents_kit::{AgentBackend, AgentBuilder, AgentStorage, WorkspaceBackend};
-    /// # use agents_kit::config::{AgentConfig, CustomAgentConfig, CustomLoopLimits, CustomToolApproval};
-    /// # use agents_kit::{model::ModelSelector, tool::ToolSelection};
-    /// # use providers_kit::{Provider, ProviderConfig, config::{OllamaConfig, ProviderKind, TransportConfig}};
-    /// # use storage_kit::{StateStore, state::config::{LanceStateStoreConfig, StateStoreConfig}};
-    /// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-    /// # runtime.block_on(async {
-    /// # let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-    /// # let custom = CustomAgentConfig::new(ModelSelector::new("exact-model")?, ToolSelection::None,
-    /// #     CustomLoopLimits::new(4, 0, 1)?, CustomToolApproval::Deny)?;
-    /// # let config = AgentConfig::new(custom.into(), Duration::from_secs(10), NonZeroUsize::MIN)?;
-    /// # let provider = Provider::from_config(ProviderConfig::new(
-    /// #     ProviderKind::Ollama(OllamaConfig::local()), TransportConfig::default()))?;
-    /// # let agent = AgentBuilder::create(config, AgentStorage::new(store)).with_provider(provider).build().await?;
-    /// assert!(agent.list_workspaces().await?.is_empty());
-    /// // Consuming shutdown joins owned cleanup before this runtime is dropped.
-    /// agent.shutdown().await?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// # })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See the [local construction example](crate) and [`Self::new_workspace`] for child ownership.
     fn shutdown(self) -> impl Future<Output = Result<(), KitError>> + Send
     where
         Self: Sized;
@@ -922,39 +387,7 @@ pub trait AgentBackend: Send + Sync + 'static {
 /// Explicit shutdown consumes it and settles owned work. Drop alone offers no
 /// asynchronous cleanup guarantee.
 ///
-/// # Examples
-///
-/// This local Custom agent uses in-memory Lance and sends no network requests.
-///
-/// ```
-/// use std::{num::NonZeroUsize, time::Duration};
-/// use agents_kit::{AgentBackend, AgentBuilder, AgentStorage, WorkspaceBackend};
-/// use agents_kit::config::{AgentConfig, CustomAgentConfig, CustomLoopLimits, CustomToolApproval};
-/// use agents_kit::{model::ModelSelector, tool::ToolSelection};
-/// use providers_kit::{Provider, ProviderConfig, config::{OllamaConfig, ProviderKind, TransportConfig}};
-/// use storage_kit::{StateStore, state::config::{LanceStateStoreConfig, StateStoreConfig}};
-/// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-/// # runtime.block_on(async {
-/// let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-/// let custom = CustomAgentConfig::new(ModelSelector::new("exact-model")?, ToolSelection::None,
-///     CustomLoopLimits::new(4, 0, 1)?, CustomToolApproval::Deny)?;
-/// let config = AgentConfig::new(custom.into(), Duration::from_secs(10), NonZeroUsize::MIN)?;
-/// let provider = Provider::from_config(ProviderConfig::new(
-///     ProviderKind::Ollama(OllamaConfig::local()), TransportConfig::default()))?;
-/// let agent = AgentBuilder::create(config, AgentStorage::new(store)).with_provider(provider).build().await?;
-/// # let outcome = async {
-/// let identity = agent.id();
-/// let observed = agent.info().await;
-/// assert_eq!(observed?.id(), &identity);
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// # }.await;
-/// # let cleanup = agent.shutdown().await;
-/// # outcome?;
-/// # cleanup?;
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// # })?;
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// ```
+/// See [`AgentBackend`] and the [local construction example](crate) for usage.
 pub struct Agent<
     S: StateStoreBackend = storage_kit::StateStore,
     D: DatabaseBackend = storage_kit::Database,

@@ -45,14 +45,7 @@ pub struct JsonSchema {
 impl JsonSchema {
     /// Wraps a schema with strict rendering semantics.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use tools_kit::schema::{JsonSchema, SchemaStrictness};
-    /// let schema = JsonSchema::strict(serde_json::json!({"type":"object"}));
-    /// assert_eq!(schema.schema["type"], "object");
-    /// assert_eq!(schema.strictness, SchemaStrictness::Strict);
-    /// ```
+    /// See [`crate::schema::JsonSchema`] for a complete example.
     ///
     #[must_use]
     pub fn strict(schema: serde_json::Value) -> Self {
@@ -129,7 +122,10 @@ impl JsonSchema {
 /// # Examples
 ///
 /// ```
-/// let issue = tools_kit::schema::ValidationIssue { path: "/city".into(), message: "expected a string".into() };
+/// let issue = tools_kit::schema::ValidationIssue {
+///     path: "/city".into(),
+///     message: "expected a string".into(),
+/// };
 /// assert_eq!(issue.path, "/city");
 /// ```
 ///

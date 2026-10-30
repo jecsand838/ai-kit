@@ -28,7 +28,8 @@
 //! listing and prompting use the real native service, so this compiles without
 //! running as a doctest. No caller Provider is constructed for a native Agent.
 //!
-//! ```no_run
+//! ```no_run,standalone_crate
+//! #![recursion_limit = "256"] // Nested concrete async futures need this on Linux.
 //! use std::{num::NonZeroUsize, time::Duration};
 //! use agents_kit::{AgentBackend, AgentBuilder, AgentStorage, ConversationBackend, WorkspaceBackend};
 //! use agents_kit::config::{AgentConfig, CodexConfig};

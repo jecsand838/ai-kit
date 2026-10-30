@@ -1262,7 +1262,8 @@ pub trait WorkspaceBackend: Send + Sync + 'static {
     ///
     /// This local Custom agent uses in-memory Lance and sends no network requests.
     ///
-    /// ```
+    /// ```standalone_crate
+    /// #![recursion_limit = "256"] // Nested concrete async futures need this on Linux.
     /// # use std::{num::NonZeroUsize, time::Duration};
     /// # use agents_kit::{AgentBackend, AgentBuilder, AgentStorage, WorkspaceBackend};
     /// # use agents_kit::config::{AgentConfig, CustomAgentConfig, CustomLoopLimits, CustomToolApproval};

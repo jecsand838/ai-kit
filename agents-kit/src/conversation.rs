@@ -27,7 +27,8 @@
 //! is not an alternative final answer. Observer loss does not abort accepted work;
 //! the separate cancellation portion uses `abort`, then observes settlement.
 //!
-//! ```no_run
+//! ```no_run,standalone_crate
+//! #![recursion_limit = "256"] // Nested concrete async futures need this on Linux.
 //! use std::{num::NonZeroUsize, time::Duration};
 //! use agents_kit::{AgentBackend, AgentBuilder, AgentStorage, ConversationBackend, WorkspaceBackend};
 //! use agents_kit::config::{AgentConfig, CustomAgentConfig, CustomLoopLimits, CustomToolApproval};

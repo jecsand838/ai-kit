@@ -21,7 +21,8 @@
 //! the StateStore holds control-plane records; the Database holds source content.
 //! The request carries sources, never private retrieval context or an adapter.
 //!
-//! ```
+//! ```standalone_crate
+//! #![recursion_limit = "256"] // Nested concrete async futures need this on Linux.
 //! use std::{num::NonZeroUsize, time::Duration};
 //! use agents_kit::{AgentBackend, AgentBuilder, AgentStorage};
 //! use agents_kit::config::{AgentConfig, CustomAgentConfig, CustomLoopLimits, CustomToolApproval};

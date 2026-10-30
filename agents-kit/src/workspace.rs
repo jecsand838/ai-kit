@@ -1290,9 +1290,9 @@ pub trait WorkspaceBackend: Send + Sync + 'static {
     /// use agents_kit::conversation::NewConversation;
     /// let workspace_id = workspace.id();
     /// let result = async {
-    ///     let conversation = workspace.new_conversation(NewConversation::new(
+    ///     let conversation = Box::pin(workspace.new_conversation(NewConversation::new(
     ///         Some("Review".into()), None, Vec::new(),
-    ///     )?).await?;
+    ///     )?)).await?;
     ///     let id = conversation.id();
     ///     let info = conversation.info().await?;
     ///     assert_eq!(info.id(), &id);

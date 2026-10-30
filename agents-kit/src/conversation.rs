@@ -66,7 +66,7 @@
 //!         WorkspaceExecutionPolicy::new(WorkspaceSandboxMode::FullAccess, WorkspaceNetworkAccess::Enabled))?;
 //!     let workspace = agent.new_workspace(NewWorkspace::new("review", context, WorkspaceDefaults::empty())?).await?;
 //!     let work = async {
-//!         let conversation = workspace.new_conversation(NewConversation::new(None, None, vec![])?).await?;
+//!         let conversation = Box::pin(workspace.new_conversation(NewConversation::new(None, None, vec![])?)).await?;
 //!         let work = async {
 //!             let mut notifications = conversation.notification_stream()?;
 //!             let request = PromptRequest::new("Call inspect_status, then describe its outcome.")?

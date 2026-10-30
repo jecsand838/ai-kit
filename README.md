@@ -4,261 +4,105 @@
   <img src="docs/assets/ai-kit-logo.png" alt="ai-kit logo" width="220">
 </p>
 
-`ai-kit` is a Rust workspace of reusable Genaptic Kit building blocks.
-It contains five independently usable library crates:
+Rust libraries for model providers, data and state storage, executable tools,
+agent runtimes, and durable workflows. Install the crates you need individually;
+`ai-kit` is the workspace that develops them together.
 
-| Crate | Primary hierarchy | Purpose |
-| --- | --- | --- |
-| `providers-kit` | `Provider -> Model -> Session` | Portable model and provider resources across OpenAI, Anthropic, Gemini, and Ollama |
-| `storage-kit` | `Database`; `StateStore -> StateTransaction` | Portable data/search plus transactional control-plane storage |
-| `tools-kit` | `Toolset -> ToolHandler` | Executable Local/MCP tools and independent MCP serving |
-| `agents-kit` | `Agent -> Workspace -> Conversation` | Portable Codex, OpenCode, and provider-backed Custom agents |
-| `app-kit` | `App -> Workspace -> Workflow -> WorkflowRun` | Durable application and workflow orchestration over caller-built agents |
+| Crate and usage guide | Use it for | Package | API docs |
+| --- | --- | --- | --- |
+| [providers-kit](providers-kit/README.md) | Model generation, streaming, embeddings, batches, and sessions across OpenAI, Anthropic, Gemini, and Ollama | [crates.io](https://crates.io/crates/providers-kit) | [rustdoc](https://docs.rs/providers-kit/latest/providers_kit/) |
+| [storage-kit](storage-kit/README.md) | Data/search through `Database` and transactional control-plane records through `StateStore` | [crates.io](https://crates.io/crates/storage-kit) | [rustdoc](https://docs.rs/storage-kit/latest/storage_kit/) |
+| [tools-kit](tools-kit/README.md) | Executable Local/MCP tools and optional MCP serving | [crates.io](https://crates.io/crates/tools-kit) | [rustdoc](https://docs.rs/tools-kit/latest/tools_kit/) |
+| [agents-kit](agents-kit/README.md) | Codex, OpenCode, and provider-backed Custom agents with workspace and conversation lifecycles | [crates.io](https://crates.io/crates/agents-kit) | [rustdoc](https://docs.rs/agents-kit/latest/agents_kit/) |
+| [app-kit](app-kit/README.md) | Durable workflows, checkpoints, and recovery over caller-supplied storage and agents | [crates.io](https://crates.io/crates/app-kit) | [rustdoc](https://docs.rs/app-kit/latest/app_kit/) |
+
+## Get started
+
+The crates require Rust **1.99 or newer**. Repository development uses the pinned
+[rustup toolchain](rust-toolchain.toml).
+
+From your own Cargo project, add the crate you need. For example, to use the
+published `0.0.1` tools package:
+
+```bash
+cargo add tools-kit@=0.0.1
+```
+
+Start with the [Local tool example](https://docs.rs/tools-kit/latest/tools_kit/),
+which registers and invokes a tool without provider credentials or a service.
+It imports the backend traits for their methods and awaits toolset shutdown.
+The example also uses Tokio and serde_json; add those dependencies when copying
+it into your application.
+
+For a complete workflow example, follow the
+[App quickstart](app-kit/docs/QUICKSTART.md). From a repository checkout, run:
+
+```bash
+cargo run --locked -p app-kit --example history_and_recovery
+```
+
+This local example runs a workflow, restores a result, and reopens it in a new
+App generation without an LLM or credentials. It uses an in-memory store;
+persistence across process exit requires a persistent store.
+
+Storage and its consumers compile native dependencies, including when using
+`--no-default-features`. Follow the [build prerequisites](CONTRIBUTING.md#get-started)
+before building them.
+
+## Choose features and backends
+
+- Provider operations depend on the selected provider and model. Supplied
+  Sessions currently support OpenAI only; see the
+  [Provider guide](providers-kit/README.md) for support boundaries.
+- MCP serving requires tools-kit's optional `mcp-server` feature. The
+  [Tool guide](tools-kit/README.md) explains client and server ownership.
+- Storage includes LanceDB and embedded Lance in its base build. Additional
+  backends are opt-in; use the [Storage feature guide](storage-kit/README.md#features)
+  and its [testing guide](storage-kit/docs/testing.md) for supported selections.
+
+## Design and composition
+
+Each crate owns a distinct part of an application. Public backend traits let
+callers supply concrete implementations and test-local mocks while preserving
+associated child types. Applications receive ready storage and agents; they do
+not reconstruct lower-crate credentials or configuration.
+
+See the [workspace architecture](ARCHITECTURE.md) for ownership and public
+boundaries, and [direct-trait mock testing](docs/mock-testing.md) for executable
+composition examples. Detailed API contracts and workflows live in the linked
+crate guides and rustdoc.
 
 ## Versioning and compatibility
 
-The initial release version is `0.0.1`. Until `1.0.0`, backwards compatibility
-is not guaranteed: public APIs, behavior, and supported backends may change
-between releases. Pin exact versions when reproducibility matters, and review
-the release notes before upgrading.
+Backwards compatibility is **not guaranteed until `1.0.0`**. Public APIs,
+behavior, and supported backends may change between releases. Pin exact versions
+when reproducibility matters, and review the
+[release notes](https://github.com/jecsand838/ai-kit/releases) before upgrading.
+Repository `main` may contain changes that are not yet published; the package
+links above identify available versions and their released API documentation.
 
-## Public Design
+Maintainers publish selected revisions of `main` through the manual
+[release process](docs/RELEASING.md).
 
-Each supplied lower-crate handle is an opaque public value over private
-exhaustive enum dispatch. Built-ins remain concrete private variants.
-Provider, Storage, and Agent public RPITIT traits support direct static
-implementations without routing them through a supplied handle.
+## Contributing and testing
 
-The eleven lower-crate implementation traits are:
+Start with [CONTRIBUTING.md](CONTRIBUTING.md) for setup, local test environments,
+and issue/PR expectations. Read the [operating contract](AGENTS.md) and the
+owning crate's rules before changing code; the [skill catalog](SKILLS.md) lists
+useful development workflows.
 
-- `ProviderBackend`, `ModelBackend`, `SessionBackend`;
-- `DatabaseBackend`, `StateStoreBackend`, `StateTransactionBackend`;
-- `ToolsetBackend`, `ToolHandlerBackend`;
-- `AgentBackend`, `WorkspaceBackend`, `ConversationBackend`.
+Run the primary deterministic checks from the workspace root:
 
-App adds five concrete workflow behavior contracts under `workflow`:
-`ActionBackend`, `ConditionBackend`, `StateTyping`, `LifecycleHooks`, and
-`ChildExecutor`. The last uses an associated future for local non-Send child
-execution; other async contracts use RPITIT. Exact signatures belong to the
-owning specifications.
-
-Parent traits declare their child implementation with an associated type.
-There is only one public erased extension constructor:
-
-```text
-Toolset::from_backend
+```bash
+bash scripts/check_ci.sh
 ```
 
-ToolHandlers are returned by their Toolset and normalized privately. Provider,
-Storage, and Agent callers use direct static trait implementations and
-associated child types; their supplied handles contain built-ins only.
+These checks exercise direct-trait mocks and Custom Agent/App composition
+without provider credentials or running services. The
+[mock-testing guide](docs/mock-testing.md) describes their scope. Native
+integration, strict-live tests, and the separate clean-checkout proof remain
+part of [release qualification](docs/release-qualification.md).
 
-The workspace intentionally has no public conformance framework, durable
-lower-crate factory API, `LoopDriver`, hosted-tools dispatcher, public
-KnowledgeBase backend, storage-to-tool adapter, portable database realtime,
-general-purpose runtime registry, compatibility layer, or serialized trait
-object. App's narrow serialization-only field/tag codec registry does not
-erase workflow behavior or lower backends.
-
-## Public Modules
-
-Primary handles, backend traits, and errors remain at crate roots. Supporting
-types are organized into functional modules:
-
-```text
-providers_kit::{
-    config, generation, embedding, hosted, files, batch, models, session,
-    runtime, error
-}
-
-storage_kit::{
-    database::{config, catalog, data, query, index},
-    state::{config, record, transaction}
-}
-
-tools_kit::{declaration, execution, interaction, local, mcp, schema}
-
-agents_kit::{
-    config, identity, workspace, conversation, prompt, notification, model,
-    tool, knowledge, error
-}
-
-app_kit::{workflow}
-```
-
-This keeps the root surface small without exposing implementation trees.
-
-## Provider Workflow
-
-Construct a Provider from validated provider configuration, choose an exact
-provider-local `ModelId`, then perform generation, streaming, embeddings,
-batch submission, or session creation on the resulting Model.
-
-Portable function use is represented by validated `FunctionCall` and
-`FunctionResult` values. `ModelBackend::Continuation` associates replay state
-with the selected Model; the supplied `GenerationContinuation` keeps its native
-contents opaque. Callers retain the returned assistant message unchanged
-before adding a function-result message. Native provider envelopes never cross
-the public boundary.
-
-Portable hosted tools use the closed `HostedTool` enum inside
-`ProviderToolSpec`. The selected Model validates whether it supports the
-requested tool and returns an honest unsupported error when it cannot.
-
-## Tool Workflow
-
-Construct executable tools directly:
-
-```text
-Toolset::local(Vec<ToolRegistration>)
-Toolset::mcp(McpClientConfig)
-```
-
-List `ToolInfo` values, request an associated handler by `ToolName`, and drive
-that unique handler through its input/output state machine. Accepted
-model-visible failures are completed `ToolResult` values marked as errors;
-outer errors represent transport, protocol, cancellation, state, or lifecycle
-failure.
-
-MCP serving is a separate `McpServer` product. It serves any Toolset, owns and
-joins its server task, and never shuts down the underlying shared Toolset.
-
-## Storage Workflow
-
-`Database::connect(DatabaseConfig)` selects always-available LanceDB or opt-in
-SurrealDB. Its portable API contains only operations with honest
-matching semantics in at least two backend families.
-
-`StateStore::connect(StateStoreConfig)` selects always-available embedded Lance or opt-in
-Redb, PostgreSQL, or SQLite/Turso. `begin_transaction` returns an owned
-StateTransaction with read, write, delete, consuming commit, and consuming
-rollback behavior.
-
-StateStore actors preserve bounded admission, exact revision conflicts,
-rollback-on-drop, cancellation safety, and deterministic task/thread cleanup.
-Database and StateStore are independent products. Callers implement
-`DatabaseBackend` or `StateStoreBackend` directly, with the latter returning
-its own `StateTransactionBackend` associated type. A caller-owned enum may
-provide optional runtime composition without a Kit `Extension` variant.
-
-## Agent Workflow
-
-Agent construction requires `AgentConfig` plus `AgentStorage<S>`, where `S`
-is a direct `StateStoreBackend`. Custom agents receive a direct
-`P: ProviderBackend` implementation and already-built `T: ToolsetBackend`
-values, and may receive a `D: DatabaseBackend` for private managed knowledge. Native Codex and
-OpenCode builders may select the same static `P` type without constructing or
-owning a provider value, so native and Custom Agents can share one
-caller-owned provider enum in an App inventory. Built-in defaults preserve the
-ordinary `AgentStorage`, `Agent`, `Workspace`, and `Conversation` spellings.
-The Agent hierarchy retains `S`, `D`, `P`, and `T`; handlers remain exact
-`T::Handler` values. Neither toolsets nor their handlers need Clone.
-Reopening requires callers to resupply runtime values; agents-kit does not
-persist lower-crate credentials or reconstruction declarations.
-
-The direct static traits form `Agent -> Workspace -> Conversation`. Caller
-implementations return their own associated child types or use matching
-caller-owned enums. Supplied handles remain closed over Codex, OpenCode, and
-Custom.
-
-Custom owns the multi-turn prompt loop. It selects a Model, preserves
-provider continuation messages, executes ToolHandlers, publishes durable
-interaction notifications, applies agent-owned limits and approvals, and
-settles cancellation and cleanup within existing lifecycle deadlines.
-
-Codex and OpenCode protocol models remain private to their backend subtrees.
-All backends share the same public notification, conflict, close, shutdown,
-and durable-reopen contracts.
-
-## Application Workflow
-
-Callers supply an app control-plane `CS: StateStoreBackend` and transfer ready
-`A: AgentBackend` values through `AgentSpec<A>` into `AppConfig<CS, A>`.
-Callers choose `CS` and `A` explicitly; App does not require supplied lower
-handles or provide lower-type defaults. app-kit validates
-workflows, coordinates app workspaces, and persists only app-owned workflow
-state. It never reconstructs agents or inspects `AgentId`, lower credentials,
-protocols, or storage records.
-
-## Contributing
-
-Start with the [contributor guide](CONTRIBUTING.md) for development setup,
-local test environments, useful skills, and issue/PR expectations.
-
-The [operating contract](AGENTS.md) contains mandatory Rust, dependency,
-public-boundary, lifecycle, and testing rules, including their narrowly
-approved exceptions. Read it together with the owning crate's `AGENTS.md`
-before changing that crate. [Architecture](ARCHITECTURE.md) explains the
-ownership model; focused crate specifications define exact contracts.
-
-## Start Here
-
-- [Workspace architecture](ARCHITECTURE.md)
-- [Repository operating contract](AGENTS.md)
-- [Workspace skill catalog](SKILLS.md)
-- [agents-kit](agents-kit/README.md)
-- [providers-kit](providers-kit/README.md)
-- [storage-kit](storage-kit/README.md)
-- [tools-kit](tools-kit/README.md)
-- [app-kit](app-kit/README.md)
-
-Each crate's `AGENTS.md` owns its exact validation commands. The shared final
-gate covers formatting, clippy across supported feature lanes, docs/doctests,
-source/compile contracts, no-path/no-alias checks, all five strict-live
-verifiers, and a locked clean-checkout proof.
-
-For an explicit continuation using verified unchanged receipts, follow the
-[release qualification guide](docs/release-qualification.md). Reused and newly
-executed checks remain distinct, and every required gate remains represented.
-An explicitly requested `--skip-strict-live` pass runs the local gates and lists
-all five live suites as deferred; it does not qualify a full workspace release.
-
-The workspace completion wrapper (`bash scripts/verify_workspace_strict.sh`)
-requires full provider coverage by default. In full mode it validates the effective
-provider environment before any gate starts and rejects long-batch mode `0` unless
-`--skip-long-provider-batches` is explicitly supplied. That flag runs all five
-crate verifiers and every other workspace check, using the Provider verifier's
-existing partial mode to exclude only its four long OpenAI batch completion
-cases and the Anthropic inline, mixed-row and bounded-results completion cases.
-Anthropic cancellation, missing-resource and unsupported-input cases remain
-required. Success is reported as **QUALIFIED**, with all seven exclusions named;
-it does not establish full Provider coverage. Any remaining test or gate failure
-fails workspace completion. The flag overrides only the Provider child after
-its environment is sourced; malformed toggle values remain errors.
-The Storage verifier runs the selected deterministic lanes before starting
-services; its default is Lance-only, and `--all-backends` adds all eight lanes
-and the complete legal/illegal feature matrix. Any owned service-cleanup
-failure also fails the gate.
-Agent's [strict-testing contract](agents-kit/docs/STRICT_TESTING.md) and Provider's
-[strict-testing contract](providers-kit/docs/STRICT_TESTING.md) separate raw
-model-copy quality for exactly two OpenCode Question cases and two OpenAI
-Realtime cases. Kit correctness, correlation, output progress, authoritative
-terminals, complete grade receipts and cleanup remain mandatory. OpenCode also
-requires independently observed native/portable terminal-text fidelity and
-unchanged native Question descriptions; answer and description copying are
-reported as separate quality grades. Realtime requires new audio and nonblank transcription after successful
-function-result submission, without claiming native parity or semantic use of
-the result. Report every exact-copy grade, including nonblocking failures;
-these observations establish neither model-quality acceptance nor reliability.
-All other acceptance rules, including knowledge and recovery, remain unchanged.
-The locked clean-checkout proof is additionally required and recorded
-separately; the wrapper itself does not perform that snapshot validation.
-
-## Primary deterministic CI
-
-Run `bash scripts/check_ci.sh` for direct public-trait mocks and real Custom
-Agent/App composition tests. [Mock testing](docs/mock-testing.md) documents the
-separate target selection, coverage, receipts, and network-restricted runtime
-qualification. Native integration and strict-live release gates remain separate
-and required.
-
-Known defects and unresolved coverage belong in the
-[mock-testing bug ledger](docs/mock-testing-production-bugs.md). Dated results
-live in [PR #22 validation history](docs/pr22-validation.md); they do not certify
-the current checkout.
-
-## Releases
-
-Maintainers publish from `main` using the manual [release process](docs/RELEASING.md).
-The initial `0.0.1` release has an explicit qualification override; later releases
-require their recorded qualification evidence.
+For dependency risk and accepted advisories, see the
+[dependency security policy](docs/security-dependencies.md). See the repository
+[license](LICENSE) and each package's license metadata on crates.io.

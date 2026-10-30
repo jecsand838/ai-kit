@@ -1,8 +1,8 @@
 # app-kit
 
-This crate is preparing its initial `0.0.1` release. Backwards compatibility is
-not guaranteed until `1.0.0`; pin exact versions and review release notes before
-upgrading.
+This crate is in early development. Backwards compatibility is not guaranteed
+until `1.0.0`; pin exact versions and review the
+[release notes](https://github.com/jecsand838/ai-kit/releases) before upgrading.
 
 `app-kit` opens one application, materializes configured Agents into
 application workspaces, and runs compact versioned workflow definitions

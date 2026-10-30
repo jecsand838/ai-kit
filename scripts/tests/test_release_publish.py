@@ -77,6 +77,29 @@ class ReleaseTests(unittest.TestCase):
         self.change(QUALIFICATION_URL="https://example.invalid/evidence")
         self.assertEqual(self.release.admit()["qualification"], "MAINTAINER_DECLARED")
 
+    def test_normal_followup_verifies_packages_and_retains_qualification(self):
+        for name in Release.PACKAGES:
+            manifest = self.root / name / "Cargo.toml"
+            manifest.write_text(manifest.read_text().replace('0.0.1', '0.0.2'))
+        self.change(RELEASE_VERSION="0.0.2", INITIAL_RELEASE_OVERRIDE="false",
+                    QUALIFICATION_REVISION=self.SHA, QUALIFICATION_URL="https://example.invalid/v002-evidence")
+        self.assertEqual(self.release.admit()["qualification"], "MAINTAINER_DECLARED")
+        with patch.object(self.release, "command", side_effect=self.archive_command) as command, patch.object(
+                self.release, "registry", side_effect=[None, {"checksum": self.checksum()}]):
+            self.release.publish_package("providers-kit")
+        self.assertEqual(command.call_args_list[0].args[0],
+                         ["cargo", "package", "--locked", "-p", "providers-kit"])
+        self.assertEqual(command.call_args_list[1].args[0],
+                         ["cargo", "publish", "--locked", "--no-verify", "-p", "providers-kit"])
+        notes = self.release.notes()
+        self.assertIn(self.SHA, notes)
+        self.assertIn(self.env["QUALIFICATION_URL"], notes)
+        self.assertNotIn("initial 0.0.1 qualification override", notes)
+        self.assertNotIn("were deferred", notes)
+        for name in Release.PACKAGES:
+            self.assertIn(f"https://crates.io/crates/{name}/0.0.2", notes)
+            self.assertIn(f"https://docs.rs/{name}/0.0.2", notes)
+
     def test_wrong_head_or_dirty_checkout_fails_before_publication(self):
         with patch.object(self.release, "git", return_value="b" * 40):
             with self.assertRaisesRegex(ReleaseError, "exactly match"):
@@ -118,7 +141,7 @@ class ReleaseTests(unittest.TestCase):
     def archive_command(self, arguments, check=True):
         if arguments[1] == "package":
             name = arguments[arguments.index("-p") + 1]
-            archive = self.root / "target/release-build/package" / f"{name}-0.0.1.crate"
+            archive = self.root / "target/release-build/package" / f"{name}-{self.release.version}.crate"
             archive.parent.mkdir(parents=True, exist_ok=True)
             archive.write_bytes(b"deterministic fixture archive")
         return subprocess.CompletedProcess(arguments, 0)

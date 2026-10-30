@@ -406,7 +406,7 @@ cargo package --locked -p storage-kit --no-default-features --allow-dirty --list
 cargo package --locked -p storage-kit --no-default-features --allow-dirty \
   > "$LANCE_EVIDENCE/package-verification.log" 2>&1
 mkdir "$LANCE_EVIDENCE/package"
-tar -xf "$CARGO_TARGET_DIR/package/storage-kit-0.0.1.crate" \
+tar -xf "$CARGO_TARGET_DIR/package/storage-kit-0.0.2.crate" \
   -C "$LANCE_EVIDENCE/package"
 ```
 

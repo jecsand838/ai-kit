@@ -49,10 +49,10 @@ class WorkspaceWiringGuardTests(unittest.TestCase):
         self.write(
             "Cargo.toml",
             '[workspace.dependencies]\n'
-            'agents-kit = { path = "agents-kit", version = "=0.0.1" }\n'
-            'providers-kit = { path = "providers-kit", version = "0.0.1" }\n'
-            'storage-kit = { path = "storage-kit", version = "0.0.1", default-features = false }\n'
-            'tools-kit = { path = "tools-kit", version = "0.0.1" }\n',
+            'agents-kit = { path = "agents-kit", version = "=0.0.2" }\n'
+            'providers-kit = { path = "providers-kit", version = "0.0.2" }\n'
+            'storage-kit = { path = "storage-kit", version = "0.0.2", default-features = false }\n'
+            'tools-kit = { path = "tools-kit", version = "0.0.2" }\n',
         )
         self.guard("check_no_path_wiring.sh", True)
 

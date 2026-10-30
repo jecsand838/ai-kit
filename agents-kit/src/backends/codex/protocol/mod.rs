@@ -41,7 +41,7 @@ use crate::{
 use jsonrpc::{CodexRequestError, CodexRpc};
 
 const SELECTED_CODEX_VERSION: &str = "0.163.0";
-const AGENTS_KIT_CLIENT_VERSION: &str = "0.0.1";
+const AGENTS_KIT_CLIENT_VERSION: &str = "0.0.2";
 const MAX_MODEL_PAGES: usize = 1_024;
 const MAX_PROTOCOL_PAGES: usize = 1_024;
 const PROTOCOL_PAGE_LIMIT: usize = 100;

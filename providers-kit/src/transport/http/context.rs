@@ -9,7 +9,7 @@ use crate::transport::auth::AuthScheme;
 
 use super::execution::RequestExecution;
 
-const PROVIDER_USER_AGENT: &str = "providers-kit/0.0.1";
+const PROVIDER_USER_AGENT: &str = "providers-kit/0.0.2";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum AuthMode {

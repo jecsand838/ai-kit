@@ -275,3 +275,55 @@ its own fresh receipt.
 while this defect was isolated. The scoped repair removes the demonstrated
 read-observation failure. It does not qualify App maximum capacity, native
 persistence recovery, strict-live services, or the full workspace release.
+
+## APP-002 — cancellation can be missed while execution reloads state
+
+**Scope.** This defect was discovered by the required native-backed
+`child_executor_contract` integration target, outside the primary direct-trait
+mock lane. The user separately authorized its repair on
+`documentation-improvements`; the existing cancellation deadlines and assertions
+remain required.
+
+**Observed failure.** On unchanged `main` at `8184f485d8ac517976409e2953355753c155ee0a`,
+an isolated `shutdown_waits_for_the_original_cancelled_child_commit_receipt` run
+failed its four-second cancellation-receipt observation. Isolated runs on the
+documentation branch also exposed intermittent behavior. Phase diagnostics
+showed parent cancellation returning by approximately 43 milliseconds into the
+observation, followed by no child cancellation receipt before the deadline. The
+two-second shutdown observation was never reached. Retained logs are
+`target/cancellation-timeout/main-isolated-01.log` and
+`target/cancellation-timeout/branch-diagnostic-04.log`.
+
+**Diagnosis and repair.** Execution consumed a run notification before reloading
+state but did not register its next listener until after that asynchronous read.
+A cancellation broadcast during the read could therefore be lost. Returning an
+older, valid snapshot left the original execution waiting for another change.
+Notification registration now belongs to publication admission for both initial
+loads and reloads. Either the read observes the cancellation or its retained
+listener prompts another observation. Native commit receipts, cancellation
+ownership, retry policy, public APIs and deadlines are unchanged.
+
+**Required regression.**
+`parent_cancellation_survives_a_stale_read_after_child_completion` in
+[child_executor_contract.rs](../app-kit/tests/child_executor_contract.rs) completes
+one original child and retains another unpolled. Its caller-supplied store holds
+one real parent-read response after the native read has released ownership.
+Public cancellation must commit while that response remains held. After releasing
+the stale response, the test requires the original child cancellation receipt
+within four seconds, before any shutdown can supply another wake. It also checks
+exact child identity, no second-child effect or premature parent reduction, and
+retained receipt ownership through the existing two-second shutdown observation.
+The pre-fix run failed the receipt assertion in
+`target/cancellation-timeout/stale-read-red.log`; its secondary cleanup failure
+is retained rather than reclassified. The original recovered-case test remains
+enabled alongside this deterministic regression.
+
+The final fixture repeats the same pre-fix assertion failure in
+`target/cancellation-timeout/stale-read-final-fixture-red.log` without the
+secondary runtime panic. On failure only, it wakes its original retained
+executor with an explicit error before shutdown; the failed cancellation
+observation still determines the test result.
+
+Current source-specific passes, failures and outstanding qualification belong
+to the PR validation evidence. Reproducing this race and passing a focused
+regression do not establish full App or workspace qualification.

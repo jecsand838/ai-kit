@@ -121,6 +121,13 @@ every contextual recovery fence remain unchanged.
 Failed reads or validation consume rollback; failed rollback preserves the primary
 public error and vetoes retry, with sanitized secondary tracing.
 
+Execution owners register for run changes before admitting both initial reads
+and reloads. The registration remains live while the read is pending, so a
+concurrent cancellation still triggers another observation when that read returns
+an older checkpoint. Consuming a notification cannot leave the next read without
+a registered observer. This ordering does not cancel or replace accepted native
+mutation receipts.
+
 Storage transactions contain only transaction-owned awaits. Lower calls occur
 outside storage mutation authority. Runtime resources are bounded and owned;
 no task, thread, channel, lock, or lower handle is persisted or detached.

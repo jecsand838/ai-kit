@@ -26,6 +26,7 @@ state typing, lifecycle hooks and child execution are App-owned behavior seams.
 
 Executable examples:
 
+- [Checkpoint restore and completed-result reopen, in memory or across processes](../examples/history_and_recovery.rs)
 - [Native state workflow without an Agent service](../examples/pure_state.rs)
 - [Caller action inputs, partial output and explicit writes](../examples/actions_and_inputs.rs)
 - [Partial, committed and halted events followed by resume](../examples/controls_and_streaming.rs)
@@ -33,7 +34,6 @@ Executable examples:
 - [Resolved child tasks, a concrete executor and synchronous Pipeline](../examples/child_composition.rs)
 - [Immutable and typed state](../examples/state.rs)
 - [Graph composition and export](../examples/graph.rs)
-- [Restore, source deletion and App reopen](../examples/history_and_recovery.rs)
 - [Long performance consumer: execution, history, cancellation and delayed observers](../examples/performance.rs),
   run explicitly through [the release workload commands](STRICT_TESTING.md#run-explicit-release-workloads).
 

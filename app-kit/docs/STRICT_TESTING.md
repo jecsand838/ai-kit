@@ -86,8 +86,8 @@ bash app-kit/scripts/check.sh
 The [App check script](../scripts/check.sh) owns the exact target inventory. It
 checks formatting and all targets, runs the deterministic/public-contract
 tests and doctests with the explicit workload-scope selection below, executes the
-seven short service-free examples, then checks
-clippy, rustdoc and the workspace alias/path restrictions. Keep additions in
+seven short service-free examples and the persistent history example contract,
+then checks clippy, rustdoc and the workspace alias/path restrictions. Keep additions in
 that script so an ordinary App check cannot silently omit new behavior. The
 zero-runtime `compile_contract` target remains compiled by all-target checking
 and Clippy. `prepare_contract` has an explicit four-case inventory and outcome
@@ -112,6 +112,21 @@ Compile the examples with `cargo check --locked -p app-kit --examples`, and run 
 service-free executables to verify their assertions; `multi_agent` needs the
 configured real services described in its source. The long performance consumer
 has a separate explicit release run below.
+
+The App check builds the actual `history_and_recovery` executable. The
+[history example contract](../tests/history_and_recovery_contract.py) discovers
+its path from Cargo JSON and invokes it in separate processes over test-owned
+Lance directories. It
+checks the unchanged memory mode, persistent create/reopen, repeated exact
+reopen, cleanup after a valid but absent exact-run lookup, refusal to overwrite
+an existing destination, invalid arguments and missing, malformed or oversized
+lookup data. Missing or empty storage must fail without replacement.
+Each invocation is bounded; children are killed and reaped before test-directory
+cleanup on failure or timeout. The build and process-test stages run fresh even
+during receipt continuation because their artifact-discovery file is local to
+that invocation. This proves reopening completed state and lineage after normal
+process exit; the required process-loss cases above retain responsibility for
+unfinished-work recovery.
 
 ## Select routine, diagnostic and maximum-capacity evidence
 

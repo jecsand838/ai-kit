@@ -87,6 +87,12 @@ release_stage app.doctest cargo test --locked -p app-kit --doc -- --nocapture
 for example in state graph pure_state actions_and_inputs controls_and_streaming history_and_recovery child_composition; do
     release_stage "app.example.${example}" cargo run --locked -p app-kit --example "${example}"
 done
+# The executable discovery output belongs to this invocation, so neither its
+# build nor the process-level persistence proof may reuse an earlier receipt.
+release_stage_fresh app.example.history_and_recovery.build cargo build --locked -p app-kit --example history_and_recovery \
+    --message-format=json > "${PREPARE_EVIDENCE}/history-example.jsonl"
+release_stage_fresh app.example.history_and_recovery.persistence \
+    python3 app-kit/tests/history_and_recovery_contract.py "${PREPARE_EVIDENCE}/history-example.jsonl"
 release_stage app.clippy cargo clippy --locked -p app-kit --all-targets -- -D warnings
 release_stage app.rustdoc env RUSTDOCFLAGS="-D warnings -D missing-docs" cargo doc --locked -p app-kit --no-deps
 release_stage app.no_aliases bash scripts/check_no_type_aliases.sh

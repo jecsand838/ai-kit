@@ -324,6 +324,25 @@ secondary runtime panic. On failure only, it wakes its original retained
 executor with an explicit error before shutdown; the failed cancellation
 observation still determines the test result.
 
+**Separate fixture correction.** The first full App check with the notification
+repair passed all 81 child-executor cases, then failed three notification
+projection cases with revoked runtime ownership. Those three cases passed on
+unchanged `8184f48`. Task-specific diagnostics showed their globally armed
+synthetic corruption reaching both the intended snapshot observer and a
+background execution reload. The latter correctly treats permanent read
+corruption as fatal. The projection fixture now confines its fault to the
+intended observer, as its existing orphan-target cases already did. A separate
+task must still read the unchanged native checkpoint and ledger records through
+both direct and transactional storage paths. Existing rejection, no-replay,
+eventual resolution, and fatal-background-read assertions remain required.
+The failed full invocation and causal trace are retained in
+`target/cancellation-timeout/app-check-fixed.log` and
+`target/cancellation-timeout/notification-projection-trace.log`; correcting the
+fixture does not turn those earlier runs into passes.
+The added separate-reader integrity assertion failed against the global fault
+in `target/cancellation-timeout/notification-fixture-scope-red.log`, before the
+observer restriction was applied.
+
 Current source-specific passes, failures and outstanding qualification belong
 to the PR validation evidence. Reproducing this race and passing a focused
 regression do not establish full App or workspace qualification.

@@ -174,38 +174,42 @@ pub trait AgentBackend: Send + Sync + 'static {
     /// let workspace = agent.new_workspace(
     ///     NewWorkspace::new("review", context, WorkspaceDefaults::empty())?,
     /// ).await?;
-    /// use agents_kit::workspace::{UpdateWorkspaceRequest, WorkspaceUpdateReadiness, DeleteWorkspaceRequest};
+    /// use agents_kit::workspace::{UpdateWorkspaceRequest, DeleteWorkspaceRequest};
     /// let observed = async {
     ///     let current = workspace.info().await?;
-    ///     assert_eq!(current.revision(), 1);
     ///     let request = UpdateWorkspaceRequest::new(current.id().clone(), current.revision(),
     ///         "renamed", current.context().clone(), current.defaults().clone())?;
     ///     // Preflight observes the still-open workspace runtime.
-    ///     assert_eq!(agent.check_workspace_update(&request).await?, WorkspaceUpdateReadiness::Ready);
+    ///     let readiness = agent.check_workspace_update(&request).await?;
     ///     // Readiness is advisory: it does not reserve or change the revision.
-    ///     assert_eq!(agent.workspace_info(current.id().clone()).await?.revision(), current.revision());
-    ///     Ok::<_, agents_kit::KitError>((current, request))
+    ///     let observed_revision = agent.workspace_info(current.id().clone()).await?.revision();
+    ///     Ok::<_, agents_kit::KitError>((current, request, readiness, observed_revision))
     /// }.await;
     /// let close = workspace.close().await;
-    /// let (current, request) = match (observed, close) {
+    /// let (current, request, readiness, observed_revision) = match (observed, close) {
     ///     (Ok(value), Ok(())) => Ok(value),
     ///     (Err(primary), Err(cleanup)) => Err(primary.with_supplementary(cleanup)),
     ///     (Err(error), _) | (_, Err(error)) => Err(error),
     /// }?;
     /// // Revision-checked mutations also accept a quiescent, closed workspace.
     /// let updated = agent.update_workspace(request).await?;
-    /// assert_eq!(updated.name(), "renamed");
-    /// assert_eq!(updated.revision(), current.revision() + 1);
     /// agent.delete_workspace(DeleteWorkspaceRequest::new(updated.id().clone(), updated.revision())?).await?;
-    /// assert!(agent.list_workspaces().await?.is_empty());
-    /// # Ok::<(), agents_kit::KitError>(())
+    /// let remaining = agent.list_workspaces().await?;
+    /// # Ok::<_, agents_kit::KitError>((current, readiness, observed_revision, updated, remaining))
     /// # }.await;
     /// # let cleanup = agent.shutdown().await;
-    /// # match (outcome, cleanup) {
+    /// # let (current, readiness, observed_revision, updated, remaining) = match (outcome, cleanup) {
     /// #     (Err(primary), Err(cleanup)) => Err(primary.with_supplementary(cleanup)),
     /// #     (Err(error), _) | (_, Err(error)) => Err(error),
-    /// #     (Ok(()), Ok(())) => Ok(()),
+    /// #     (Ok(observed), Ok(())) => Ok(observed),
     /// # }?;
+    /// // Check the observations after consuming shutdown has settled cleanup.
+    /// assert_eq!(current.revision(), 1);
+    /// assert_eq!(readiness, agents_kit::workspace::WorkspaceUpdateReadiness::Ready);
+    /// assert_eq!(observed_revision, current.revision());
+    /// assert_eq!(updated.name(), "renamed");
+    /// assert_eq!(updated.revision(), current.revision() + 1);
+    /// assert!(remaining.is_empty());
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// # })?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())

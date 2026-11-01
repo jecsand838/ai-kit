@@ -7,11 +7,19 @@ use crate::error::ValidationViolation;
 ///
 /// The policy applies only to request shapes that the Kit marks safe to replay,
 /// and every retry still runs inside the same shared logical request deadline.
+/// Defaults allow up to three retries, with a 250-millisecond initial backoff
+/// and a four-second maximum backoff. Use [`RetryPolicy::new`] to change these
+/// settings or disable retries.
 ///
 /// # Examples
 /// ```rust
-/// let policy = providers_kit::config::RetryPolicy::default();
-/// let _ = policy;
+/// use std::time::Duration;
+/// use providers_kit::config::RetryPolicy;
+/// assert_eq!(
+///     RetryPolicy::default(),
+///     RetryPolicy::new(3, Duration::from_millis(250), Duration::from_secs(4))?,
+/// );
+/// # Ok::<(), providers_kit::KitError>(())
 /// ```
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RetryPolicy {

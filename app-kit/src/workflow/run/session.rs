@@ -138,6 +138,8 @@ impl<
     ///
     /// # Example
     ///
+    /// Setup follows [the dedicated-runtime cleanup pattern](crate#local-workflow).
+    ///
     /// ```
     /// use agents_kit::Agent;
     /// use app_kit::{App, AppConfig, Shutdown, WorkspaceConfig};
@@ -145,6 +147,7 @@ impl<
     /// use storage_kit::{StateStore, state::config::{LanceStateStoreConfig, StateStoreConfig}};
     /// let runtime = tokio::runtime::Builder::new_multi_thread()
     ///     .worker_threads(2).enable_all().build()?;
+    /// # let result = (|| -> Result<_, Box<dyn std::error::Error>> {
     /// # let store = runtime.block_on(StateStore::connect(
     /// #     StateStoreConfig::lance(LanceStateStoreConfig::memory()),
     /// # ))?;
@@ -175,8 +178,18 @@ impl<
     /// #     timeout: std::time::Duration::from_secs(5),
     /// # }));
     /// # if let Err(error) = &cleanup { eprintln!("App shutdown: {error}"); }
+    /// # drop(app);
     /// # let snapshot = outcome?;
     /// # cleanup?;
+    /// # Ok(snapshot)
+    /// # })();
+    /// # let metrics = runtime.metrics();
+    /// # runtime.block_on(async {
+    /// #     while metrics.num_alive_tasks() != 0 {
+    /// #         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    /// #     }
+    /// # });
+    /// # let snapshot = result?;
     /// assert_eq!(snapshot.state.values()["count"], 1);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
@@ -1404,7 +1417,7 @@ impl<
     /// # use storage_kit::state::config::{LanceStateStoreConfig, StateStoreConfig};
     /// #
     /// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-    /// # runtime.block_on(async {
+    /// # let result = runtime.block_on(async {
     /// # let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
     /// # let definition = WorkflowDefinition::parse(r#"{
     /// #     "schema":"app-kit.workflow/v2", "id":"counter", "revision":"r1",
@@ -1424,19 +1437,26 @@ impl<
     /// #     let mut run = workflow.prepare(WorkflowState::default()).await?;
     ///     let execution = run.execution(ExecutionOptions::default()).await?;
     ///     let parked = execution.abort().await?;
-    ///     assert_eq!(parked.state.values()["count"], 0);
-    ///     assert!(parked.last_action_ordinal.is_none());
     ///     let completed = run.execution(ExecutionOptions::default()).await?.finish().await?;
-    ///     assert_eq!(completed.state.values()["count"], 1);
     ///     #
-    /// #     Ok::<(), Box<dyn std::error::Error>>(())
+    /// #     Ok::<_, Box<dyn std::error::Error>>((parked, completed))
     /// # }.await;
     /// # let cleanup = app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }).await;
     /// # if let Err(error) = &cleanup { eprintln!("App shutdown: {error}"); }
-    /// # outcome?;
+    /// # let observed = outcome?;
     /// # cleanup?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// # })?;
+    /// # Ok::<_, Box<dyn std::error::Error>>(observed)
+    /// # });
+    /// # let metrics = runtime.metrics();
+    /// # runtime.block_on(async {
+    /// #     while metrics.num_alive_tasks() != 0 {
+    /// #         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    /// #     }
+    /// # });
+    /// # let (parked, completed) = result?;
+    /// assert_eq!(parked.state.values()["count"], 0);
+    /// assert!(parked.last_action_ordinal.is_none());
+    /// assert_eq!(completed.state.values()["count"], 1);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub async fn abort(mut self) -> Result<RunSnapshot, AppError> {

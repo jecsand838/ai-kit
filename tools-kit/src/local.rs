@@ -617,13 +617,17 @@ impl ToolInvocationContext {
 
     /// Requests a JSON form value from the caller and waits for its resolution.
     ///
-    /// When `schema_validation` is true, the submitted object is validated
-    /// before it is returned.
+    /// The tool must declare the form interaction capability. When
+    /// `schema_validation` is true, it must also declare form schema validation;
+    /// the submitted object is then validated before it is returned.
     /// Form replies must be objects even when schema validation is disabled.
     ///
     /// # Errors
     ///
-    /// Returns [`ToolError::UndeclaredInteraction`] for an absent form capability, validation errors for malformed replies or schemas, or the corresponding decline, cancellation, or closure error.
+    /// Returns [`ToolError::UndeclaredInteraction`] when form capability is absent,
+    /// or when schema validation is requested without the corresponding capability.
+    /// Malformed replies or schemas produce validation errors; decline,
+    /// cancellation, and closure retain their corresponding errors.
     ///
     /// # Examples
     ///

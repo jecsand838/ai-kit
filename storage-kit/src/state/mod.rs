@@ -74,9 +74,10 @@
 //! use storage_kit::{StateStore, StateStoreBackend, StateTransactionBackend};
 //! use storage_kit::state::config::{LanceStateStoreConfig, StateStoreConfig};
 //! use storage_kit::state::record::{StateKey, StateRecord};
+//! let runtime = tokio::runtime::Runtime::new()?;
 //! let directory = std::env::temp_dir().join(format!("ai-kit-state-doc-{}", uuid::Uuid::new_v4()));
 //! std::fs::create_dir(&directory)?;
-//! let result = tokio::runtime::Runtime::new()?.block_on(async {
+//! let result = runtime.block_on(async {
 //!     let config = StateStoreConfig::lance(LanceStateStoreConfig::directory(&directory));
 //!     let store = StateStore::connect(config.clone()).await?;
 //!     let key = StateKey::new("settings", "theme")?;
@@ -85,15 +86,20 @@
 //!     transaction.commit().await?;
 //!     drop(store);
 //!     let reopened = StateStore::connect(config).await?;
-//!     let observed = reopened.load(key).await?.expect("durable record");
-//!     assert_eq!(observed.record.value.as_ref(), &serde_json::json!("dark"));
-//!     assert_eq!(observed.revision.get(), 1);
+//!     let observed = reopened.load(key).await?;
 //!     drop(reopened);
-//!     Ok::<(), storage_kit::StateStoreError>(())
+//!     Ok::<_, storage_kit::StateStoreError>(observed)
 //! });
+//! drop(runtime);
 //! let cleanup = std::fs::remove_dir_all(&directory);
-//! result?; // Preserve the operation error if cleanup also failed.
+//! if let (Err(_), Err(cleanup)) = (&result, &cleanup) {
+//!     eprintln!("Directory cleanup also failed: {cleanup}");
+//! }
+//! let observed = result?; // Preserve the operation error if cleanup also failed.
 //! cleanup?;
+//! let observed = observed.expect("durable record");
+//! assert_eq!(observed.record.value.as_ref(), &serde_json::json!("dark"));
+//! assert_eq!(observed.revision.get(), 1);
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!

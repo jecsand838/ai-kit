@@ -81,10 +81,13 @@
 //! # }
 //! ```
 //!
-//! For manual audio, send `TurnStart`, one or more raw `Audio` chunks in the exact
-//! configured format, then `TurnEnd`; receive until a native terminal event. A raw
-//! chunk is not a whole-turn or automatic flush operation. Output wording is
-//! model-authored, not a Kit exact-copy guarantee.
+//! For manual audio, configure input audio and manual turn detection as shown in
+//! [`SessionConfig::with_turn_detection`]. Send `TurnStart`, one or more raw
+//! `Audio` chunks in the exact configured format, then `TurnEnd`; receive until a
+//! native terminal event. The supplied OpenAI session also supports automatic
+//! voice activity detection; its explicit turn controls require manual mode.
+//! A raw chunk is not a whole-turn or automatic flush operation. Output wording
+//! is model-authored, not a Kit exact-copy guarantee.
 
 use std::collections::BTreeSet;
 use std::convert::Infallible;
@@ -227,12 +230,24 @@ impl SessionConfig {
 
     /// Selects provider-managed or caller-managed turn boundaries.
     ///
+    /// Automatic detection is the default. The supplied OpenAI session uses
+    /// native voice activity detection in automatic mode. Its explicit
+    /// [`SessionInput::TurnStart`] and [`SessionInput::TurnEnd`] controls require
+    /// manual mode and configured audio input; session opening validates this
+    /// combination. Building the configuration performs no service request.
+    ///
     /// # Examples
     ///
     /// ```
     /// use providers_kit::session::{SessionConfig, SessionTurnDetection};
-    /// let config = SessionConfig::default().with_turn_detection(SessionTurnDetection::Manual);
+    /// let config = SessionConfig::default();
+    /// assert_eq!(config.turn_detection(), SessionTurnDetection::Automatic);
+    /// let config = config
+    ///     .with_input_audio("audio/pcm;rate=24000", false)?
+    ///     .with_turn_detection(SessionTurnDetection::Manual);
     /// assert_eq!(config.turn_detection(), SessionTurnDetection::Manual);
+    /// assert_eq!(config.input_audio_format(), Some("audio/pcm;rate=24000"));
+    /// # Ok::<(), providers_kit::KitError>(())
     /// ```
     ///
     #[must_use]
@@ -436,11 +451,16 @@ pub enum SessionInput {
     /// A completed client-function result.
     FunctionResult(FunctionResult),
     /// Starts a caller-managed audio turn.
+    ///
+    /// The supplied OpenAI session requires manual detection and configured audio
+    /// input; see [`SessionConfig::with_turn_detection`] for the configuration
+    /// example. Automatic voice activity detection does not use this explicit control.
     TurnStart,
     /// Ends caller-managed audio input or, where supported, explicitly ends
     /// the currently submitted automatic-audio segment.
     ///
-    /// The supplied OpenAI backend requires manual turn detection.
+    /// The supplied OpenAI backend requires an open manual audio turn, begun
+    /// with [`SessionInput::TurnStart`].
     /// This input does not complete or cancel the provider response.
     TurnEnd,
     /// Cancels the active provider response when supported.

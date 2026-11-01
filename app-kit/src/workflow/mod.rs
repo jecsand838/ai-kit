@@ -43,7 +43,8 @@
 //!   the selected run's retained history.
 //!
 //! The complete example below joins these three tasks without credentials, an
-//! Agent value or a subprocess.
+//! Agent value or a subprocess. Its setup follows
+//! [the dedicated-runtime cleanup pattern](crate#local-workflow).
 //!
 //! ```
 //! use agents_kit::Agent;
@@ -54,7 +55,7 @@
 //! use storage_kit::state::config::{LanceStateStoreConfig, StateStoreConfig};
 //! use std::{num::NonZeroUsize, time::Duration};
 //! # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-//! # runtime.block_on(async {
+//! # let result = runtime.block_on(async {
 //! let store = StateStore::connect(StateStoreConfig::lance(LanceStateStoreConfig::memory())).await?;
 //! let definition = WorkflowDefinition::parse(r#"{
 //!     "schema":"app-kit.workflow/v2","id":"counter","revision":"r1",
@@ -70,8 +71,12 @@
 //!     }).await?;
 //!     let workflow = workspace.workflow("counter".parse()?).await?;
 //!     let mut run = workflow.prepare(WorkflowState::default()).await?;
-//!     assert!(matches!(run.snapshot().await?.status, RunStatus::Paused));
-//!     assert_eq!(run.checkpoint(CheckpointSelector::Sequence(0)).await?.state.values()["count"], 0);
+//!     if !matches!(run.snapshot().await?.status, RunStatus::Paused)
+//!         || run.checkpoint(CheckpointSelector::Sequence(0)).await?.state.values().get("count")
+//!             != Some(&serde_json::json!(0))
+//!     {
+//!         return Err(AppError::Integration("prepared run must be paused at count zero".into()).into());
+//!     }
 //!     let mut execution = run.execution(ExecutionOptions::default()).await?;
 //!     let mut committed_actions = 0;
 //!     while let Some(event) = execution.next().await? {
@@ -80,40 +85,61 @@
 //!         }
 //!     }
 //!     let terminal = execution.finish().await?;
-//!     assert!(matches!(terminal.status, RunStatus::Succeeded));
-//!     assert_eq!(terminal.state.values()["count"], 1);
-//!     assert_eq!(committed_actions, 1);
+//!     if !matches!(terminal.status, RunStatus::Succeeded)
+//!         || terminal.state.values().get("count") != Some(&serde_json::json!(1))
+//!         || committed_actions != 1
+//!     {
+//!         return Err(AppError::Integration("one committed action must finish at count one".into()).into());
+//!     }
 //!
 //!     // Read history in bounded pages.
 //!     let first = run.history(None, NonZeroUsize::new(1).unwrap()).await?;
-//!     assert_eq!(first.checkpoints[0].sequence, 0);
-//!     let cursor = first.next.expect("the action has a later checkpoint");
+//!     if !first.checkpoints.first().is_some_and(|checkpoint| checkpoint.sequence == 0) {
+//!         return Err(AppError::Integration("history must begin at checkpoint zero".into()).into());
+//!     }
+//!     let cursor = first.next.ok_or_else(|| AppError::Integration("the action must have a later checkpoint".into()))?;
 //!     let later = run.history(Some(cursor), NonZeroUsize::new(10).unwrap()).await?;
-//!     assert!(later.checkpoints.iter().any(|checkpoint| checkpoint.action_ordinal == Some(0)));
+//!     if !later.checkpoints.iter().any(|checkpoint| checkpoint.action_ordinal == Some(0)) {
+//!         return Err(AppError::Integration("history must retain the committed action".into()).into());
+//!     }
 //!     // Restore an independent run, then remove both histories explicitly.
 //!     let mut copy = workflow.restore(RestoreOptions {
 //!         source: RunSelector::Latest(run.id().clone()), checkpoint: CheckpointSelector::Action(0),
 //!         overrides: WorkflowState::default(), position: ResumePosition::AfterCompleted, fallback: None,
 //!     }).await?;
-//!     assert_ne!(copy.id(), run.id());
-//!     assert!(matches!(copy.snapshot().await?.status, RunStatus::Paused));
+//!     if copy.id() == run.id() || !matches!(copy.snapshot().await?.status, RunStatus::Paused) {
+//!         return Err(AppError::Integration("restore must create an independent paused run".into()).into());
+//!     }
 //!     let copied = copy.checkpoint(CheckpointSelector::Sequence(0)).await?;
-//!     assert_eq!(copied.state.values()["count"], 1);
-//!     assert_eq!(&copied.lineage.as_ref().unwrap().source, run.id());
+//!     if copied.state.values().get("count") != Some(&serde_json::json!(1))
+//!         || !copied.lineage.as_ref().is_some_and(|lineage| &lineage.source == run.id())
+//!     {
+//!         return Err(AppError::Integration("restore must preserve state and source lineage".into()).into());
+//!     }
 //!     let copied_terminal = copy.execution(ExecutionOptions::default()).await?.finish().await?;
-//!     assert!(matches!(copied_terminal.status, RunStatus::Succeeded));
+//!     if !matches!(copied_terminal.status, RunStatus::Succeeded) {
+//!         return Err(AppError::Integration("restored run must finish successfully".into()).into());
+//!     }
 //!     copy.delete(copied_terminal.checkpoint).await?;
 //!     let original_id = run.id().clone();
 //!     run.delete(terminal.checkpoint).await?;
-//!     assert!(matches!(workflow.open_run(RunSelector::Latest(original_id)).await, Err(AppError::NotFound(_))));
-//!     Ok::<(), Box<dyn std::error::Error>>(())
+//!     let deleted = matches!(workflow.open_run(RunSelector::Latest(original_id)).await, Err(AppError::NotFound(_)));
+//!     Ok::<_, Box<dyn std::error::Error>>(deleted)
 //! }.await;
 //! let cleanup = app.shutdown(Shutdown::CancelAndDrain { timeout: Duration::from_secs(5) }).await;
 //! if let Err(error) = &cleanup { eprintln!("App shutdown: {error}"); }
-//! outcome?; // An execution error remains primary if shutdown also reports an error.
+//! let deleted = outcome?; // Preserve an execution error if shutdown also fails.
 //! cleanup?;
-//! # Ok::<(), Box<dyn std::error::Error>>(())
-//! # })?;
+//! # Ok::<_, Box<dyn std::error::Error>>(deleted)
+//! # });
+//! # let metrics = runtime.metrics();
+//! # runtime.block_on(async {
+//! #     while metrics.num_alive_tasks() != 0 {
+//! #         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+//! #     }
+//! # });
+//! # let deleted = result?;
+//! assert!(deleted);
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!
@@ -1369,7 +1395,7 @@ impl<
     /// # use storage_kit::state::config::{LanceStateStoreConfig, StateStoreConfig};
     /// #
     /// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-    /// # runtime.block_on(async {
+    /// # let result = runtime.block_on(async {
     /// # let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
     /// # let definition = WorkflowDefinition::parse(r#"{
     /// #     "schema":"app-kit.workflow/v2", "id":"counter", "revision":"r1",
@@ -1390,16 +1416,23 @@ impl<
     ///     let before = run.snapshot().await?;
     ///     run.cancel(before.checkpoint).await?;
     ///     let cancelled = run.wait().await?;
-    ///     assert!(matches!(cancelled.status, RunStatus::Cancelled));
     ///     #
-    /// #     Ok::<(), Box<dyn std::error::Error>>(())
+    /// #     Ok::<_, Box<dyn std::error::Error>>(cancelled)
     /// # }.await;
     /// # let cleanup = app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }).await;
     /// # if let Err(error) = &cleanup { eprintln!("App shutdown: {error}"); }
-    /// # outcome?;
+    /// # let cancelled = outcome?;
     /// # cleanup?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// # })?;
+    /// # Ok::<_, Box<dyn std::error::Error>>(cancelled)
+    /// # });
+    /// # let metrics = runtime.metrics();
+    /// # runtime.block_on(async {
+    /// #     while metrics.num_alive_tasks() != 0 {
+    /// #         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    /// #     }
+    /// # });
+    /// # let cancelled = result?;
+    /// assert!(matches!(cancelled.status, RunStatus::Cancelled));
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub async fn cancel(&self, expected_checkpoint: u64) -> Result<RunSnapshot, AppError> {
@@ -1430,7 +1463,7 @@ impl<
     /// # use storage_kit::state::config::{LanceStateStoreConfig, StateStoreConfig};
     /// #
     /// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-    /// # runtime.block_on(async {
+    /// # let result = runtime.block_on(async {
     /// # let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
     /// # let definition = WorkflowDefinition::parse(r#"{
     /// #  "schema":"app-kit.workflow/v2","id":"counter","revision":"r1",
@@ -1448,20 +1481,28 @@ impl<
     ///     use app_kit::workflow::{Interaction, Resolution};
     ///     let run = workflow.start(ExecutionOptions::default()).await?;
     ///     let waiting = run.wait().await?;
-    ///     let Interaction::Input { sequence, generation, .. } = waiting.interactions[0] else {
-    ///         panic!("the input workflow must request a value");
+    ///     let Some(Interaction::Input { sequence, generation, .. }) = waiting.interactions.first() else {
+    ///         return Err(app_kit::AppError::Integration("the input workflow must request a value".into()).into());
     ///     };
-    ///     run.resolve(sequence, generation, Resolution::Input(serde_json::json!("ownership"))).await?;
-    ///     assert_eq!(run.wait().await?.state.values()["answer"], "ownership");
+    ///     run.resolve(*sequence, *generation, Resolution::Input(serde_json::json!("ownership"))).await?;
+    ///     let terminal = run.wait().await?;
     ///     #
-    /// #     Ok::<(), Box<dyn std::error::Error>>(())
+    /// #     Ok::<_, Box<dyn std::error::Error>>(terminal)
     /// # }.await;
     /// # let cleanup = app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }).await;
     /// # if let Err(error) = &cleanup { eprintln!("App shutdown: {error}"); }
-    /// # outcome?;
+    /// # let terminal = outcome?;
     /// # cleanup?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// # })?;
+    /// # Ok::<_, Box<dyn std::error::Error>>(terminal)
+    /// # });
+    /// # let metrics = runtime.metrics();
+    /// # runtime.block_on(async {
+    /// #     while metrics.num_alive_tasks() != 0 {
+    /// #         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    /// #     }
+    /// # });
+    /// # let terminal = result?;
+    /// assert_eq!(terminal.state.values()["answer"], "ownership");
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub async fn resolve(

@@ -97,8 +97,12 @@
 //!                     }
 //!                 }
 //!             }).await.map_err(|_| agents_kit::KitError::timeout("caller observation deadline"))??;
-//!             assert!(output.recv().await.is_none());
-//!             assert!(!completion.output().trim().is_empty());
+//!             if output.recv().await.is_some() {
+//!                 return Err(agents_kit::KitError::protocol("completed output stream did not fuse"));
+//!             }
+//!             if completion.output().trim().is_empty() {
+//!                 return Err(agents_kit::KitError::invalid_state("example expected nonempty terminal text"));
+//!             }
 //!             println!("Authoritative answer: {}", completion.output());
 //!
 //!             // Admission succeeds before cancellation. Dropping `output` would not cancel.

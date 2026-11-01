@@ -34,41 +34,55 @@
 //!
 //! # Local workflow
 //!
+//! Resource-owning examples use a dedicated Tokio runtime with no unrelated tasks.
+//! Their setup retains operation errors, attempts shutdown, drops all App handles,
+//! and keeps that runtime driven until its tasks settle before reporting failure.
+//! This settlement may outlive the shutdown observation timeout; timing out does
+//! not cancel the finalizer. Runtime-wide task counts are unsuitable for a shared
+//! application runtime, where the application must keep its owners driven instead.
+//!
 //! ```
 //! use agents_kit::Agent;
 //! use app_kit::{App, AppConfig, Shutdown, WorkspaceConfig};
 //! use app_kit::workflow::{ExecutionOptions, RunStatus, WorkflowDefinition};
 //! use storage_kit::{StateStore, state::config::{LanceStateStoreConfig, StateStoreConfig}};
-//! # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-//! # runtime.block_on(async {
-//! let store = StateStore::connect(StateStoreConfig::lance(LanceStateStoreConfig::memory())).await?;
-//! let definition = WorkflowDefinition::parse(r#"{
-//!     "schema":"app-kit.workflow/v2", "id":"counter", "revision":"r1",
-//!     "state":{"count":0}, "required":["count"],
-//!     "reducers":{"count":"reject_concurrent"}, "entry":"increment",
-//!     "nodes":[{"id":"increment","step":{"kind":"state","mutations":[
-//!         {"kind":"increment","target":"count","value":{"kind":"literal","value":1}}
-//!     ]}}], "routes":{}
-//! }"#)?;
-//! let mut app = App::open(AppConfig::<_, Agent>::new(store, Vec::new(), vec![definition])).await?;
-//! let outcome = async {
-//!     let workspace = app.create_workspace(WorkspaceConfig {
-//!         name: Some("local counter".into()), root: std::env::current_dir()?,
-//!     }).await?;
-//!     let workflow = workspace.workflow("counter".parse()?).await?;
-//!     let run = workflow.start(ExecutionOptions::default()).await?;
-//!     Ok::<_, Box<dyn std::error::Error>>(run.wait().await?)
-//! }.await;
-//! let cleanup = app.shutdown(Shutdown::CancelAndDrain {
-//!     timeout: std::time::Duration::from_secs(5),
-//! }).await;
-//! if let Err(error) = &cleanup { eprintln!("App shutdown: {error}"); }
-//! let snapshot = outcome?; // Preserve the operation error after attempting shutdown.
-//! cleanup?;
+//! let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
+//! let result = runtime.block_on(async {
+//!     let store = StateStore::connect(StateStoreConfig::lance(LanceStateStoreConfig::memory())).await?;
+//!     let definition = WorkflowDefinition::parse(r#"{
+//!         "schema":"app-kit.workflow/v2", "id":"counter", "revision":"r1",
+//!         "state":{"count":0}, "required":["count"],
+//!         "reducers":{"count":"reject_concurrent"}, "entry":"increment",
+//!         "nodes":[{"id":"increment","step":{"kind":"state","mutations":[
+//!             {"kind":"increment","target":"count","value":{"kind":"literal","value":1}}
+//!         ]}}], "routes":{}
+//!     }"#)?;
+//!     let mut app = App::open(AppConfig::<_, Agent>::new(store, Vec::new(), vec![definition])).await?;
+//!     let outcome = async {
+//!         let workspace = app.create_workspace(WorkspaceConfig {
+//!             name: Some("local counter".into()), root: std::env::current_dir()?,
+//!         }).await?;
+//!         let workflow = workspace.workflow("counter".parse()?).await?;
+//!         let run = workflow.start(ExecutionOptions::default()).await?;
+//!         Ok::<_, Box<dyn std::error::Error>>(run.wait().await?)
+//!     }.await;
+//!     let cleanup = app.shutdown(Shutdown::CancelAndDrain {
+//!         timeout: std::time::Duration::from_secs(5),
+//!     }).await;
+//!     if let Err(error) = &cleanup { eprintln!("App shutdown: {error}"); }
+//!     let snapshot = outcome?; // Preserve the operation error after attempting shutdown.
+//!     cleanup?;
+//!     Ok::<_, Box<dyn std::error::Error>>(snapshot)
+//! });
+//! let metrics = runtime.metrics();
+//! runtime.block_on(async {
+//!     while metrics.num_alive_tasks() != 0 {
+//!         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+//!     }
+//! });
+//! let snapshot = result?;
 //! assert!(matches!(snapshot.status, RunStatus::Succeeded));
 //! assert_eq!(snapshot.state.values()["count"], 1);
-//! # Ok::<(), Box<dyn std::error::Error>>(())
-//! # })?;
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 
@@ -240,6 +254,7 @@ pub enum Shutdown {
 ///
 /// Replacement and deletion use the latest observed revision as their fence.
 /// This example uses real process-local storage without configuring Agents or workflows.
+/// Its setup follows [the dedicated-runtime cleanup pattern](crate#local-workflow).
 ///
 /// ```
 /// use agents_kit::Agent;
@@ -247,7 +262,7 @@ pub enum Shutdown {
 /// use storage_kit::{StateStore, state::config::{LanceStateStoreConfig, StateStoreConfig}};
 /// use std::{num::NonZeroUsize, time::Duration};
 /// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-/// # runtime.block_on(async {
+/// # let result = runtime.block_on(async {
 /// let store = StateStore::connect(
 ///     StateStoreConfig::lance(LanceStateStoreConfig::memory()),
 /// ).await?;
@@ -259,24 +274,33 @@ pub enum Shutdown {
 ///     }).await?;
 ///     let before = workspace.snapshot().await?;
 ///     let reopened = app.workspace(workspace.id().clone()).await?;
-///     assert_eq!(reopened.snapshot().await?.revision, before.revision);
+///     let reopened_revision = reopened.snapshot().await?.revision;
 ///     let updated = workspace.replace(before.revision, WorkspaceConfig {
 ///         name: Some("reviewed".into()), root,
 ///     }).await?;
-///     assert!(updated.revision > before.revision);
-///     assert_eq!(updated.config.name.as_deref(), Some("reviewed"));
 ///     workspace.delete(updated.revision).await?;
-///     assert!(app.list_workspaces(None, NonZeroUsize::new(10).unwrap()).await?.is_empty());
-///     Ok::<(), Box<dyn std::error::Error>>(())
+///     let remaining = app.list_workspaces(None, NonZeroUsize::new(10).unwrap()).await?;
+///     Ok::<_, Box<dyn std::error::Error>>((before, reopened_revision, updated, remaining))
 /// }.await;
 /// let cleanup = app.shutdown(Shutdown::CancelAndDrain {
 ///     timeout: Duration::from_secs(5),
 /// }).await;
 /// if let Err(error) = &cleanup { eprintln!("App shutdown: {error}"); }
-/// outcome?;
+/// let observed = outcome?;
 /// cleanup?;
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// # })?;
+/// # Ok::<_, Box<dyn std::error::Error>>(observed)
+/// # });
+/// # let metrics = runtime.metrics();
+/// # runtime.block_on(async {
+/// #     while metrics.num_alive_tasks() != 0 {
+/// #         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+/// #     }
+/// # });
+/// # let (before, reopened_revision, updated, remaining) = result?;
+/// assert_eq!(reopened_revision, before.revision);
+/// assert!(updated.revision > before.revision);
+/// assert_eq!(updated.config.name.as_deref(), Some("reviewed"));
+/// assert!(remaining.is_empty());
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 pub struct Workspace<
@@ -450,7 +474,9 @@ impl<
     ///         let workflow = workspace.workflow("counter".parse()?).await?;
     ///         let run = workflow.start(ExecutionOptions::default()).await?;
     ///         let terminal = run.wait().await?;
-    ///         assert!(matches!(terminal.status, RunStatus::Succeeded));
+    ///         if !matches!(terminal.status, RunStatus::Succeeded) {
+    ///             return Err(app_kit::AppError::Integration("source run did not succeed".into()));
+    ///         }
     ///         Ok::<_, app_kit::AppError>((workspace.id().clone(), run.id().clone()))
     ///     }.await;
     ///     let shutdown = app.shutdown(Shutdown::CancelAndDrain { timeout: Duration::from_secs(5) }).await;
@@ -466,11 +492,17 @@ impl<
     ///         let workflow = workspace.workflow("counter".parse()?).await?;
     ///         let mut run = workflow.open_run(RunSelector::Latest(run_id.clone())).await?;
     ///         let terminal = run.snapshot().await?;
-    ///         assert!(matches!(terminal.status, RunStatus::Succeeded));
-    ///         assert_eq!(terminal.state.values()["count"], 1);
+    ///         if !matches!(terminal.status, RunStatus::Succeeded)
+    ///             || terminal.state.values().get("count") != Some(&serde_json::json!(1))
+    ///         {
+    ///             return Err(app_kit::AppError::Integration("reopened result changed".into()));
+    ///         }
     ///         run.delete(terminal.checkpoint).await?;
-    ///         assert!(matches!(workflow.open_run(RunSelector::Latest(run_id)).await,
-    ///             Err(app_kit::AppError::NotFound(_))));
+    ///         if !matches!(workflow.open_run(RunSelector::Latest(run_id)).await,
+    ///             Err(app_kit::AppError::NotFound(_)))
+    ///         {
+    ///             return Err(app_kit::AppError::Integration("deleted history remains readable".into()));
+    ///         }
     ///         Ok::<(), app_kit::AppError>(())
     ///     }.await;
     ///     let shutdown = reopened.shutdown(Shutdown::CancelAndDrain { timeout: Duration::from_secs(5) }).await;
@@ -480,7 +512,14 @@ impl<
     ///     shutdown?;
     ///     Ok::<(), Box<dyn std::error::Error>>(())
     /// });
-    /// // A shutdown timeout bounds the waiter, not necessarily the owned finalizer.
+    /// // A shutdown timeout bounds observation, not the owned finalizer.
+    /// // This dedicated runtime has no unrelated tasks; keep it driven until all settle.
+    /// let metrics = runtime.metrics();
+    /// runtime.block_on(async {
+    ///     while metrics.num_alive_tasks() != 0 {
+    ///         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    ///     }
+    /// });
     /// // Remove the directory only after both generations demonstrably settled.
     /// if result.is_ok() {
     ///     std::fs::remove_dir_all(&directory)?;

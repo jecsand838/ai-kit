@@ -52,21 +52,21 @@
 //!     agent.ingest_knowledge(IngestKnowledgeRequest::new(vec![])?
 //!         .with_scope(KnowledgeScope::Agent)).await?; // retains the runbook
 //!     let invalid = agent.ingest_knowledge(IngestKnowledgeRequest::new(vec![])?
-//!         .with_scope(KnowledgeScope::Conversation)).await.unwrap_err();
-//!     assert_eq!(invalid.kind(), agents_kit::error::ErrorKind::InvalidInput);
+//!         .with_scope(KnowledgeScope::Conversation)).await;
 //!     let request = agents_kit::prompt::PromptRequest::new("How are incidents escalated?")?
 //!         .with_knowledge_policy(KnowledgePolicy::only(vec![KnowledgeScope::Agent])?)?;
-//!     assert_eq!(request.knowledge_policy(),
-//!         Some(&KnowledgePolicy::Only(vec![KnowledgeScope::Agent])));
 //!     // Sending this request through a Conversation requires the configured model.
-//!     Ok::<(), agents_kit::KitError>(())
+//!     Ok::<_, agents_kit::KitError>((invalid, request))
 //! }.await;
 //! let shutdown = agent.shutdown().await;
-//! match (outcome, shutdown) {
+//! let (invalid, request) = match (outcome, shutdown) {
 //!     (Err(primary), Err(cleanup)) => Err(primary.with_supplementary(cleanup)),
 //!     (Err(error), _) | (_, Err(error)) => Err(error),
-//!     (Ok(()), Ok(())) => Ok(()),
+//!     (Ok(observed), Ok(())) => Ok(observed),
 //! }?;
+//! assert_eq!(invalid.unwrap_err().kind(), agents_kit::error::ErrorKind::InvalidInput);
+//! assert_eq!(request.knowledge_policy(),
+//!     Some(&KnowledgePolicy::Only(vec![KnowledgeScope::Agent])));
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! # })?;
 //! # Ok::<(), Box<dyn std::error::Error>>(())

@@ -217,6 +217,11 @@ impl SqliteStateStoreConfig {
 
     /// Replaces the operation timeout.
     ///
+    /// Stores whole milliseconds, discarding any fractional millisecond. Values
+    /// beyond `u64::MAX` milliseconds saturate at that bound. This setter does not
+    /// validate: zero and sub-millisecond durations store zero, which
+    /// [`Self::validate`] and [`crate::StateStore::connect`] reject.
+    ///
     /// # Examples
     ///
     /// ```rust

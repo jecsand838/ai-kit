@@ -12,6 +12,10 @@ use crate::StorageError;
 /// values. Use this wrapper for SurrealDB root passwords and PostgreSQL
 /// StateStore authentication.
 ///
+/// `Debug` redacts the password, but Serde serialization writes its exact secret
+/// value. Treat serialized configurations containing this wrapper as credentials;
+/// serialization does not redact them.
+///
 /// # Examples
 ///
 /// ```

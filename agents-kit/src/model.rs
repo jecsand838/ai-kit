@@ -73,7 +73,10 @@
 //!             (Err(primary), Err(cleanup)) => Err(primary.with_supplementary(cleanup)),
 //!             (Err(error), _) | (_, Err(error)) => Err(error),
 //!         }?;
-//!         assert!(!response.output().trim().is_empty()); // progress, not a prescribed wording grade
+//!         // Report a failed progress check through the cleanup path; no wording is prescribed.
+//!         if response.output().trim().is_empty() {
+//!             return Err(agents_kit::KitError::invalid_state("example expected nonempty terminal text"));
+//!         }
 //!         Ok::<(), agents_kit::KitError>(())
 //!     }.await;
 //!     let close = workspace.close().await; // also runs if conversation creation failed

@@ -1157,7 +1157,10 @@ impl Default for ReasoningConfig {
     }
 }
 
-/// Policy for how strongly the allowed-tool list should be enforced.
+/// Whether tool use is optional or required within the allowed-tool subset.
+///
+/// Both modes retain only the named tools. The selected model validates whether
+/// it supports the requested policy.
 ///
 /// # Examples
 /// ```rust
@@ -1166,9 +1169,9 @@ impl Default for ReasoningConfig {
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AllowedToolMode {
-    /// Lets the provider decide how strictly to enforce the allowed-tool list.
+    /// Lets the provider decide whether to call a tool from the allowed subset.
     Auto,
-    /// Requires the provider to keep tool calls inside the allowed-tool list.
+    /// Requires at least one tool call from the allowed subset.
     Required,
 }
 
@@ -1232,7 +1235,9 @@ pub enum ToolChoice {
     None,
     /// Requires at least one tool call before completion.
     Required,
-    /// Allows any declared tool to be called.
+    /// Requires at least one call to a declared tool.
+    ///
+    /// Supplied backends apply the same required-call policy as [`ToolChoice::Required`].
     Any,
     /// Forces the provider to call one specific tool.
     Tool {
@@ -1241,7 +1246,7 @@ pub enum ToolChoice {
     },
     /// Restricts tool calls to an explicit subset of tool names.
     Allowed {
-        /// Enforcement mode for the allowed-tool subset.
+        /// Whether a call from the allowed subset is optional or required.
         mode: AllowedToolMode,
         /// Tool names that remain eligible for selection.
         names: Vec<String>,

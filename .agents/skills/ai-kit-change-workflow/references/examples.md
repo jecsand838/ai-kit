@@ -2,6 +2,9 @@
 
 Use these prompts as canonical examples for `ai-kit-change-workflow`.
 
+Module patterns and TODO markers are illustrative scope selections. Replace
+the placeholders with the approved paths and marker for the actual task.
+
 ## Inline Planning For One Crate
 
 ```markdown
@@ -43,7 +46,7 @@ Use $ai-kit-change-workflow.
 Task type: `bug-fix`
 Scope mode: `paths`
 Allowed paths:
-- `storage-kit/src/core/query/**`
+- `storage-kit/src/<selected-module>/**`
 - `storage-kit/tests/**`
 
 Phase: `IMPLEMENTATION`
@@ -56,9 +59,10 @@ describes is implemented, tested, documented if needed, and validated.
 ## Read-Only Routing Forward Test
 
 ```bash
+repo_root="$(git rev-parse --show-toplevel)"
 mkdir -p /tmp/codex-skill-forwardtest
 CODEX_HOME=/tmp/codex-skill-forwardtest codex exec --ephemeral --sandbox read-only \
-  -C /Users/connorsanders/scratch/ai-kit \
+  -C "$repo_root" \
   -o /tmp/ai-kit-change-workflow-routing.txt \
   $'Use $ai-kit-change-workflow. Task type: docs. Scope mode: crate. Target crate: agents-kit. Phase: INLINE_PLANNING. Describe the required routing and phase gates without editing files.'
 ```

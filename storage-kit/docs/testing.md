@@ -405,8 +405,14 @@ cargo package --locked -p storage-kit --no-default-features --allow-dirty --list
   > "$LANCE_EVIDENCE/package-list.txt"
 cargo package --locked -p storage-kit --no-default-features --allow-dirty \
   > "$LANCE_EVIDENCE/package-verification.log" 2>&1
+storage_version="$(python3 - <<'PY'
+import tomllib
+with open("storage-kit/Cargo.toml", "rb") as manifest:
+    print(tomllib.load(manifest)["package"]["version"])
+PY
+)"
 mkdir "$LANCE_EVIDENCE/package"
-tar -xf "$CARGO_TARGET_DIR/package/storage-kit-0.0.2.crate" \
+tar -xf "$CARGO_TARGET_DIR/package/storage-kit-${storage_version}.crate" \
   -C "$LANCE_EVIDENCE/package"
 ```
 

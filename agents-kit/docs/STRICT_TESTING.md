@@ -58,9 +58,8 @@ Conversation<S,D,P,T>` preservation. Supplied-handle behavior requires the
 corresponding public trait in scope; compile-negative cases guard against
 duplicate inherent forwarding contracts.
 
-The disposable downstream Cargo roots select the same approved Geo 0.32.0
-source as the workspace root: Cargo does not inherit patches from dependency
-manifests. These test projects copy the workspace lockfile and resolve offline.
+The disposable downstream Cargo roots depend on the local `agents-kit` package,
+copy the workspace lockfile, and resolve dependencies offline.
 Compile-negative checks must reach rustc diagnostics; dependency-resolution
 failures cannot prove a rejected public API. Module placement and invariant-field
 privacy have separate cases with the corresponding compiler error codes.
@@ -560,7 +559,7 @@ inspection. Run exactly once, with a nonempty inventory and outer process
 supervision; do not retry an unchanged failure:
 
 ```bash
-cargo +1.94.1 test --locked -p agents-kit --test codex_direct_live -- \
+cargo test --locked -p agents-kit --test codex_direct_live -- \
   codex_direct_interactive_answer_is_exact --exact --nocapture --test-threads=1
 ```
 

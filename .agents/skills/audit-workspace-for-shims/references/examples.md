@@ -9,10 +9,11 @@ about read-only or Plan Mode constraints.
 Use a fresh temporary Codex home and capture the last message to a file:
 
 ```bash
+repo_root="$(git rev-parse --show-toplevel)"
 mkdir -p /tmp/codex-skill-forwardtest
 CODEX_HOME=/tmp/codex-skill-forwardtest codex exec --ephemeral --sandbox read-only \
-  -C /Users/connorsanders/scratch/ai-kit \
-  -o /tmp/<output-file>.txt \
+  -C "$repo_root" \
+  -o /tmp/audit-workspace-for-shims-routing.txt \
   $'Use $audit-workspace-for-shims ...'
 ```
 
@@ -92,9 +93,10 @@ Expected checks:
 ## Read-Only Or Plan-Mode Honesty Check
 
 ```bash
+repo_root="$(git rev-parse --show-toplevel)"
 mkdir -p /tmp/codex-skill-forwardtest
 CODEX_HOME=/tmp/codex-skill-forwardtest codex exec --ephemeral --sandbox read-only \
-  -C /Users/connorsanders/scratch/ai-kit \
+  -C "$repo_root" \
   -o /tmp/audit-workspace-for-shims-readonly.txt \
   $'Use $audit-workspace-for-shims to audit providers-kit for shims and annotate every confirmed issue with DELETE(providers-kit shim audit) markers.'
 ```

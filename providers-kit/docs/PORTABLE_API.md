@@ -63,9 +63,10 @@ decomposition route.
 The portable Session vocabulary does not imply identical native support.
 `SessionInput::TurnEnd` ends caller-managed audio input or, where supported,
 explicitly ends the currently submitted automatic-audio segment. It does not
-complete or cancel the provider response. The supplied OpenAI backend retains
-its manual-only boundary. Raw `Audio` remains one chunk, with no
-implicit end marker.
+complete or cancel the provider response. The supplied OpenAI backend accepts
+`TurnStart` only with manual turn detection and `TurnEnd` only for an open manual
+audio turn; automatic turn detection uses native VAD. Raw `Audio` remains one
+chunk, with no implicit end marker.
 OpenAI Realtime implements explicit `SessionInput::CancelTurn`. The portable
 cancellation vocabulary remains available to caller-owned Session implementations.
 

@@ -352,6 +352,26 @@ durable reopen and forced process-loss recovery. A config containing two Agents
 and zero workflows proves none of this. Real sequential approvals exercise two
 notification targets during one prompt.
 
+Parallel isolation diagnostics collect native tool receipts before question
+resolution and before terminal assertions, and compare bounded normalized Agent
+markers with App state without printing their contents. Keep exact expected
+marker, prompt, resolution and no-replay assertions blocking. Missing capture
+does not establish lower/App equality or identify a model failure.
+Both configured marker schemas constrain canonical UUID shape and length without
+expected marker values. Before constructing native owners, a preflight validates
+canonical and malformed controls against both schemas in the actual workflow
+definition. These controls establish schema validation, not native delivery.
+
+The cancellation caller must handle an `Unknown` published after its initial
+cancellation receipt within the original 120-second terminal budget. A real
+pending-question case holds the forwarded abort, proves the later unsafe-to-retry
+`Unknown`, then starts that caller from the original receipt. Exact current
+sequence/generation acceptance with empty values must yield `Cancelled`, unchanged
+state, one prompt and no question submission. Conflicts require fresh observation,
+not an assumed settlement or prompt retry. Release the gate before independent
+App/service cleanup on every observed outcome. This is controlled real-service
+timing evidence, not a change to App's caller-owned uncertainty policy.
+
 Strict-live uses real configured providers, native Codex/OpenCode processes,
 Ollama and each owning storage/tool lane with unique test-owned durable domains.
 The exact verifier env/service/version/model contracts are authoritative.

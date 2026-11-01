@@ -99,7 +99,7 @@ live runs retain the exact crash command.
 Fixture validation is reported separately from App behavior: retain the two
 `OwnedChild` cleanup cases, receipt-page lifetime probe and real-Lance
 conflict-controller test while their machinery remains in use. Test-local
-controls do not establish real-Agent behavior; all 18 live cases and the canonical
+controls do not establish real-Agent behavior; all 19 live cases and the canonical
 process-recovery assertions remain required.
 
 The [documentation tests](../tests/docs_examples.rs) check required guide and
@@ -428,7 +428,7 @@ bash app-kit/scripts/verify_strict_live.sh
 The verifier loads the ignored environment, runs the precheck, then runs the
 whole App check script. That invocation executes all four `prepare_contract`
 cases, including the canonical four-boundary LanceDB process-loss case exactly
-once, before the verifier executes all 18 `workflow_live` cases serially. A
+once, before the verifier executes all 19 `workflow_live` cases serially. A
 missing or unhealthy prerequisite fails. Do not convert that failure into a skip
 or replace the backend with a recording or scripted server.
 
@@ -456,6 +456,32 @@ reaping bound; the synchronous Drop fallback retains its two-second bound.
 If the fallback cannot obtain a reap receipt because of an operating-system
 error or expiry, it reports that uncertainty and retains the owned paths. That
 failing fallback is not a guaranteed join or successful cleanup.
+
+The cancellation caller re-observes the run within one 120-second terminal
+budget and applies `Resolution::Accept` with empty values to the exact observed
+`Unknown` sequence and generation. A conflict requires a fresh snapshot; an
+attempted decision is not evidence of settlement. The late-Unknown regression
+holds a real pending question's forwarded abort until the existing abort grace
+expires. It proves that the cancellation receipt has no `Unknown`, a later
+checkpoint does, and the caller can reach `Cancelled` from its original receipt
+with unchanged state, one prompt and no submitted question answer. This is real
+integration with controlled timing. It adds no prompt retry or automatic
+uncertainty resolution to App.
+
+The two-Agent isolation cases read each native tool receipt before question
+resolution and again before terminal assertions. Their diagnostics compare
+bounded normalized Agent markers with App state and the expected markers,
+reporting only shape, length, UUID validity, equality and counts. Uncaptured
+values leave exact lower/App equality unproven. Receipt reads are bounded and
+never dump native sessions or response contents. Exact marker fidelity,
+unchanged native receipts and the original counts and terminal assertions remain
+required. Both configured marker schemas require 36-character lowercase,
+hyphenated UUIDs through length and pattern constraints, without expected marker
+values. A preflight checks canonical and malformed controls against both schemas
+in the actual workflow definition later supplied to App; it does not observe
+native wire delivery. The prompt, model, requested structured retry count of zero
+and exact copy assertions are unchanged. Schema conformance alone does not prove exact
+marker copying or identify the cause of a malformed response.
 
 The native service-interruption case preserves the exact Unknown target and
 caller Fail outcome. Its original 30-second Drain must either succeed after a

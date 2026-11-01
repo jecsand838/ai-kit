@@ -194,29 +194,73 @@ impl ForwardingControl {
             .clone()
     }
 
-    pub(super) fn last_structured_markers(&self) -> Option<Value> {
-        self.last_structured_markers
+    pub(super) fn structured_marker_diagnostics(
+        &self,
+        app_value: &Value,
+        expected_tool: &str,
+        expected_knowledge: &str,
+    ) -> Value {
+        let observed = self
+            .last_structured_markers
             .lock()
-            .expect("structured marker observation lock")
-            .clone()
+            .expect("structured marker observation lock");
+        let mut diagnostics = serde_json::Map::new();
+        diagnostics.insert("observed".to_owned(), Value::Bool(observed.is_some()));
+        for (key, expected) in [("tool", expected_tool), ("knowledge", expected_knowledge)] {
+            let lower = observed.as_ref().and_then(|value| value.get(key));
+            let lower_marker = lower.and_then(Value::as_str);
+            let app_marker = app_value.get(key).and_then(Value::as_str);
+            let canonical_uuid = |marker: &str| {
+                uuid::Uuid::parse_str(marker)
+                    .is_ok_and(|uuid| uuid.hyphenated().to_string() == marker)
+            };
+            diagnostics.insert(
+                key.to_owned(),
+                serde_json::json!({
+                    "lower_shape": if lower_marker.is_some() {
+                        "bounded_hex_and_dash_string"
+                    } else {
+                        lower.and_then(|value| value["shape"].as_str()).unwrap_or("unobserved")
+                    },
+                    "lower_bytes": lower_marker.map(str::len).or_else(|| {
+                        lower.and_then(|value| value["bytes"].as_u64()).and_then(|length| usize::try_from(length).ok())
+                    }),
+                    "lower_canonical_uuid": lower_marker.is_some_and(canonical_uuid),
+                    "lower_app_exact": lower_marker.map(|marker| Some(marker) == app_marker),
+                    "lower_expected_exact": lower_marker.map(|marker| marker == expected),
+                    "app_bytes": app_marker.map(str::len),
+                    "app_canonical_uuid": app_marker.is_some_and(canonical_uuid),
+                    "app_expected_exact": app_marker == Some(expected),
+                }),
+            );
+        }
+        Value::Object(diagnostics)
     }
 
     fn observe_structured_markers(&self, response: &PromptResponse) {
-        // Record only the two UUID fields used by the isolation fixture. Never
-        // retain or print the full native response or arbitrary response text.
+        // Retain only bounded marker-shaped strings from the isolation fixture,
+        // including malformed UUIDs, for exact lower/App comparison. All other
+        // content becomes shape/length metadata; never retain a native response.
         let markers = response.structured_output().map(|value| {
             let mut markers = serde_json::Map::new();
             for key in ["tool", "knowledge"] {
                 let marker = match value.get(key) {
                     Some(Value::String(marker))
-                        if marker.len() <= 64 && uuid::Uuid::parse_str(marker).is_ok() =>
+                        if !marker.is_empty()
+                            && marker.len() <= 64
+                            && marker
+                                .bytes()
+                                .all(|byte| byte.is_ascii_hexdigit() || byte == b'-') =>
                     {
-                        marker.clone()
+                        Value::String(marker.clone())
                     }
-                    Some(_) => "<not a UUID string>".to_owned(),
-                    None => "<missing>".to_owned(),
+                    Some(Value::String(marker)) => serde_json::json!({
+                        "shape": "other_string", "bytes": marker.len()
+                    }),
+                    Some(_) => serde_json::json!({"shape": "not_string"}),
+                    None => serde_json::json!({"shape": "missing"}),
                 };
-                markers.insert(key.to_owned(), Value::String(marker));
+                markers.insert(key.to_owned(), marker);
             }
             Value::Object(markers)
         });
@@ -895,43 +939,28 @@ impl OwnedOpenCode {
         self.tool_canary = Some(canary);
     }
 
-    pub(super) fn tool_receipt(&self) -> String {
-        fs::read_to_string(self.root.join("tool-receipt.txt")).unwrap_or_else(|error| {
-            let inventory = Self::request(
-                self.address,
-                "/experimental/session?archived=true&limit=10",
-                None,
-            );
-            eprintln!(
-                "missing native tool receipt at {}: {error}; sessions: {inventory:?}",
-                self.root.display()
-            );
-            if let Some(sessions) = inventory
-                .as_deref()
-                .and_then(|body| serde_json::from_str::<Value>(body).ok())
-                .and_then(|value| value.as_array().cloned())
-            {
-                for session in sessions {
-                    if let Some(id) = session.get("id").and_then(Value::as_str) {
-                        let messages = Self::request(
-                            self.address,
-                            &format!("/session/{id}/message?limit=10"),
-                            None,
-                        );
-                        eprintln!("native tool receipt diagnostic {id}: {messages:?}");
-                    }
-                }
-            }
-            eprintln!(
-                "native pending questions: {:?}",
-                Self::request(self.address, "/question", None)
-            );
-            eprintln!(
-                "native durable events: {:?}",
-                Self::request(self.address, "/sync/history", Some("{}"))
-            );
-            panic!("the actual native tool must write its receipt: {error}")
-        })
+    pub(super) fn tool_receipt(&self) -> Result<String, &'static str> {
+        let path = self.root.join("tool-receipt.txt");
+        if !fs::symlink_metadata(&path)
+            .map_err(|_| "native tool receipt metadata is unavailable")?
+            .file_type()
+            .is_file()
+        {
+            return Err("native tool receipt is not a regular file");
+        }
+        let file = fs::File::open(path).map_err(|_| "native tool receipt could not be opened")?;
+        let mut receipt = String::new();
+        file.take(4097)
+            .read_to_string(&mut receipt)
+            .map_err(|_| "native tool receipt could not be read")?;
+        if receipt.len() > 4096
+            || !receipt
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() || matches!(byte, b'-' | b'\n'))
+        {
+            return Err("native tool receipt exceeded marker content bounds");
+        }
+        Ok(receipt)
     }
 
     pub fn endpoint(&self) -> String {
@@ -1324,8 +1353,52 @@ impl OwnedOpenCode {
         run: &WorkflowRun<StateStore, A>,
         mut snapshot: RunSnapshot,
     ) -> RunSnapshot {
-        tokio::time::timeout(Duration::from_secs(120), async {
+        let mut last_observation = None;
+        let result = tokio::time::timeout(Duration::from_secs(120), async {
             loop {
+                let status = match &snapshot.status {
+                    RunStatus::Running => "Running",
+                    RunStatus::Paused => "Paused",
+                    RunStatus::Halted { .. } => "Halted",
+                    RunStatus::Cancelling => "Cancelling",
+                    RunStatus::Succeeded => "Succeeded",
+                    RunStatus::Failed(_) => "Failed",
+                    RunStatus::Cancelled => "Cancelled",
+                    _ => "Other",
+                };
+                let interactions = snapshot
+                    .interactions
+                    .iter()
+                    .map(|interaction| match interaction {
+                        Interaction::Input {
+                            sequence,
+                            generation,
+                            ..
+                        } => ("Input", Some(*sequence), Some(*generation), None),
+                        Interaction::Notification {
+                            sequence,
+                            generation,
+                            ..
+                        } => ("Notification", Some(*sequence), Some(*generation), None),
+                        Interaction::Unknown {
+                            sequence,
+                            generation,
+                            retry_safe,
+                        } => (
+                            "Unknown",
+                            Some(*sequence),
+                            Some(*generation),
+                            Some(*retry_safe),
+                        ),
+                        Interaction::Inputs {
+                            sequence,
+                            generation,
+                            ..
+                        } => ("Inputs", Some(*sequence), Some(*generation), None),
+                        _ => ("Other", None, None, None),
+                    })
+                    .collect::<Vec<_>>();
+                last_observation = Some((status, snapshot.checkpoint, interactions));
                 if matches!(
                     snapshot.status,
                     RunStatus::Succeeded | RunStatus::Failed(_) | RunStatus::Cancelled
@@ -1342,8 +1415,11 @@ impl OwnedOpenCode {
                 snapshot = observed;
             }
         })
-        .await
-        .expect("the strict-live run must reach a terminal outcome in time")
+        .await;
+        if result.is_err() {
+            eprintln!("strict-live terminal diagnostic: last={last_observation:?}");
+        }
+        result.expect("the strict-live run must reach a terminal outcome in time")
     }
 
     async fn wait_until_healthy(&mut self) {

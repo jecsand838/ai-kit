@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -383,6 +384,9 @@ test("fresh provenance distinguishes provider formatting from later native alter
       assert.equal(summary.native_equals_expected, native === FreshFixture.EXPECTED);
       assert.equal(summary.native_equals_provider, native === provider);
       assert.equal(summary.foreground_http_body_observed, false);
+      assert.equal(summary.native_text_sha256, undefined, "Ollama text fingerprints remain outside this cloud-only diagnostic scope");
+      assert.equal(summary.native_parts, undefined);
+      assert.equal(fixture.facts().find((fact) => fact.event === "fresh_user").native_session_sha256, undefined);
     } finally { fixture.close(); }
   }
 });
@@ -610,4 +614,376 @@ test("known usage-only fresh frames and fragmented Unicode remain complete", asy
     assert.equal(summary.native_equals_provider, true);
     assert.equal(summary.native_text_bytes, Buffer.byteLength(text));
   } finally { fixture.close(); }
+});
+
+class ResponsesFixture extends CaptureFixture {
+  static EXPECTED = "PRIVATE_FRESH_TOKEN";
+  static PROMPT = "Do not call tools. Return only this exact token: PRIVATE_FRESH_TOKEN";
+
+  constructor(frames = ResponsesFixture.frames(), options = {}) {
+    const bytes = options.bytes ?? ResponsesFixture.bytes(frames);
+    super(options.delegate ?? (() => new Response(CaptureFixture.stream(bytes, options.width ?? 7), {
+      status: options.status ?? 200,
+      headers: { "content-type": options.contentType ?? "text/event-stream" },
+    })));
+    this.bytes = bytes;
+    this.config = { provider: { openai: {
+      npm: "@ai-sdk/openai", models: { PRIVATE_MODEL: { name: "Expected Model" } },
+      options: { fetch: this.config.provider.ollama.options.fetch, apiKey: "PRIVATE_KEY" },
+    } } };
+  }
+
+  async install() {
+    this.hooks = await plugin({}, {
+      outputDirectory: this.directory, expectedProvider: "openai", expectedModelName: "Expected Model",
+      freshOutput: { prompt: ResponsesFixture.PROMPT, expected: ResponsesFixture.EXPECTED },
+    });
+    await this.hooks.config(this.config);
+    return this.config.provider.openai.options.fetch;
+  }
+
+  request() {
+    return { method: "POST", headers: { authorization: "PRIVATE_AUTH", "x-opencode-session-id": "PRIVATE_SESSION" },
+      body: JSON.stringify({ model: "PRIVATE_MODEL", stream: true,
+        input: [{ role: "developer", content: "PRIVATE_CONTEXT" },
+          { role: "user", content: [{ type: "input_text", text: ResponsesFixture.PROMPT }] }],
+      }) };
+  }
+
+  async root() {
+    const input = { sessionID: "PRIVATE_SESSION", messageID: "PRIVATE_USER", model: { providerID: "openai", modelID: "PRIVATE_MODEL" } };
+    const output = { message: { id: "PRIVATE_USER", sessionID: "PRIVATE_SESSION", role: "user", agent: "build", model: { ...input.model } },
+      parts: [{ id: "PRIVATE_USER_PART", sessionID: "PRIVATE_SESSION", messageID: "PRIVATE_USER", type: "text", text: ResponsesFixture.PROMPT }] };
+    const original = JSON.stringify({ input, output });
+    await this.hooks["chat.message"](input, output);
+    assert.equal(JSON.stringify({ input, output }), original);
+  }
+
+  async assistant(completed = false) {
+    await this.hooks.event({ event: { type: "message.updated", properties: { info: {
+      id: "PRIVATE_ASSISTANT", sessionID: "PRIVATE_SESSION", parentID: "PRIVATE_USER", role: "assistant",
+      providerID: "openai", modelID: "PRIVATE_MODEL", time: completed ? { created: 1, completed: 2 } : { created: 1 },
+      ...(completed ? { finish: "stop" } : {}),
+    } } } });
+  }
+
+  async native(text) {
+    const output = { text };
+    await this.hooks["experimental.text.complete"]({ sessionID: "PRIVATE_SESSION", messageID: "PRIVATE_ASSISTANT", partID: "PRIVATE_NATIVE_PART" }, output);
+    assert.equal(output.text, text);
+    await this.assistant(true);
+  }
+
+  facts() {
+    return readdirSync(this.directory).filter((name) => name.endsWith(".jsonl")).flatMap((name) => {
+      const path = join(this.directory, name);
+      assert.equal(statSync(path).mode & 0o777, 0o600);
+      const text = readFileSync(path, "utf8");
+      assert(!text.includes("PRIVATE_"), "redacted receipts must contain no raw values");
+      return text.trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
+    });
+  }
+
+  async finish() {
+    await this.hooks.dispose();
+    return this.facts().findLast((fact) => fact.event === "fresh_summary");
+  }
+
+  async collect(native = ResponsesFixture.EXPECTED) {
+    const fetch = await this.install(); await this.root(); await this.assistant();
+    assert.deepEqual(new Uint8Array(await (await fetch("PRIVATE_URL", this.request())).arrayBuffer()), this.bytes);
+    await this.native(native);
+    return this.finish();
+  }
+
+  static bytes(frames) {
+    return new TextEncoder().encode(frames.map((frame) => `event: ${frame.type}\r\ndata: ${JSON.stringify(frame)}\r\n\r\n`).join(""));
+  }
+
+  static frames(parts = [{ delta: ResponsesFixture.EXPECTED }], model = "PRIVATE_MODEL") {
+    const response = { id: "PRIVATE_RESPONSE", model, status: "in_progress", output: [], error: null, incomplete_details: null };
+    const message = { id: "PRIVATE_MESSAGE", type: "message", role: "assistant", status: "in_progress", content: [] };
+    const frames = [{ type: "response.created", response }, { type: "response.in_progress", response },
+      { type: "response.output_item.added", output_index: 0, item: message }];
+    const itemContent = [];
+    const finalContent = [];
+    for (const [content_index, values] of parts.entries()) {
+      const owner = { output_index: 0, content_index, item_id: message.id };
+      frames.push({ type: "response.content_part.added", ...owner, part: { type: "output_text", text: "" } },
+        { type: "response.output_text.delta", ...owner, delta: values.delta },
+        { type: "response.output_text.done", ...owner, text: values.done ?? values.delta },
+        { type: "response.content_part.done", ...owner, part: { type: "output_text", text: values.part ?? values.done ?? values.delta } });
+      itemContent.push({ type: "output_text", text: values.item ?? values.part ?? values.done ?? values.delta });
+      finalContent.push({ type: "output_text", text: values.final ?? values.item ?? values.part ?? values.done ?? values.delta });
+    }
+    frames.push({ type: "response.output_item.done", output_index: 0, item: { ...message, status: "completed", content: itemContent } },
+      { type: "response.completed", response: { ...response, status: "completed", output: [{ ...message, status: "completed", content: finalContent }] } });
+    return frames.map((frame, sequence_number) => ({ ...frame, sequence_number }));
+  }
+}
+
+test("OpenAI Responses: per-part redistribution remains visible when aggregates match", async () => {
+  const fixture = new ResponsesFixture(ResponsesFixture.frames([{ delta: "AB", done: "A" }, { delta: "C", done: "BC" }]));
+  try {
+    const summary = await fixture.collect("ABC");
+    assert.equal(summary.capture, "complete");
+    assert.equal(summary.provider_delta_equals_done, true);
+    assert.equal(summary.provider_parts_delta_equal_done, false, "equal concatenations must not hide changed individual parts");
+    const parts = fixture.facts().filter((fact) => fact.event === "fresh_provider_part");
+    assert.equal(parts.length, 2);
+    assert.deepEqual(parts.map((part) => part.delta_equals_done), [false, false]);
+  } finally { fixture.close(); }
+});
+
+test("OpenAI Responses: transient receipt write failure cannot certify retained evidence", async () => {
+  const fixture = new ResponsesFixture();
+  try {
+    const fetch = await fixture.install();
+    const receipt = join(fixture.directory, readdirSync(fixture.directory).find((name) => name.endsWith(".jsonl")));
+    const held = `${receipt}.held`;
+    renameSync(receipt, held); mkdirSync(receipt);
+    try { await fixture.root(); } finally { rmSync(receipt, { recursive: true }); renameSync(held, receipt); }
+    await fixture.assistant();
+    assert.deepEqual(new Uint8Array(await (await fetch("PRIVATE_URL", fixture.request())).arrayBuffer()), fixture.bytes);
+    await fixture.native(ResponsesFixture.EXPECTED);
+    const summary = await fixture.finish();
+    assert.equal(summary.capture, "incomplete", "a later complete summary must not erase missing retained provenance");
+    assert.equal(summary.receipt_persistence_complete, false);
+  } finally { fixture.close(); }
+});
+
+test("OpenAI Responses: fragmented Unicode preserves request receiver metadata and exact bytes", async () => {
+  const frames = ResponsesFixture.frames([{ delta: "PRIVATE_é🤖" }]);
+  const bytes = ResponsesFixture.bytes(frames);
+  const receiver = {};
+  let request;
+  const fixture = new ResponsesFixture(frames, { delegate: function (...args) {
+    assert.equal(this, receiver); assert.equal(args[0], "PRIVATE_URL"); assert.equal(args[1], request);
+    const response = new Response(CaptureFixture.stream(bytes, 1), { status: 201, statusText: "Created", headers: { "content-type": "text/event-stream", "x-private": "PRIVATE_HEADER" } });
+    Object.defineProperty(response, "url", { value: "PRIVATE_RESPONSE_URL" });
+    Object.defineProperty(response, "redirected", { value: true });
+    return response;
+  } });
+  try {
+    const fetch = await fixture.install(); await fixture.root(); await fixture.assistant();
+    request = fixture.request(); const original = JSON.stringify(request);
+    const response = await Reflect.apply(fetch, receiver, ["PRIVATE_URL", request]);
+    assert.equal(response.status, 201); assert.equal(response.statusText, "Created");
+    assert.equal(response.url, "PRIVATE_RESPONSE_URL"); assert.equal(response.redirected, true); assert.equal(response.type, "default");
+    assert.equal(response.headers.get("x-private"), "PRIVATE_HEADER");
+    assert.deepEqual(new Uint8Array(await response.arrayBuffer()), bytes); assert.equal(JSON.stringify(request), original);
+    await fixture.native("PRIVATE_é🤖");
+    const comparison = fixture.facts().findLast((fact) => fact.event === "fresh_comparison");
+    assert.equal(comparison.capture, "complete");
+    assert.equal(comparison.native_equals_provider_final, true);
+    assert.equal(comparison.provider_delta_sha256, createHash("sha256").update("PRIVATE_é🤖").digest("hex"));
+    assert.equal(comparison.native_text_sha256, comparison.provider_delta_sha256);
+    assert.equal(comparison.native_session_sha256, createHash("sha256").update("PRIVATE_SESSION").digest("hex"));
+    assert.equal(comparison.native_user_sha256, createHash("sha256").update("PRIVATE_USER").digest("hex"));
+    assert.equal(comparison.native_assistant_sha256, createHash("sha256").update("PRIVATE_ASSISTANT").digest("hex"));
+    assert.deepEqual(comparison.native_parts, [{ part_sha256: createHash("sha256").update("PRIVATE_NATIVE_PART").digest("hex"),
+      text_sha256: comparison.native_text_sha256, text_bytes: Buffer.byteLength("PRIVATE_é🤖") }]);
+    assert.equal((await fixture.finish()).receipt_persistence_complete, true);
+  } finally { fixture.close(); }
+});
+
+test("OpenAI Responses: snapshot disagreements remain complete independent observations", async () => {
+  const fields = ["delta", "done", "part", "item", "final", "native"];
+  for (const changed of fields) {
+    const values = Object.fromEntries(fields.map((field) => [field, field === changed ? "PRIVATE_DIFFERENT" : ResponsesFixture.EXPECTED]));
+    const fixture = new ResponsesFixture(ResponsesFixture.frames([values]));
+    try {
+      const summary = await fixture.collect(values.native);
+      assert.equal(summary.capture, "complete", changed);
+      assert.equal(summary.provider_delta_equals_expected, changed !== "delta", changed);
+      assert.equal(summary.provider_done_equals_expected, changed !== "done", changed);
+      assert.equal(summary.provider_final_equals_expected, changed !== "final", changed);
+      assert.equal(summary.native_equals_expected, changed !== "native", changed);
+      assert.equal(summary.native_equals_provider_final, values.native === values.final, changed);
+      const part = fixture.facts().find((fact) => fact.event === "fresh_provider_part");
+      assert.equal(part.delta_equals_done, values.delta === values.done, changed);
+      assert.equal(part.done_equals_content, values.done === values.part, changed);
+      assert.equal(part.content_equals_item, values.part === values.item, changed);
+      assert.equal(part.item_equals_final, values.item === values.final, changed);
+      for (const field of ["delta", "done", "final"]) {
+        assert.equal(summary[`provider_${field}_sha256`], createHash("sha256").update(values[field]).digest("hex"));
+      }
+    } finally { fixture.close(); }
+  }
+});
+
+test("OpenAI Responses: correlation rejects cross-response and cross-part attribution", async () => {
+  for (const variant of ["response", "model_changed", "item", "output_index", "content_index", "duplicate_item", "final_inventory"]) {
+    const frames = ResponsesFixture.frames([{ delta: "A" }, { delta: "B" }]);
+    if (variant === "response") frames.at(-1).response.id = "PRIVATE_OTHER_RESPONSE";
+    if (variant === "model_changed") frames.at(-1).response.model = "PRIVATE_OTHER_MODEL";
+    if (variant === "item") frames.find((frame) => frame.type === "response.output_text.delta").item_id = "PRIVATE_OTHER_MESSAGE";
+    if (variant === "output_index") frames.find((frame) => frame.type === "response.output_text.delta").output_index = 1;
+    if (variant === "content_index") frames.find((frame) => frame.type === "response.output_text.delta").content_index = 1;
+    if (variant === "duplicate_item") frames.splice(3, 0, { ...frames[2], output_index: 1 });
+    if (variant === "final_inventory") frames.at(-1).response.output.push({ ...frames.at(-1).response.output[0], id: "PRIVATE_EXTRA_MESSAGE" });
+    const fixture = new ResponsesFixture(frames.map((frame, sequence_number) => ({ ...frame, sequence_number })));
+    try {
+      assert.equal((await fixture.collect("AB")).capture, "incomplete", variant);
+      assert.equal(fixture.facts().find((fact) => fact.event === "fresh_provider_text").capture, "incomplete", variant);
+    } finally { fixture.close(); }
+  }
+});
+
+test("OpenAI Responses: request identity and reported model have distinct attribution facts", async () => {
+  for (const variant of ["model", "session", "stream", "extra_text", "reported_model"]) {
+    const fixture = new ResponsesFixture(ResponsesFixture.frames(undefined, variant === "reported_model" ? "PRIVATE_REPORTED_ALIAS" : "PRIVATE_MODEL"));
+    try {
+      const fetch = await fixture.install(); await fixture.root(); await fixture.assistant();
+      const request = fixture.request(); const body = JSON.parse(request.body);
+      if (variant === "model") body.model = "PRIVATE_WRONG_MODEL";
+      if (variant === "session") request.headers["x-opencode-session-id"] = "PRIVATE_WRONG_SESSION";
+      if (variant === "stream") body.stream = false;
+      if (variant === "extra_text") body.input.at(-1).content.push({ type: "input_text", text: "PRIVATE_NATIVE_REMINDER" });
+      request.body = JSON.stringify(body); const original = JSON.stringify(request);
+      assert.deepEqual(new Uint8Array(await (await fetch("PRIVATE_URL", request)).arrayBuffer()), fixture.bytes);
+      assert.equal(JSON.stringify(request), original);
+      await fixture.native(ResponsesFixture.EXPECTED);
+      const summary = await fixture.finish();
+      assert.equal(summary.capture, ["extra_text", "reported_model"].includes(variant) ? "complete" : "incomplete", variant);
+      if (variant === "reported_model") assert.equal(summary.provider_reported_model_matches_requested, false);
+      if (variant === "extra_text") {
+        const facts = fixture.facts().find((fact) => fact.event === "fresh_request");
+        assert.equal(facts.exact_prompt_parts, 1); assert.equal(facts.other_user_text_parts, 1);
+      }
+    } finally { fixture.close(); }
+  }
+});
+
+test("OpenAI Responses: missing duplicate late and truncated events stay inconclusive", async () => {
+  for (const variant of ["missing_created", "missing_done", "missing_completed", "sequence_gap", "duplicate_sequence", "late_delta", "duplicate_completed", "trailing", "unknown_event", "sentinel"]) {
+    let frames = ResponsesFixture.frames();
+    if (variant === "missing_created") frames.shift();
+    if (variant === "missing_done") frames = frames.filter((frame) => frame.type !== "response.output_text.done");
+    if (variant === "missing_completed") frames.pop();
+    if (variant === "late_delta") frames.splice(-2, 0, frames.find((frame) => frame.type === "response.output_text.delta"));
+    if (variant === "duplicate_completed") frames.push(frames.at(-1));
+    if (variant === "unknown_event") frames.splice(2, 0, { type: "response.private_unknown" });
+    frames = frames.map((frame, sequence_number) => ({ ...frame, sequence_number }));
+    if (variant === "sequence_gap") frames[2].sequence_number++;
+    if (variant === "duplicate_sequence") frames[2].sequence_number--;
+    const suffix = variant === "trailing" ? "data: {" : variant === "sentinel" ? "data: [DONE]\n\n" : "";
+    const fixture = new ResponsesFixture(frames, { bytes: new Uint8Array([...ResponsesFixture.bytes(frames), ...new TextEncoder().encode(suffix)]) });
+    try { assert.equal((await fixture.collect()).capture, "incomplete", variant); } finally { fixture.close(); }
+  }
+});
+
+test("OpenAI Responses: supported reasoning items preserve ordered text attribution", async () => {
+  const frames = ResponsesFixture.frames();
+  for (const frame of frames) if (Object.hasOwn(frame, "output_index")) frame.output_index = 1;
+  const reasoning = { id: "PRIVATE_REASONING", type: "reasoning", status: "completed", summary: [] };
+  frames.splice(2, 0,
+    { type: "response.output_item.added", output_index: 0, item: { ...reasoning, status: "in_progress" } },
+    { type: "response.output_item.done", output_index: 0, item: reasoning });
+  frames.at(-1).response.output.unshift(reasoning);
+  const fixture = new ResponsesFixture(frames.map((frame, sequence_number) => ({ ...frame, sequence_number })));
+  try {
+    assert.equal((await fixture.collect()).capture, "complete");
+    assert.equal(fixture.facts().find((fact) => fact.event === "fresh_provider_part").output_index, 1);
+  } finally { fixture.close(); }
+});
+
+test("OpenAI Responses: unsupported shapes encoding and bounds preserve every forwarded byte", async () => {
+  for (const variant of ["nontext", "malformed_json", "malformed_utf8", "frame_bound", "text_bound", "response_bound", "part_bound", "status", "content_type"]) {
+    let frames = ResponsesFixture.frames();
+    if (variant === "nontext") frames[2].item.type = "function_call";
+    if (variant === "text_bound") frames = ResponsesFixture.frames([{ delta: "X".repeat(65 << 10) }]);
+    if (variant === "part_bound") frames = ResponsesFixture.frames(Array.from({ length: 17 }, () => ({ delta: "X" })));
+    let bytes = ResponsesFixture.bytes(frames);
+    if (variant === "malformed_json") bytes = new TextEncoder().encode("data: {PRIVATE_MALFORMED}\n\n");
+    if (variant === "malformed_utf8") bytes = new Uint8Array([...bytes, 0xff, 10, 10]);
+    if (variant === "frame_bound") bytes = new TextEncoder().encode(`data: ${"X".repeat(257 << 10)}\n\n`);
+    if (variant === "response_bound") bytes = new Uint8Array([...bytes, ...new TextEncoder().encode(": padding\n\n".repeat(900000))]);
+    const fixture = new ResponsesFixture(frames, { bytes, width: 65536,
+      status: variant === "status" ? 500 : 200, contentType: variant === "content_type" ? "application/json" : "text/event-stream" });
+    try {
+      assert.equal((await fixture.collect()).capture, "incomplete", variant);
+      if (variant === "response_bound") {
+        const directory = join(fixture.directory, "private-pending");
+        const manifest = JSON.parse(readFileSync(join(directory, readdirSync(directory).find((name) => name.endsWith(".manifest.json"))), "utf8"));
+        assert.equal(manifest.body_capture_complete, false); assert.equal(manifest.response_bound_exceeded, true);
+        assert.equal(manifest.captured_response_bytes, 8 << 20);
+        assert.deepEqual(new Uint8Array(readFileSync(join(directory, manifest.response_file))), bytes.subarray(0, 8 << 20));
+      }
+    } finally { fixture.close(); }
+  }
+});
+
+test("OpenAI Responses: cancellation is lazy and settles the outstanding native read", async () => {
+  let pulls = 0; let cancelled;
+  const fixture = new ResponsesFixture(undefined, { delegate: () => new Response(new ReadableStream({
+    pull() { pulls++; }, cancel(reason) { cancelled = reason; },
+  }, { highWaterMark: 0 }), { headers: { "content-type": "text/event-stream" } }) });
+  try {
+    const fetch = await fixture.install(); await fixture.root(); await fixture.assistant();
+    const response = await fetch("PRIVATE_URL", fixture.request()); assert.equal(pulls, 0);
+    const reader = response.body.getReader(); const pending = reader.read(); await Promise.resolve();
+    assert.equal(pulls, 1);
+    const reason = { private: "PRIVATE_CANCEL_REASON" }; await reader.cancel(reason);
+    assert.deepEqual(await pending, { done: true, value: undefined }); assert.equal(cancelled, reason);
+    await fixture.native(ResponsesFixture.EXPECTED);
+    assert.equal((await fixture.finish()).capture, "incomplete");
+  } finally { fixture.close(); }
+});
+
+test("OpenAI Responses: native fetch and body failures retain identity despite receipt failure", async () => {
+  for (const phase of ["fetch", "body"]) {
+    const failure = new Error("PRIVATE_NATIVE_FAILURE");
+    const fixture = new ResponsesFixture(undefined, { delegate: () => {
+      if (phase === "fetch") throw failure;
+      return new Response(new ReadableStream({ pull(controller) { controller.error(failure); } }, { highWaterMark: 0 }), { headers: { "content-type": "text/event-stream" } });
+    } });
+    try {
+      const fetch = await fixture.install(); await fixture.root(); await fixture.assistant();
+      fixture.close();
+      await assert.rejects(async () => (await fetch("PRIVATE_URL", fixture.request())).text(), (actual) => actual === failure);
+    } finally { fixture.close(); }
+  }
+});
+
+test("OpenAI Responses: private staging keeps exact bounded bodies separate from redacted receipts", async () => {
+  const fixture = new ResponsesFixture();
+  try {
+    assert.equal((await fixture.collect()).capture, "complete");
+    const directory = join(fixture.directory, "private-pending");
+    assert.equal(statSync(directory).mode & 0o777, 0o700);
+    const files = readdirSync(directory); assert.equal(files.length, 3);
+    for (const file of files) assert.equal(statSync(join(directory, file)).mode & 0o777, 0o600);
+    const manifest = JSON.parse(readFileSync(join(directory, files.find((name) => name.endsWith(".manifest.json"))), "utf8"));
+    assert.equal(manifest.protocol, "openai_responses"); assert.equal(manifest.body_capture_complete, true);
+    assert.equal(manifest.provider_correlation_complete, true); assert.equal(manifest.receipt_persistence_complete, true);
+    assert.equal(manifest.eof, true); assert.equal(manifest.response_bound_exceeded, false);
+    const request = readFileSync(join(directory, manifest.request_file), "utf8");
+    const response = readFileSync(join(directory, manifest.response_file));
+    assert.equal(request, fixture.request().body); assert.deepEqual(new Uint8Array(response), fixture.bytes);
+    assert.equal(manifest.request_bytes, Buffer.byteLength(request)); assert.equal(manifest.response_bytes, response.length);
+    assert.equal(manifest.captured_response_bytes, response.length);
+    for (const secret of ["PRIVATE_AUTH", "PRIVATE_KEY", "PRIVATE_URL"]) {
+      assert(!request.includes(secret)); assert(!response.includes(secret)); assert(!JSON.stringify(manifest).includes(secret));
+    }
+    fixture.facts();
+  } finally { fixture.close(); }
+});
+
+test("OpenAI Responses: private staging failures and oversized requests remain inconclusive", async () => {
+  for (const variant of ["directory_mode", "request_bound"]) {
+    const fixture = new ResponsesFixture();
+    try {
+      const fetch = await fixture.install(); await fixture.root(); await fixture.assistant();
+      if (variant === "directory_mode") mkdirSync(join(fixture.directory, "private-pending"), { mode: 0o755 });
+      const request = fixture.request();
+      if (variant === "request_bound") {
+        const value = JSON.parse(request.body); value.input[0].content = "X".repeat(2 << 20); request.body = JSON.stringify(value);
+      }
+      assert.deepEqual(new Uint8Array(await (await fetch("PRIVATE_URL", request)).arrayBuffer()), fixture.bytes);
+      await fixture.native(ResponsesFixture.EXPECTED);
+      assert.equal((await fixture.finish()).capture, "incomplete", variant);
+      if (variant === "directory_mode") assert.deepEqual(readdirSync(join(fixture.directory, "private-pending")), [], "invalid directory permissions must prevent every private body write");
+    } finally { fixture.close(); }
+  }
 });

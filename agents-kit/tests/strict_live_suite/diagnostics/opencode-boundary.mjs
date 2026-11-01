@@ -1,9 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
-import { appendFileSync, openSync, closeSync } from "node:fs";
+import { appendFileSync, openSync, closeSync, lstatSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 // Test-only native plugin. No raw request, response, identifier, header, URL,
-// description, prompt, or argument value enters a receipt.
+// description, prompt, or argument value enters a receipt. The cloud case also
+// stages bounded private bodies separately; its caller owns their disposition.
 class BoundaryCapture {
   static REQUEST_LIMIT = 2 << 20;
   static FRAME_LIMIT = 256 << 10;
@@ -19,6 +20,7 @@ class BoundaryCapture {
     this.provider = options.expectedProvider ?? "ollama";
     this.flow = 0;
     this.written = 0;
+    this.receiptPersistenceComplete = true;
     this.capture = randomUUID();
     this.path = join(options.outputDirectory, `opencode-boundary-${process.pid}-${this.capture}.jsonl`);
     const fd = openSync(this.path, "wx", 0o600);
@@ -44,17 +46,29 @@ class BoundaryCapture {
       if (this.receiptsExhausted) return;
       let line = JSON.stringify({ version: 1, capture_id: this.capture, ...facts }) + "\n";
       if (Buffer.byteLength(line) > 8192) {
+        this.receiptIncomplete();
         line = JSON.stringify({ version: 1, capture_id: this.capture, event: "observer_incomplete", flow: facts.flow, reason: "receipt_record_bound" }) + "\n";
       }
       if (this.written + Buffer.byteLength(line) > BoundaryCapture.RECEIPT_LIMIT - 256) {
         this.receiptsExhausted = true;
+        this.receiptIncomplete();
         line = JSON.stringify({ version: 1, capture_id: this.capture, event: "observer_incomplete", reason: "receipt_total_bound" }) + "\n";
       }
       appendFileSync(this.path, line, { encoding: "utf8", mode: 0o600 });
       this.written += Buffer.byteLength(line);
     } catch {
+      this.receiptIncomplete();
       // Diagnostics never replace a native request, stream, or cleanup outcome.
     }
+  }
+
+  receiptIncomplete() {
+    this.receiptPersistenceComplete = false;
+    if (this.fresh) this.fresh.incomplete = true;
+  }
+
+  static fingerprint(value) {
+    return createHash("sha256").update(value).digest("hex");
   }
 
   static shape(value) {
@@ -101,6 +115,10 @@ class BoundaryCapture {
       }
       this.fresh.root = { session: input.sessionID, user: message.id };
       this.emit({ event: "fresh_user", capture: "complete", prompt_matches_expected: true,
+        ...(this.provider === "openai" ? {
+          native_session_sha256: BoundaryCapture.fingerprint(input.sessionID),
+          native_user_sha256: BoundaryCapture.fingerprint(message.id),
+        } : {}),
         agent_matches_build: message.agent === "build" });
     } catch {
       this.freshIncomplete("user_observer_error");
@@ -254,6 +272,9 @@ class BoundaryCapture {
           provider_delta_bytes: Buffer.byteLength(text),
           provider_done_bytes: Buffer.byteLength(snapshots.done),
           provider_final_bytes: Buffer.byteLength(snapshots.final),
+          provider_delta_sha256: BoundaryCapture.fingerprint(text),
+          provider_done_sha256: BoundaryCapture.fingerprint(snapshots.done),
+          provider_final_sha256: BoundaryCapture.fingerprint(snapshots.final),
           provider_delta_equals_expected: text === this.fresh.expected,
           provider_done_equals_expected: snapshots.done === this.fresh.expected,
           provider_final_equals_expected: snapshots.final === this.fresh.expected,
@@ -262,9 +283,27 @@ class BoundaryCapture {
           provider_done_equals_final: snapshots.done === snapshots.final,
           provider_content_part_equals_done: snapshots.part === snapshots.done,
           provider_item_equals_done: snapshots.item === snapshots.done,
+          provider_text_parts: snapshots.parts.length,
+          provider_parts_delta_equal_done: snapshots.parts.every((part) => part.delta === part.doneText),
+          provider_parts_done_equal_content: snapshots.parts.every((part) => part.doneText === part.partText),
+          provider_parts_content_equal_item: snapshots.parts.every((part) => part.partText === part.itemText),
+          provider_parts_item_equal_final: snapshots.parts.every((part) => part.itemText === part.finalText),
           provider_reported_model_matches_requested: snapshots.model === this.expectedModel,
         } : {}),
       };
+      if (complete) {
+        for (const part of snapshots.parts) {
+          this.emit({ event: "fresh_provider_part", flow, capture: "complete",
+            output_index: part.output_index, content_index: part.content_index,
+            delta_bytes: Buffer.byteLength(part.delta), done_bytes: Buffer.byteLength(part.doneText),
+            content_bytes: Buffer.byteLength(part.partText), item_bytes: Buffer.byteLength(part.itemText), final_bytes: Buffer.byteLength(part.finalText),
+            delta_sha256: BoundaryCapture.fingerprint(part.delta), done_sha256: BoundaryCapture.fingerprint(part.doneText),
+            content_sha256: BoundaryCapture.fingerprint(part.partText), item_sha256: BoundaryCapture.fingerprint(part.itemText), final_sha256: BoundaryCapture.fingerprint(part.finalText),
+            delta_equals_done: part.delta === part.doneText, done_equals_content: part.doneText === part.partText,
+            content_equals_item: part.partText === part.itemText, item_equals_final: part.itemText === part.finalText,
+          });
+        }
+      }
     }
     this.emit({ event: "fresh_provider_text", flow, capture: complete ? "complete" : "incomplete",
       ...(complete ? { text_bytes: Buffer.byteLength(text), text_equals_expected: text === this.fresh.expected,
@@ -287,12 +326,22 @@ class BoundaryCapture {
       .map(([, text]) => text).join("") : undefined;
     this.emit({ event: final ? "fresh_summary" : "fresh_comparison", capture: complete ? "complete" : "incomplete",
       matching_provider_flows: flows.length, matching_assistants: assistants.length,
+      receipt_persistence_complete: this.receiptPersistenceComplete,
       foreground_http_body_observed: false,
       ...(complete ? {
         provider_equals_expected: flows[0].text === this.fresh.expected,
         provider_equals_asterisk_wrapped_expected: flows[0].text === `*${this.fresh.expected}*`,
         native_equals_expected: native === this.fresh.expected, native_equals_provider: native === flows[0].text,
         native_text_parts: assistants[0].parts.size, native_text_bytes: Buffer.byteLength(native),
+        ...(this.provider === "openai" ? {
+          native_text_sha256: BoundaryCapture.fingerprint(native),
+          native_session_sha256: BoundaryCapture.fingerprint(this.fresh.root.session),
+          native_user_sha256: BoundaryCapture.fingerprint(this.fresh.root.user),
+          native_assistant_sha256: BoundaryCapture.fingerprint(this.fresh.assistants.keys().next().value),
+          native_parts: [...assistants[0].parts].map(([id, text]) => ({
+            part_sha256: BoundaryCapture.fingerprint(id), text_sha256: BoundaryCapture.fingerprint(text), text_bytes: Buffer.byteLength(text),
+          })),
+        } : {}),
         ...flows[0].providerFacts,
         ...(flows[0].providerFacts ? {
           native_equals_provider_delta: native === flows[0].text,
@@ -385,6 +434,7 @@ class BoundaryCapture {
         } else {
           const request = JSON.parse(body);
           observation.fresh = this.freshRequest(request, args[1], flow);
+          if (observation.fresh && this.provider === "openai") observation.stageRequest(body);
           const tools = Array.isArray(request.tools) ? request.tools : [];
           const questions = tools.filter((tool) => tool?.type === "function"
             && (this.provider === "openai" ? tool.name : tool.function?.name) === "question");
@@ -457,6 +507,75 @@ class BoundaryResponse {
     }
   }
 
+  stageRequest(body) {
+    const stem = `${this.owner.capture}-flow-${this.flow}`;
+    this.privateCapture = { directory: join(this.owner.options.outputDirectory, "private-pending"),
+      request: `${stem}.request.json`, response: `${stem}.response.body`, manifest: `${stem}.manifest.json`,
+      requestBytes: Buffer.byteLength(body), responseBytes: 0, capturedBytes: 0, bounded: false, failed: false, directoryReady: false };
+    const capture = this.privateCapture;
+    try {
+      capture.bytes = Buffer.alloc(BoundaryCapture.RESPONSE_LIMIT);
+      try { mkdirSync(capture.directory, { mode: 0o700 }); } catch (error) {
+        if (error.code !== "EEXIST") throw error;
+      }
+      const directory = lstatSync(capture.directory);
+      if (!directory.isDirectory() || (directory.mode & 0o777) !== 0o700) throw new Error("private_directory_mode");
+      capture.directoryReady = true;
+      writeFileSync(join(capture.directory, capture.request), body, { flag: "wx", mode: 0o600 });
+    } catch {
+      capture.failed = true;
+      this.owner.freshIncomplete("private_request_write");
+    }
+  }
+
+  stageChunk(value) {
+    const capture = this.privateCapture;
+    if (!capture) return;
+    try {
+      capture.responseBytes += value.byteLength;
+      const remaining = BoundaryCapture.RESPONSE_LIMIT - capture.capturedBytes;
+      if (remaining > 0 && capture.bytes) {
+        const bytes = value.subarray(0, remaining);
+        capture.bytes.set(bytes, capture.capturedBytes);
+        capture.capturedBytes += bytes.byteLength;
+      }
+      if (capture.responseBytes > BoundaryCapture.RESPONSE_LIMIT) capture.bounded = true;
+    } catch {
+      capture.failed = true;
+      this.owner.freshIncomplete("private_response_capture");
+    }
+  }
+
+  stageEnd(outcome) {
+    const capture = this.privateCapture;
+    if (!capture) return;
+    if (!capture.directoryReady) {
+      capture.bytes = undefined;
+      return;
+    }
+    try {
+      writeFileSync(join(capture.directory, capture.response), capture.bytes.subarray(0, capture.capturedBytes), { flag: "wx", mode: 0o600 });
+      writeFileSync(join(capture.directory, capture.manifest), JSON.stringify({
+        version: 1, protocol: "openai_responses", capture_id: this.owner.capture, flow: this.flow,
+        request_file: capture.request, response_file: capture.response,
+        request_bytes: capture.requestBytes, response_bytes: capture.responseBytes, captured_response_bytes: capture.capturedBytes,
+        outcome, status: this.status ?? null, eof: outcome === "eof", response_bound_exceeded: capture.bounded,
+        body_capture_complete: !capture.failed && !capture.bounded && outcome === "eof",
+        provider_correlation_complete: this.complete && this.invalidFrames === 0 && this.responses.phase === "completed",
+        receipt_persistence_complete: this.owner.receiptPersistenceComplete,
+      }) + "\n", { flag: "wx", mode: 0o600 });
+      this.owner.emit({ event: "private_bodies_staged", flow: this.flow,
+        capture: !capture.failed && !capture.bounded && outcome === "eof" ? "complete" : "incomplete",
+        request_bytes: capture.requestBytes, response_bytes: capture.responseBytes, captured_response_bytes: capture.capturedBytes,
+      });
+    } catch {
+      capture.failed = true;
+      this.owner.freshIncomplete("private_response_write");
+    } finally {
+      capture.bytes = undefined;
+    }
+  }
+
   observe(response) {
     this.status = response.status;
     if (this.fresh) this.decoder = new TextDecoder("utf-8", { fatal: true });
@@ -508,6 +627,7 @@ class BoundaryResponse {
   }
 
   chunk(value) {
+    this.stageChunk(value);
     try {
       if (!this.complete) return;
       this.bytes += value.byteLength;
@@ -737,14 +857,15 @@ class BoundaryResponse {
     const complete = this.complete && this.invalidFrames === 0 && outcome === "eof"
       && this.status >= 200 && this.status < 300 && this.format === "sse" && state.phase === "completed";
     const parts = complete ? [...state.items].sort(([left], [right]) => left - right)
-      .flatMap(([, item]) => item.kind === "message"
-        ? [...item.parts].sort(([left], [right]) => left - right).map(([, part]) => part) : []) : [];
+      .flatMap(([output_index, item]) => item.kind === "message"
+        ? [...item.parts].sort(([left], [right]) => left - right).map(([content_index, part]) => ({ output_index, content_index, ...part })) : []) : [];
     const snapshots = {
       done: parts.map((part) => part.doneText).join(""),
       part: parts.map((part) => part.partText).join(""),
       item: parts.map((part) => part.itemText).join(""),
       final: parts.map((part) => part.finalText).join(""),
       model: state.model,
+      parts,
     };
     this.owner.freshResponse(this.flow, complete, parts.map((part) => part.delta).join(""),
       "responses_terminal_or_capture_shape", snapshots);
@@ -888,6 +1009,7 @@ class BoundaryResponse {
       this.complete = false;
     }
     if (this.fresh && this.responses) {
+      this.stageEnd(outcome);
       this.responsesEnd(outcome);
     } else if (this.fresh) {
       const complete = this.complete && this.invalidFrames === 0 && outcome === "eof"

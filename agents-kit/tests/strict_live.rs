@@ -1,4 +1,5 @@
 mod caller_shell;
+mod cloud_output_evidence;
 mod codex_input_evidence;
 mod custom_provider_evidence;
 mod custom_provider_observation;
@@ -6,5 +7,6 @@ mod knowledge_evidence;
 mod native_cleanup;
 mod native_process;
 mod native_stream;
+mod opencode_foreground_evidence;
 mod opencode_question_evidence;
 mod strict_live_suite;

@@ -173,7 +173,7 @@ class CampaignLedger:
 
     def finish(self, directory, reservation, report, retained_roots):
         report = dict(report, **reservation, state="settled")
-        report["continue_allowed"] = CampaignPolicy.can_continue(report)
+        report["continue_allowed"] = CampaignPolicy.can_continue(report) and report["attempt"] < CampaignPolicy.LIMIT
         CampaignPolicy.write_new(directory / "receipt.json", report)
         CampaignPolicy.write_new(directory / "seal.json", {
             "attempt_evidence": CampaignPolicy.snapshot(list(directory.iterdir())),

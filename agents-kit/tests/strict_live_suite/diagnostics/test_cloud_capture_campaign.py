@@ -61,6 +61,8 @@ class CampaignPolicyContract(unittest.TestCase):
         for number in range(1, 4):
             directory = self.finish()
             self.assertEqual(f"attempt-{number:02d}", directory.name)
+            receipt = json.loads((directory / "receipt.json").read_text())
+            self.assertEqual(number < 3, receipt["continue_allowed"])
         with self.assertRaisesRegex(RuntimeError, "budget"):
             self.ledger.reserve()
 

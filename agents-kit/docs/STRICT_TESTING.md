@@ -268,6 +268,24 @@ This description supplies no expected answer and changes no exact-output,
 one-call, streaming, deadline, or cleanup assertion. A description correction
 is a changed model input and requires fresh live qualification.
 
+The Codex process-delivery prompt requires native shell execution exactly once.
+The selected native runtime registers shell execution as a tool; this fixture
+installs no managed Toolset. Process
+ordering, exclusive delivery, replay, exact output, exit status, terminal drain,
+and the original observation and cleanup bounds remain required. Changing this
+prompt changes model input and requires fresh live qualification.
+
+A failed cloud-stream output assertion retains its original panic before
+bounded native readback. Before cleanup, at most three read-only requests inspect
+the owned OpenCode service's health, unique session, and exact prompt's terminal
+history. Capture ends at the earlier of the original scenario deadline and ten
+seconds. A diagnostic of at most 4 KiB reports lengths, fingerprints, and exact
+comparisons of native and incremental text with the portable and expected output,
+without native identities or raw content. This later history snapshot does not
+establish the original HTTP response or model authorship. Missing, interrupted, or failed
+capture preserves the original assertion failure and all cleanup obligations;
+the successful path performs no additional native requests.
+
 Kit correctness assertions run for every configured model. Prompts that request
 an exact token or interaction answer require exact raw terminal equality, with
 one explicitly approved acceptance-policy exception for these two cases:

@@ -104,6 +104,12 @@ callers supply concrete implementations and test-local mocks while preserving
 associated child types. Applications receive ready storage and agents; they do
 not reconstruct lower-crate credentials or configuration.
 
+![ai-kit architecture: App uses caller-supplied agents and storage; Agents own separate state, with provider and tool integrations on the Custom path and optional managed knowledge.](docs/assets/ai-kit-architecture.svg)
+
+App and Agent state stores have separate ownership. The provider and tool
+connections show the Custom agent path. View the [full-size diagram](docs/assets/ai-kit-architecture.svg)
+or the [original blog article](https://johnconnorsanders.com/blog/announcing-ai-kit/#content-architecture).
+
 See the [workspace architecture](ARCHITECTURE.md) for ownership and public
 boundaries, and [direct-trait mock testing](docs/mock-testing.md) for executable
 composition examples. Detailed API contracts and workflows live in the linked

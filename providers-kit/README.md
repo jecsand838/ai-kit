@@ -15,10 +15,10 @@ Provider -> Model -> Session
 
 `Provider` selects an exact `ModelId` and owns provider-wide resources.
 `Model` performs generation, streaming, embeddings, batch submission, and
-session opening. The approved Session target gives all four providers a
-Conversation profile retaining exact conversational continuity, plus explicit
-OpenAI Realtime and Gemini Live profiles. This target is under implementation;
-these documentation changes are not a qualification receipt. Stateless OpenAI
+session opening. All four supplied providers expose a Conversation profile
+retaining exact conversational continuity. OpenAI Realtime and Gemini Live
+provide explicit native Realtime profiles. Qualification is established by
+recorded validation of the exact source and invocation. Stateless OpenAI
 audio remains separately unsupported. Direct stateless multi-turn generation
 continues to reuse returned messages.
 

@@ -7,9 +7,8 @@ model as the owner of model-bound operations:
 Provider -> Model -> Session
 ```
 
-The Session portions of this document specify the approved target under
-implementation. They establish ownership before the tests-first migration and
-do not assert a completed implementation or live qualification.
+This document defines current Session ownership. Qualification is established
+separately by recorded validation of the exact source and invocation.
 
 The crate intentionally does not contain a reusable agent loop. Tool execution,
 approvals, shell behavior, generation-retry policy, durable recovery, and

@@ -889,6 +889,29 @@ impl<C> Message<C> {
 }
 
 impl GenerationContinuation {
+    pub(crate) fn retained_bytes(&self) -> Result<usize, KitError> {
+        let mut size = RetainedSize::new();
+        size.add(self.model_id.as_str().len())?;
+        match &self.inner {
+            NativeContinuation::OpenAi { output_items } => {
+                for value in output_items {
+                    size.json(value)?;
+                }
+            }
+            NativeContinuation::Anthropic { content_blocks } => {
+                for value in content_blocks {
+                    size.json(value)?;
+                }
+            }
+            NativeContinuation::Gemini { signed_parts } => {
+                for value in signed_parts {
+                    size.json(value)?;
+                }
+            }
+            NativeContinuation::Ollama { thinking } => size.add(thinking.len())?,
+        }
+        Ok(size.bytes)
+    }
     pub(crate) fn open_ai(model_id: ModelId, output_items: Vec<Value>) -> Self {
         Self {
             model_id,
@@ -2671,6 +2694,27 @@ pub struct GenerateResponse<C = GenerationContinuation> {
 }
 
 impl<C> GenerateResponse<C> {
+    pub(crate) fn into_session_parts(self) -> (Message<C>, GenerateResponse<()>) {
+        let observation = Message {
+            role: self.message.role,
+            content: self.message.content.clone(),
+            function_calls: self.message.function_calls.clone(),
+            function_results: self.message.function_results.clone(),
+            continuation: None,
+        };
+        (
+            self.message,
+            GenerateResponse {
+                model: self.model,
+                message: observation,
+                finish_reason: self.finish_reason,
+                citations: self.citations,
+                artifacts: self.artifacts,
+                hosted_tool_outputs: self.hosted_tool_outputs,
+                usage: self.usage,
+            },
+        )
+    }
     /// Maps only opaque continuation values.
     ///
     /// # Errors
@@ -2883,5 +2927,428 @@ impl Usage {
     pub(crate) fn with_reasoning(mut self, reasoning_tokens: Option<u64>) -> Self {
         self.reasoning_tokens = reasoning_tokens;
         self
+    }
+}
+
+/// Checked accounting walks retained payloads without copying or serializing replay.
+pub(crate) struct RetainedSize {
+    bytes: usize,
+}
+
+impl RetainedSize {
+    pub(crate) fn new() -> Self {
+        Self { bytes: 0 }
+    }
+    pub(crate) fn add(&mut self, bytes: usize) -> Result<(), KitError> {
+        self.bytes = self
+            .bytes
+            .checked_add(bytes)
+            .ok_or_else(|| KitError::invalid_state("session retained byte accounting overflow"))?;
+        Ok(())
+    }
+    pub(crate) fn bytes(&self) -> usize {
+        self.bytes
+    }
+    pub(crate) fn session_config(
+        &mut self,
+        config: &crate::session::SessionConfig,
+    ) -> Result<(), KitError> {
+        self.add(std::mem::size_of::<crate::session::SessionConfig>())?;
+        self.add(config.instructions().map_or(0, str::len))?;
+        self.add(config.input_audio_format().map_or(0, str::len))?;
+        self.add(config.output_audio_format().map_or(0, str::len))?;
+        for stop in config.generation().stop_sequences() {
+            self.add(stop.len())?;
+        }
+        match config.generation().tool_choice() {
+            Some(ToolChoice::Tool { name }) => self.add(name.len())?,
+            Some(ToolChoice::Allowed { names, .. }) => {
+                for name in names {
+                    self.add(name.len())?;
+                }
+            }
+            _ => {}
+        }
+        if let Some(ResponseFormat::JsonSchema(schema)) = config.response_format() {
+            self.json(schema.schema())?;
+        }
+        for tool in config.tools() {
+            self.add(std::mem::size_of::<ProviderToolSpec>())?;
+            match tool {
+                ProviderToolSpec::Function(function) => {
+                    self.add(function.name().len())?;
+                    self.add(function.description().map_or(0, str::len))?;
+                    self.json(function.input_schema().schema())?;
+                }
+                ProviderToolSpec::Hosted(HostedTool::FileSearch { store_ids }) => {
+                    for id in store_ids {
+                        self.add(id.len())?;
+                    }
+                }
+                ProviderToolSpec::Hosted(_) => {}
+            }
+        }
+        Ok(())
+    }
+    pub(crate) fn json(&mut self, value: &Value) -> Result<(), KitError> {
+        self.add(std::mem::size_of::<Value>())?;
+        match value {
+            Value::String(text) => self.add(text.len()),
+            Value::Array(values) => {
+                for value in values {
+                    self.json(value)?;
+                }
+                Ok(())
+            }
+            Value::Object(values) => {
+                for (key, value) in values {
+                    self.add(key.len())?;
+                    self.json(value)?;
+                }
+                Ok(())
+            }
+            Value::Null | Value::Bool(_) | Value::Number(_) => Ok(()),
+        }
+    }
+    fn file(&mut self, file: &FileReference) -> Result<(), KitError> {
+        match file {
+            FileReference::Provider { id, media_type } => {
+                self.add(id.len())?;
+                self.add(media_type.as_ref().map_or(0, String::len))
+            }
+            FileReference::Url { url, media_type } => {
+                self.add(url.as_str().len())?;
+                self.add(media_type.as_ref().map_or(0, String::len))
+            }
+        }
+    }
+    pub(crate) fn content(&mut self, content: &ContentPart) -> Result<(), KitError> {
+        self.add(std::mem::size_of::<ContentPart>())?;
+        match content {
+            ContentPart::Text { text } => self.add(text.len()),
+            ContentPart::Thinking { text } => self.add(text.as_ref().map_or(0, String::len)),
+            ContentPart::ImageUrl { url } => self.add(url.as_str().len()),
+            ContentPart::Image { media_type, data } | ContentPart::Audio { media_type, data } => {
+                self.add(media_type.len())?;
+                self.add(data.len())
+            }
+            ContentPart::Document {
+                media_type,
+                data,
+                file_name,
+            } => {
+                self.add(media_type.len())?;
+                self.add(data.len())?;
+                self.add(file_name.as_ref().map_or(0, String::len))
+            }
+            ContentPart::File { reference } => self.file(reference),
+            ContentPart::Json { value } => self.json(value),
+        }
+    }
+    pub(crate) fn call(&mut self, call: &FunctionCall) -> Result<(), KitError> {
+        self.add(std::mem::size_of::<FunctionCall>())?;
+        self.add(call.id().map_or(0, str::len))?;
+        self.add(call.name().len())?;
+        self.json(call.arguments())
+    }
+    pub(crate) fn result(&mut self, result: &FunctionResult) -> Result<(), KitError> {
+        self.add(std::mem::size_of::<FunctionResult>())?;
+        self.add(result.call_id().map_or(0, str::len))?;
+        self.add(result.name().len())?;
+        for content in result.content() {
+            self.content(content)?;
+        }
+        Ok(())
+    }
+    pub(crate) fn message<C>(&mut self, message: &Message<C>) -> Result<(), KitError> {
+        self.add(std::mem::size_of::<Message<C>>())?;
+        for content in message.content() {
+            self.content(content)?;
+        }
+        for call in message.function_calls() {
+            self.call(call)?;
+        }
+        for result in message.function_results() {
+            self.result(result)?;
+        }
+        Ok(())
+    }
+    fn optional(&mut self, value: &Option<String>) -> Result<(), KitError> {
+        self.add(value.as_ref().map_or(0, String::len))
+    }
+    fn citation(&mut self, citation: &Citation) -> Result<(), KitError> {
+        self.add(std::mem::size_of::<Citation>())?;
+        match citation {
+            Citation::Url {
+                url,
+                title,
+                snippet,
+                ..
+            } => {
+                self.add(url.len())?;
+                self.optional(title)?;
+                self.optional(snippet)
+            }
+            Citation::File {
+                reference,
+                title,
+                snippet,
+                ..
+            } => {
+                self.file(reference)?;
+                self.optional(title)?;
+                self.optional(snippet)
+            }
+        }
+    }
+    fn artifact(&mut self, artifact: &Artifact) -> Result<(), KitError> {
+        self.add(std::mem::size_of::<Artifact>())?;
+        match artifact {
+            Artifact::Inline {
+                media_type,
+                file_name,
+                description,
+                data,
+            } => {
+                self.add(media_type.len())?;
+                self.optional(file_name)?;
+                self.optional(description)?;
+                self.add(data.len())
+            }
+            Artifact::File {
+                reference,
+                file_name,
+                description,
+            } => {
+                self.file(reference)?;
+                self.optional(file_name)?;
+                self.optional(description)
+            }
+        }
+    }
+    fn native_details(
+        &mut self,
+        details: &crate::error::NativeErrorDetails,
+    ) -> Result<(), KitError> {
+        use crate::error::NativeDetail;
+        self.add(std::mem::size_of::<crate::error::NativeErrorDetails>())?;
+        for value in [
+            &details.message,
+            &details.body,
+            &details.code,
+            &details.error_type,
+            &details.event_type,
+            &details.outcome,
+            &details.parameter,
+            &details.request_id,
+            &details.event_id,
+            &details.related_event_id,
+            &details.tool_call_id,
+            &details.native_status,
+            &details.retry_after,
+            &details.url,
+        ] {
+            self.optional(value)?;
+        }
+        for detail in &details.details {
+            self.add(std::mem::size_of::<NativeDetail>())?;
+            match detail {
+                NativeDetail::Reason { domain, reason } => {
+                    self.add(domain.len())?;
+                    self.add(reason.len())?;
+                }
+                NativeDetail::Resource {
+                    resource_type,
+                    name,
+                    owner,
+                    description,
+                } => {
+                    self.optional(resource_type)?;
+                    self.add(name.len())?;
+                    self.optional(owner)?;
+                    self.optional(description)?;
+                }
+                NativeDetail::FieldViolation {
+                    field,
+                    reason,
+                    description,
+                } => {
+                    self.add(field.len())?;
+                    self.optional(reason)?;
+                    self.optional(description)?;
+                }
+                NativeDetail::QuotaViolation {
+                    subject,
+                    description,
+                } => {
+                    self.optional(subject)?;
+                    self.optional(description)?;
+                }
+                NativeDetail::PreconditionViolation {
+                    kind,
+                    subject,
+                    description,
+                } => {
+                    self.optional(kind)?;
+                    self.optional(subject)?;
+                    self.optional(description)?;
+                }
+                NativeDetail::RetryDelay { .. } => {}
+            }
+        }
+        Ok(())
+    }
+    pub(crate) fn error(&mut self, error: &KitError) -> Result<(), KitError> {
+        self.add(std::mem::size_of::<KitError>())?;
+        self.native_details(error.native_details())?;
+        self.add(error.request_target().map_or(0, str::len))?;
+        self.add(error.correlation_id().map_or(0, str::len))?;
+        match error.response_details() {
+            Some(crate::error::ResponseDetails::Discriminator { actual }) => {
+                self.add(actual.len())?
+            }
+            Some(crate::error::ResponseDetails::Identity { expected, actual }) => {
+                self.add(expected.len())?;
+                self.add(actual.len())?;
+            }
+            _ => {}
+        }
+        if let Some(cause) = error.cause() {
+            self.error(cause)?;
+        }
+        for error in error.supplementary() {
+            self.error(error)?;
+        }
+        Ok(())
+    }
+    fn hosted_status(
+        &mut self,
+        status: &Option<crate::hosted::HostedToolStatus>,
+    ) -> Result<(), KitError> {
+        if let Some(crate::hosted::HostedToolStatus::Failed { error }) = status {
+            self.native_details(error.native_details())?;
+        }
+        Ok(())
+    }
+    fn hosted(&mut self, output: &HostedToolOutput) -> Result<(), KitError> {
+        use crate::hosted::HostedWebSearchAction;
+        self.add(std::mem::size_of::<HostedToolOutput>())?;
+        match output {
+            HostedToolOutput::WebSearch {
+                status,
+                action,
+                results,
+                citations,
+            } => {
+                self.hosted_status(status)?;
+                match action {
+                    Some(HostedWebSearchAction::Search {
+                        query,
+                        queries,
+                        sources,
+                    }) => {
+                        self.optional(query)?;
+                        for query in queries {
+                            self.add(query.len())?;
+                        }
+                        for source in sources {
+                            self.optional(&source.title)?;
+                            self.add(source.url.len())?;
+                        }
+                    }
+                    Some(HostedWebSearchAction::OpenPage { url }) => self.optional(url)?,
+                    Some(HostedWebSearchAction::FindInPage { url, pattern }) => {
+                        self.add(url.len())?;
+                        self.add(pattern.len())?;
+                    }
+                    None => {}
+                }
+                for result in results {
+                    self.optional(&result.title)?;
+                    self.add(result.url.len())?;
+                    self.optional(&result.snippet)?;
+                }
+                for citation in citations {
+                    self.citation(citation)?;
+                }
+            }
+            HostedToolOutput::FileSearch {
+                status,
+                queries,
+                results,
+                citations,
+            } => {
+                self.hosted_status(status)?;
+                for query in queries {
+                    self.add(query.len())?;
+                }
+                if let Some(results) = results {
+                    for result in results {
+                        self.add(result.file_id.len())?;
+                        self.optional(&result.file_name)?;
+                        self.optional(&result.text)?;
+                    }
+                }
+                for citation in citations {
+                    self.citation(citation)?;
+                }
+            }
+            HostedToolOutput::CodeExecution {
+                status,
+                code,
+                results,
+                artifacts,
+            } => {
+                self.hosted_status(status)?;
+                for source in code {
+                    self.optional(&source.language)?;
+                    self.add(source.code.len())?;
+                }
+                for result in results {
+                    self.hosted_status(&result.status)?;
+                    self.optional(&result.logs)?;
+                    self.optional(&result.stdout)?;
+                    self.optional(&result.stderr)?;
+                }
+                for artifact in artifacts {
+                    self.artifact(artifact)?;
+                }
+            }
+            HostedToolOutput::UrlContext {
+                requested_url,
+                retrieved_url,
+                status,
+                citations,
+            } => {
+                self.optional(requested_url)?;
+                self.optional(retrieved_url)?;
+                self.hosted_status(status)?;
+                for citation in citations {
+                    self.citation(citation)?;
+                }
+            }
+        }
+        Ok(())
+    }
+    pub(crate) fn response<C>(&mut self, response: &GenerateResponse<C>) -> Result<(), KitError> {
+        self.add(std::mem::size_of::<GenerateResponse<C>>())?;
+        self.add(response.model.as_str().len())?;
+        self.message(&response.message)?;
+        for citation in &response.citations {
+            self.citation(citation)?;
+        }
+        for artifact in &response.artifacts {
+            self.artifact(artifact)?;
+        }
+        for hosted in &response.hosted_tool_outputs {
+            self.hosted(hosted)?;
+        }
+        Ok(())
+    }
+}
+
+impl GenerateRequest<GenerationContinuation> {
+    pub(crate) fn append_session(&mut self, message: Message<GenerationContinuation>) {
+        self.messages.push(message);
     }
 }

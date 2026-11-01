@@ -17,10 +17,8 @@ The public backend contracts are `ProviderBackend`, `ModelBackend`, and
 `session::SessionCommands` and `session::SessionEvents`. The exact caller surface is owned by
 [`docs/PORTABLE_API.md`](docs/PORTABLE_API.md).
 
-The Session rules below are the approved target contract for the session
-refactor. Documentation pre-work establishes this authority before tests and
-production migration; it is not a claim that implementation or qualification
-has already completed.
+The Session rules below define the current contract. Qualification is
+established separately by recorded validation of the exact source and invocation.
 
 providers-kit does not own an agent loop, executable tool runtime, shell
 runtime, approval system, durable factory, public conformance suite, or

@@ -26,19 +26,19 @@ source providers-kit/strict-tests.env && bash providers-kit/scripts/verify_stric
   `Provider::model(ModelId)`.
 - OpenAI, Anthropic, Gemini, and Ollama concrete Models own generation,
   demand-driven streaming, supported embeddings, and batch submission. The
-  approved Session target requires a Conversation baseline for each provider
-  and independent OpenAI Realtime/Gemini Live profiles. Expand the canonical
-  live inventory with two exchanges and a tool round trip per Conversation
-  provider plus authentic Gemini Live cases; old inventory passes do not prove
-  the new target. Historical Gemini withdrawal remains historical evidence,
-  not an active implementation prohibition. Stateless OpenAI audio remains
+  Session contract requires a Conversation baseline for each provider
+  and independent OpenAI Realtime/Gemini Live profiles. The canonical live
+  inventory includes two exchanges and a tool round trip per Conversation
+  provider plus authentic Gemini Live cases; passing a prior inventory does not
+  qualify added scenarios. Historical Gemini withdrawal remains historical
+  evidence, not an active implementation prohibition. Stateless OpenAI audio remains
   separately unsupported; stateless Gemini audio is unaffected.
 - Select profiles explicitly and preserve exact configured model ids. Gemini
   Live requires `TEST_GEMINI_MODEL_INTERACTIVE`, initially exact
   `models/gemini-3.8-live`; account/model unavailability is a blocker, not a
-  reason to fall back. Update env contracts, verifier, assertion helpers and
-  evidence reporters with the new cases. Documentation pre-work does not claim
-  their implementation or live qualification is complete.
+  reason to fall back. Keep env contracts, verifier, assertion helpers and
+  evidence reporters synchronized with the canonical inventory. Native
+  qualification requires recorded validation of the exact source and invocation.
 - Provider owns discovery, files, batch lifecycle, health, and shared shutdown.
 - Function-calling proof preserves exact call correlation and replays the full
   model-authored assistant Message. OpenAI, Anthropic, Gemini, and Ollama proof

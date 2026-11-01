@@ -1,8 +1,8 @@
 # Gemini Provider Notes
 
-Session guidance in this note is the approved target under implementation.
-It governs the tests-first refactor without claiming a completed implementation
-or new native qualification. Other provider behavior retains its existing scope.
+Session behavior follows the current [portable API contract](../PORTABLE_API.md).
+Native qualification is recorded separately for the tested source and configuration.
+Other provider behavior retains its existing scope.
 
 Gemini construction uses provider-owned config. Model selection uses the exact
 Gemini resource/model id through `Provider::model(ModelId)`; the Kit does not
@@ -48,6 +48,15 @@ all late events or outstanding tools have drained. Input activity start/end and
 `audioStreamEnd` are distinct controls. Do not implement cancellation through an
 empty completed input or claim narrow response cancellation/playback semantics
 that the protocol cannot support; reject those requests honestly.
+
+Supplied Live function declarations explicitly select native `behavior: BLOCKING`.
+Gemini 3.8 Live defaults to `NON_BLOCKING` but also supports blocking execution;
+the supplied mapping chooses blocking continuation so the caller can resolve a
+function request during the active response before generation completes. This
+is a provider-local wire choice, with no new portable policy option or automatic
+tool execution. Asynchronous function scheduling is outside this supplied
+mapping. See the [official model comparison and asynchronous function calling
+guide](https://ai.google.dev/gemini-api/docs/live-api/capabilities).
 
 Input transcription arrives independently with no guaranteed ordering and may
 lack an attribution identifier. Preserve that absence rather than attaching it

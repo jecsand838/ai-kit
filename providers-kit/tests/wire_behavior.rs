@@ -33,6 +33,66 @@ use support::scripted_http::{RecordedRequest, ScriptedResponse, spawn_scripted_h
 struct OpaqueContinuation;
 
 #[tokio::test]
+async fn sse_carriage_return_lines_and_fragmented_crlf_preserve_completion() {
+    // SSE permits CR, LF and CRLF line endings. Native response envelope follows
+    // OpenAI Responses response.completed; only transport chunking is synthetic.
+    let native = json!({"type":"response.completed","response":{
+        "model":"gpt-wire","status":"completed","output":[{
+            "type":"message","role":"assistant","content":[{
+                "type":"output_text","text":"complete 😀"}]}]}})
+    .to_string();
+    let split = native
+        .find(',')
+        .expect("native envelope has multiple fields")
+        + 1;
+    for chunks in [
+        vec![format!("data: {native}\r\r").into_bytes()],
+        vec![
+            format!("data: {native}\r").into_bytes(),
+            b"\n\r".to_vec(),
+            b"\n".to_vec(),
+        ],
+        vec![
+            b": keepalive\r".to_vec(),
+            format!("data: {native}\r\n\r").into_bytes(),
+            b"\n".to_vec(),
+        ],
+        vec![format!("data: {}\rdata: {}\r\r", &native[..split], &native[split..]).into_bytes()],
+    ] {
+        let mut server = spawn_scripted_http_server(vec![ScriptedResponse::chunks(
+            200,
+            "text/event-stream",
+            chunks,
+        )])
+        .await;
+        let model = WireProvider::OpenAi.api_model(server.base_url(), "gpt-wire");
+        let result = model
+            .generate_stream(&WireRequest::user("stream"))
+            .await
+            .expect("fixture HTTP stream opens")
+            .try_collect::<Vec<_>>()
+            .await;
+        let settled = server.finish(Duration::from_secs(2)).await;
+        assert_eq!(settled, Ok(()));
+        let events = result.expect("all legal SSE line endings must parse");
+        let completions = events
+            .iter()
+            .filter_map(|event| match event {
+                GenerateEvent::Completed(response) => Some(response),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(completions.len(), 1, "one authoritative terminal response");
+        assert_eq!(
+            completions[0].message.content(),
+            &[ContentPart::Text {
+                text: "complete 😀".into()
+            }]
+        );
+    }
+}
+
+#[tokio::test]
 async fn provider_http_reports_current_sdk_version() {
     let mut server =
         spawn_scripted_http_server(vec![ScriptedResponse::json(r#"{"data":[]}"#)]).await;

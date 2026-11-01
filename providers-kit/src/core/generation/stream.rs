@@ -155,6 +155,7 @@ impl FrameDecoder {
             body: Some(response.bytes_stream()),
             chunk: None,
             cursor: 0,
+            skip_lf: false,
             line: String::new(),
             utf8_suffix: Vec::new(),
             decoder: self,
@@ -216,6 +217,7 @@ struct FramedStreamState<S, F, B, C> {
     body: Option<S>,
     chunk: Option<B>,
     cursor: usize,
+    skip_lf: bool,
     line: String,
     utf8_suffix: Vec<u8>,
     decoder: FrameDecoder,
@@ -301,9 +303,20 @@ where
             self.cursor = 0;
             return Ok(true);
         }
-        if let Some(offset) = bytes[self.cursor..].iter().position(|byte| *byte == b'\n') {
+        if self.skip_lf {
+            self.skip_lf = false;
+            if bytes[self.cursor] == b'\n' {
+                self.cursor += 1;
+            }
+        }
+        let sse = self.decoder.parser.is_some();
+        if let Some(offset) = bytes[self.cursor..]
+            .iter()
+            .position(|byte| *byte == b'\n' || (sse && *byte == b'\r'))
+        {
             let end = self.cursor + offset;
             self.push_bytes(&bytes[self.cursor..end])?;
+            self.skip_lf = sse && bytes[end] == b'\r';
             self.cursor = end + 1;
             self.chunk = Some(chunk);
             self.finish_line()?;

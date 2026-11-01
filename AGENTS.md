@@ -131,9 +131,9 @@ portable hosted-tool configuration, wire adaptation and shared shutdown.
 
 `Provider -> Model -> Session` is a resource hierarchy. `Model` owns exact
 selected-model stateless calls; `Session` owns conversational continuity for
-that exact model. The approved target contract requires explicit Conversation
-sessions for all four supplied providers and native Realtime sessions for
-OpenAI and Gemini. Managed Conversation sessions reuse generation and preserve
+that exact model. All four supplied providers expose explicit Conversation
+sessions; OpenAI and Gemini also expose native Realtime sessions.
+Managed Conversation sessions reuse generation and preserve
 authoritative assistant messages and opaque continuation unchanged. The
 caller owns tool execution, approvals and agent policy; accepting a validated
 tool-result set may trigger one continuation generation, never an autonomous
@@ -159,8 +159,7 @@ generation admission. Sealing rejects new work while observation, cancellation
 and consuming cleanup remain available. Track and join owned tasks, preserve
 primary failures, and never claim remote stop from local cleanup alone. Exact
 signatures and provider support rules belong to Provider's portable contract.
-This target guidance is normative pre-work for the approved refactor, not a
-claim of completed implementation or passing validation.
+Qualification requires recorded validation of the exact source and invocation.
 
 Normalized `FunctionCall`/`FunctionResult` cross the boundary.
 `ModelBackend::Continuation` associates exact selected-Model replay. Supplied
@@ -350,8 +349,8 @@ record red evidence. Require independent subagent review of the actual diff
 before closing an area. Check existing owners for extension/reduction before
 adding abstractions. Run one Cargo command at a time.
 
-For the approved Session refactor, update and independently review active
-target-state agentic guidance before tests or production edits. Then record
+For Session contract changes, update and independently review active
+agentic guidance before tests or production edits. Then record
 failing tests before each production area, require green behavioral regressions
 after the public surface compiles, and independently review that area's actual
 implementation diff. A new-API compile failure alone does not establish the

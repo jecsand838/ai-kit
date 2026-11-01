@@ -9,11 +9,14 @@ use crate::generation::{
 };
 use crate::models::{ModelBackend, ModelId};
 
+use super::api::GeminiApiContext;
 use super::batches::render_batch_submission;
 use super::client::GeminiClient;
 use super::embeddings::{build_embed_request, normalize_embed_response};
 use super::generate_content::{build_generate_body, normalize_generate_response};
 use super::reasoning::GeminiThinkingProfile;
+use super::session::GeminiSession;
+use crate::session::SessionConfig;
 
 pub(crate) use catalog::{list_models, model_info};
 
@@ -35,14 +38,22 @@ impl GeminiModel {
     fn thinking(&self) -> GeminiThinkingProfile {
         GeminiThinkingProfile::for_model(self.id.as_str())
     }
+
+    pub(crate) fn api(&self) -> &GeminiApiContext {
+        self.client.api()
+    }
 }
 
 impl ModelBackend for GeminiModel {
     type Continuation = GenerationContinuation;
-    type Session = std::convert::Infallible;
+    type Session = GeminiSession;
 
     fn model_id(&self) -> &ModelId {
         &self.id
+    }
+
+    async fn open_session(&self, config: SessionConfig) -> Result<Self::Session, KitError> {
+        GeminiSession::open(self, config).await
     }
 
     async fn generate(&self, request: &GenerateRequest) -> Result<GenerateResponse, KitError> {

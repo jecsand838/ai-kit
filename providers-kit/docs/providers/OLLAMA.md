@@ -1,8 +1,8 @@
 # Ollama Provider Notes
 
-Session guidance in this note is the approved target under implementation.
-It governs the tests-first refactor without claiming a completed implementation
-or new native qualification. Other provider behavior retains its existing scope.
+Session behavior follows the current [portable API contract](../PORTABLE_API.md).
+Native qualification is recorded separately for the tested source and configuration.
+Other provider behavior retains its existing scope.
 
 Local Ollama construction uses typed unauthenticated config rather than an
 empty API key. Model selection uses the exact installed tag through

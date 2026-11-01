@@ -5,6 +5,7 @@ mod generation;
 mod hosted;
 mod ollama_settings;
 mod resources;
+mod sessions;
 mod stores;
 
 use std::env;

@@ -144,9 +144,9 @@ fields and receiver-owned behavior.
 mutable. A Model retains its Provider runtime; provider shutdown seals model
 handles and drains admitted work. Model has no separate lifecycle.
 
-The approved Session target contract is under implementation; this architecture
-states requirements, not a completed-support or qualification claim. Sessions
-select an explicit Conversation or Realtime profile for the exact Model.
+This architecture defines the current Session contract. Qualification is
+established separately by recorded validation of the exact source and invocation.
+Sessions select an explicit Conversation or Realtime profile for the exact Model.
 OpenAI, Anthropic, Gemini and Ollama each own a Conversation implementation
 composing their existing generation path. OpenAI Realtime and Gemini Live have
 separate native protocol mappings. Unsupported profile/model/configuration

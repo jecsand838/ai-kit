@@ -6,6 +6,83 @@ cancellation follow-up started at `1de968b3c98015f7fc48255d6ac40ef4593ca44d`.
 Regressions remain enabled; fixture and validation-setup errors are distinguished
 from production defects. Manifests, lockfiles, features, and vendor sources are unchanged.
 
+## Provider session refactor evidence — 2026-11-01, in progress
+
+The separately authorized session replacement starts at `2853a542`; its target
+guidance was committed first as `eca58db`. The following defects were reproduced
+through production wire paths before replacing the implementation. These are
+wire regressions, distinct from the direct-trait mock lane. All remain enabled.
+
+| Defect | Required regression | Recorded red behavior |
+| --- | --- | --- |
+| Missing/unknown Realtime terminal status became success | `session_lifecycle::session_refactor_rejects_missing_or_invalid_terminal_status` | `Completed` without affirmative status |
+| Realtime terminal usage was discarded | `session_lifecycle::session_refactor_preserves_authoritative_terminal_usage` | Completion arrived without final usage |
+| Known-cancelled queued function calls remained executable | `session_lifecycle::openai_audio_transcription_functions_and_cancellation_are_normalized` | Cancelled call delivered instead of invalidation |
+| CR-only SSE framing lost completion | `wire_behavior::sse_carriage_return_lines_and_fragmented_crlf_preserve_completion` | `InvalidResponse(UnexpectedEnd)` |
+
+Raw local red logs are retained under `target/session-refactor-evidence/` as
+`openai-terminal-red.log`, `openai-cancelled-tools-red.log`, and `framing-red.log`.
+Missing replacement surface and ownership compilation failures are separately
+recorded in `public-contract-red.log`, `ownership-contract-red.log`,
+`new-session-profiles-red.log`, and `managed-contract-red.log`; those failures
+alone are not behavioral proof.
+
+Tests against the first replacement implementation also reproduced accepting an
+unknown playback segment (`openai-behavior.log`), invalidating valid tools when
+cancelling an already completed response, and omitting retained configuration
+from the aggregate budget (`managed-behavior-rerun.log`). The earlier managed
+run failed on an unsupported fixture model and is retained as fixture error,
+not as cancellation evidence. `gemini-env-red.log` records the verifier missing
+the new required interactive model role. Fixes, independent review, and final
+source validation remain in progress; these records do not establish release
+qualification.
+
+Independent review added enabled regressions for the following replacement
+defects. Each log below records a behavioral failure before its associated fix;
+the later full source gates remain authoritative for completion.
+
+| Area | Behavioral red logs under `target/session-refactor-evidence/` |
+| --- | --- |
+| Lost/reassigned native command correlation and repeated control receipts | `openai-correlation-red-rerun.log` |
+| Completion winning cancellation incorrectly invalidated executable tools | `cancellation-race-red.log` |
+| Admitted automatic audio lost during provider sealing | `openai-audio-admission-red.log`, `gemini-audio-ordering-red.log` |
+| Native tool declaration, frame bounds, duplicate terminals and late output | `gemini-reviewed-red-rerun.log` |
+| Accepted command secretly retained after failed submission | `managed-capacity-red.log` |
+| Control byte reserve, metadata accounting and fabricated cancellation identities | `managed-reviewed-bounds-red.log` |
+| Admitted managed completion discarded and undeclared calls published | `managed-sealing-tool-red.log` |
+| Terminal provider error misclassified as partial completion | `managed-terminal-error-red.log` |
+| Premature managed transport EOF misclassified as a settled failure | `managed-unresolved-red.log` |
+| Concurrent cancellation receipt orphaned and partial-tool continuity unsafe | `managed-cancel-handoff-red.log` |
+| Executable tools published before reserving all retained completion copies | `completion-copy-budget-red.log` |
+| Native control acknowledgement had no deadline | `openai-control-timeout-red.log` |
+| Accepted-but-unstarted native work lacked an explicit failure | `gemini-unstarted-red.log` |
+| Native malformed identity/argument errors leaked caller-input classification | `gemini-boundaries-behavior-red.log`, `openai-unstarted-errors-red.log` |
+| Native interruption/turn boundaries disappeared or changed attribution | `gemini-boundaries-behavior-red.log` |
+| New manual audio after tool interruption lost its generation ownership | `gemini-tool-interruption-red.log` |
+| Supplied command error omitted the public operation context | `session-submit-context-red.log` |
+| Session registration exhaustion omitted the open-session operation context | `session-registration-context-red.log` |
+| Gemini setup omitted blocking function execution required by the portable continuation contract | `gemini-blocking-tools-red.log` |
+| Live evidence accepted uncorrelated completion or old-response output | `session-evidence-red.log`, `session-evidence-correlation-red.log` |
+| Cancellation evidence accepted a different command receipt or target | `cancellation-evidence-correlation-red.log` |
+| Final transcription snapshots were omitted instead of replacing deltas | `transcription-snapshot-red.log` |
+
+The native-boundary API compile failure is separately retained in
+`native-boundary-contract-red.log`. The initial Gemini close failures exposed a
+shared socket defect: production close now drains the peer acknowledgement
+within its original deadline, while retaining the strict fixture. The subsequent
+OpenAI and shutdown fixture failures separately required flushing their queued
+WebSocket close acknowledgements. Unexpected transport closure remains an error.
+No suppressed cleanup failure,
+skipped regression or narrowed native acceptance replaces these records.
+
+The first cancellation-evidence invocation in `cancellation-evidence-red.log`
+selected zero tests and is not red evidence; the corrected correlation log above
+contains the actual failure. `release-target-inventory-red.log` separately records
+the stale test inventory omitting the three new Provider targets already included
+by the validation runner. Its additional
+Tool assertion failure came from the same fixture's accumulated trace after the
+Provider mismatch, not a separate Tool defect.
+
 ## Repair status — 2026-10-25
 
 M001 remains resolved. The separately authorized follow-up from `2da7fcaf`

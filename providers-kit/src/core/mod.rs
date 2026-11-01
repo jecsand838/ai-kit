@@ -16,7 +16,10 @@ pub(crate) use generation::{
     hosted_url_artifact, inline_media_part, push_provider_thinking_content, push_text_part,
     tool_call,
 };
-pub(crate) use session::{SessionSocket, SessionSocketMessage};
+pub(crate) use session::{
+    ManagedCommands, ManagedConversation, SessionControl, SessionEventPort, SessionSocket,
+    SessionSocketMessage,
+};
 pub(crate) use tools::{
     HostedToolMode, filter_tools_for_choice, selected_tools_for_choice, tool_name, tool_result_text,
 };

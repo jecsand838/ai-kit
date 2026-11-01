@@ -11,7 +11,9 @@ use providers_kit::config::{
 use providers_kit::embedding::EmbedRequest;
 use providers_kit::generation::{GenerateEvent, GenerateRequest, Message};
 use providers_kit::models::{ModelId, ModelListRequest};
-use providers_kit::session::{SessionBackend, SessionConfig, SessionInput};
+use providers_kit::session::{
+    SessionBackend, SessionCommand, SessionCommands, SessionConfig, SessionProfile,
+};
 use providers_kit::{ModelBackend, Provider, ProviderBackend, ProviderConfig};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -109,6 +111,10 @@ impl BlockingGenerateServer {
                         .expect("interactive close frame should decode")
                         .is_close()
                     {
+                        socket
+                            .flush()
+                            .await
+                            .expect("interactive close should be acknowledged");
                         break;
                     }
                 }
@@ -467,7 +473,7 @@ async fn every_provider_seals_existing_cloned_and_racing_models() {
                     (
                         "open_session",
                         model
-                            .open_session(SessionConfig::default())
+                            .open_session(SessionConfig::new(SessionProfile::Realtime))
                             .await
                             .map(|_| ()),
                     ),
@@ -504,7 +510,7 @@ async fn a_model_keeps_working_after_its_provider_handle_is_dropped() {
             .model(ModelId::new(OPENAI_SESSION_MODEL_ID).expect("session model id should validate"))
             .expect("session model should select")
             .open_session(
-                SessionConfig::default()
+                SessionConfig::new(SessionProfile::Realtime)
                     .with_output_audio("audio/pcm;rate=24000", false)
                     .expect("OpenAI output audio should validate"),
             )
@@ -546,7 +552,7 @@ async fn shutdown_drains_and_replays_with_cancelled_and_concurrent_waiters() {
                 .model(ModelId::new(OPENAI_SESSION_MODEL_ID).expect("session model id should validate"))
                 .expect("session model should select")
                 .open_session(
-                    SessionConfig::default()
+                    SessionConfig::new(SessionProfile::Realtime)
                         .with_output_audio("audio/pcm;rate=24000", false)
                         .expect("OpenAI output audio should validate"),
                 )
@@ -624,9 +630,7 @@ async fn shutdown_drains_and_replays_with_cancelled_and_concurrent_waiters() {
 
             assert!(matches!(
                 session
-                    .send(SessionInput::Text {
-                        text: "sealed".to_string(),
-                    })
+                    .split().0.submit(SessionCommand::Input(Message::user_text("sealed").expect("valid user message")))
                     .await,
                 Err(ref error) if error.kind() == ErrorKind::Closed
             ));
@@ -653,7 +657,7 @@ async fn cancelled_stream_opening_releases_provider_admission() {
             .model(ModelId::new(OPENAI_SESSION_MODEL_ID).expect("session model id should validate"))
             .expect("session model should select")
             .open_session(
-                SessionConfig::default()
+                SessionConfig::new(SessionProfile::Realtime)
                     .with_output_audio("audio/pcm;rate=24000", false)
                     .expect("OpenAI output audio should validate"),
             )

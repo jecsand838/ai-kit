@@ -33,9 +33,9 @@ portable API section before changing behavior.
     Keep local acceptance, remote outcomes, outstanding tools, capture, playback
     and continuity distinct; observation and cleanup remain available after seal.
 
-For the approved Session refactor, update conflicting active agentic guidance
-to the target contract before tests or production changes. This normative
-pre-work does not claim implementation or live qualification has completed.
+For Session contract changes, update conflicting active agentic guidance
+before tests or production changes. Qualification requires recorded validation
+of the exact source and invocation.
 During implementation, add or strengthen meaningful tests and record red
 evidence before production edits, then require passing controls and independent
 review. Run the exact completion validation contract in [`AGENTS.md`](AGENTS.md)

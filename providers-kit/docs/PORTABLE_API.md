@@ -11,10 +11,8 @@ traits and two subordinate borrowed Session-half traits.
 Caller types remain concrete and return their own associated children; the Kit
 has no erased ingress, extension arm, or normalization constructor.
 
-The Session contract below is the approved target under implementation. It
-supersedes native-only and owner-level send/receive guidance before the
-tests-first production migration; it does not claim that the target already
-passes deterministic or live qualification.
+This document owns the current Session contract. Qualification is established
+separately by recorded validation of the exact source and invocation.
 
 ## Contracts
 
@@ -118,6 +116,14 @@ side effect. After acceptance, the owner settles it independently of the waiter,
 without automatic resend. In-flight state precedes the first external write;
 partially applied writes require reconciliation or uncertain continuity.
 
+The command variants are `Input(Message<()>)`,
+`ToolResults(Vec<SessionToolResult>)`, `Cancel(CancelTarget)`, `StartInput`,
+`Audio { media_type, data }`, `EndInput`, `EndAudioStream`, `DiscardInput`, and
+`ReconcilePlayback { segment, played }`. `CancelTarget` identifies an accepted
+`CommandId` or a `ResponseId`; `played` is a `Duration`. `SessionToolResult::new`
+associates a `ToolRequestId` with an already validated `FunctionResult`.
+Submission validates the association against the live obligation registry.
+
 Command, response, tool-request and output-segment tokens are distinct opaque
 session-scoped values. Their public constructors validate the owner-local
 session identity and nonzero sequence; supplied owners check exhaustion,
@@ -149,8 +155,19 @@ status, malformed terminal data or premature EOF never become success. A
 response ending does not finish input capture, playback, late transcription or
 unrelated tool work. Preserve original auxiliary correlation; explicitly absent
 native attribution is preferable to assigning the currently active response.
+`Interruption { response: Option<ResponseId> }` reports a native interaction or
+playback interruption independently of generation completion. It can follow an
+already completed response without rewriting its outcome. An interrupted active
+generation still receives its one `ResponseFinished` outcome.
+`TurnEnded { response: Option<ResponseId> }` reports a native interaction/activity
+boundary and never supplies evidence of successful generation. Each retains
+the original response when the native mapping supports attribution; otherwise
+the absence is explicit. Neither event alone cancels unrelated tool obligations.
 Usage identifies its actual scope, retains unknown counts, and replaces
 compatible interim snapshots with authoritative totals without summing them.
+Transcription observations with `finalized = false` are deltas. A finalized
+transcription is the authoritative full value for its original source/segment;
+it replaces those interim deltas rather than being appended to them.
 
 Cancellation reports already-settled, acknowledged-stop, locally-stopped or
 unconfirmed/failed-stop resolution independently from continuity: reusable,
@@ -160,6 +177,9 @@ mutations while observation and cleanup remain available. Cancellation does not
 rewind accepted history, discard capture input or reconcile unplayed audio.
 Native acknowledgements must match the target; unrelated errors, EOF and timeout
 are not acknowledgements. A completed response wins a later cancellation race.
+`ControlApplied` means the supported local/native control send path completed;
+it does not independently prove remote application. Only the explicit
+`CancellationResolution::Stopped` makes the matching native stop claim.
 
 ### Exact managed history and progress
 
@@ -238,7 +258,7 @@ validation; native Realtime support is independently validated.
 Stateless OpenAI audio is temporarily unsupported by the supplied implementation,
 including unary/streamed generation and batch submission on its withdrawn exact
 audio-model selections. The public audio content DTO and Model methods remain;
-OpenAI Realtime Session audio remains required through the replacement ownership
+OpenAI Realtime Session audio remains required through the Session ownership
 contract. See the [OpenAI boundary](providers/OPENAI.md).
 
 Every unlisted combination returns `Unsupported` or `InvalidInput` before

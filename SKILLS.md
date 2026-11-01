@@ -31,11 +31,12 @@ framework, LoopDriver, hosted-tools dispatcher, public KnowledgeBase backend,
 storage tool adapter, portable database realtime, direct child ingress, or
 compatibility path.
 
-The approved Session target is explicit Conversation profiles for all four
-providers and independent OpenAI Realtime/Gemini Live profiles. Update active
-guidance before implementing that refactor, preserve opaque static associated
-halves and sole consuming close authority, then record failing tests before
-production edits. The target contract is not evidence of completed support.
+Sessions use explicit Conversation profiles for all four providers and
+independent OpenAI Realtime/Gemini Live profiles. For Session contract changes,
+update active guidance first, preserve opaque static associated halves and
+sole consuming close authority, then record failing tests before production
+edits. Qualification requires recorded validation of the exact source and
+invocation.
 
 ## Workflow Skills
 

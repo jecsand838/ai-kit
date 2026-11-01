@@ -34,6 +34,9 @@ for target in \
     mock_contracts \
     shutdown_lifecycle \
     session_lifecycle \
+    session_contract \
+    managed_conversation \
+    gemini_session \
     provider_behavior \
     wire_behavior \
     error_contract \

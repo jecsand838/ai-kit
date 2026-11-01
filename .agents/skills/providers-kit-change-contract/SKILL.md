@@ -63,11 +63,11 @@ conversation continuity and native protocol boundaries.
 11. Organize supporting API into `config`, `generation`, `embedding`,
     `hosted`, `files`, `batch`, `models`, `session`, and `runtime`. Keep only
     primary handles, traits, errors, and normal construction at the root.
-12. For the approved Session refactor, update and independently review active
-    target-state guidance first. Add meaningful failing tests before each
-    production area, implement against the failures, and independently review
+12. For Session contract changes, update and independently review active
+    guidance first. Add meaningful failing tests before each production area,
+    implement against the failures, and independently review
     the actual diff before closing the area. Update source contracts deliberately
-    without weakening opacity. Run exact crate and full workspace gates; target
+    without weakening opacity. Run exact crate and full workspace gates;
     guidance and compile-only red evidence do not prove behavior or completion.
 
 ## Removed Boundaries

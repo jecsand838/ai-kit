@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 use std::marker::PhantomPinned;
-use std::num::NonZeroUsize;
+use std::num::{NonZeroU64, NonZeroUsize};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -18,7 +18,10 @@ use providers_kit::generation::{
 };
 use providers_kit::models::{ModelId, ModelListRequest, ModelPage, ModelSummary};
 use providers_kit::runtime::HealthStatus;
-use providers_kit::session::{SessionConfig, SessionEvent, SessionInput};
+use providers_kit::session::{
+    CommandId, SessionCommand, SessionCommands, SessionConfig, SessionContinuity, SessionEvent,
+    SessionEvents,
+};
 use providers_kit::{KitError, ModelBackend, ProviderBackend, SessionBackend};
 
 // Neither continuation implements Debug, equality or serde; Beta is also !Unpin.
@@ -57,7 +60,7 @@ pub enum Request<C> {
     Embed(EmbedRequest),
     Submit(BatchSubmitRequest<C>),
     OpenSession(SessionConfig),
-    Send(String, SessionInput),
+    Send(String, SessionCommand),
     Recv(String),
     Close(String),
 }
@@ -100,7 +103,10 @@ impl<C> Request<C> {
                 _ => panic!("unexpected batch submission kind"),
             },
             (Self::OpenSession(a), Self::OpenSession(b)) => assert_eq!(a, b),
-            (Self::Send(a, input), Self::Send(b, other)) => assert_eq!((a, input), (b, other)),
+            (Self::Send(a, input), Self::Send(b, other)) => {
+                assert_eq!(a, b);
+                Self::assert_command(input, other);
+            }
             (Self::Recv(a), Self::Recv(b)) | (Self::Close(a), Self::Close(b)) => assert_eq!(a, b),
             (Self::Health, Self::Health) | (Self::Shutdown, Self::Shutdown) => {}
             _ => panic!("unexpected operation; typed script expected a different request"),
@@ -124,6 +130,52 @@ impl<C> Request<C> {
                 expected.continuation().is_some(),
                 actual.continuation().is_some()
             );
+        }
+    }
+
+    fn assert_command(expected: &SessionCommand, actual: &SessionCommand) {
+        match (expected, actual) {
+            (SessionCommand::Input(expected), SessionCommand::Input(actual)) => {
+                assert_eq!(expected.role(), actual.role());
+                assert_eq!(expected.content(), actual.content());
+                assert_eq!(expected.function_calls(), actual.function_calls());
+                assert_eq!(expected.function_results(), actual.function_results());
+            }
+            (SessionCommand::ToolResults(expected), SessionCommand::ToolResults(actual)) => {
+                assert_eq!(expected.len(), actual.len());
+                for (expected, actual) in expected.iter().zip(actual) {
+                    assert_eq!(expected.request(), actual.request());
+                    assert_eq!(expected.result(), actual.result());
+                }
+            }
+            (SessionCommand::Cancel(expected), SessionCommand::Cancel(actual)) => {
+                assert_eq!(expected, actual)
+            }
+            (
+                SessionCommand::Audio {
+                    media_type: a,
+                    data: b,
+                },
+                SessionCommand::Audio {
+                    media_type: c,
+                    data: d,
+                },
+            ) => assert_eq!((a, b), (c, d)),
+            (
+                SessionCommand::ReconcilePlayback {
+                    segment: a,
+                    played: b,
+                },
+                SessionCommand::ReconcilePlayback {
+                    segment: c,
+                    played: d,
+                },
+            ) => assert_eq!((a, b), (c, d)),
+            (SessionCommand::StartInput, SessionCommand::StartInput)
+            | (SessionCommand::EndInput, SessionCommand::EndInput)
+            | (SessionCommand::EndAudioStream, SessionCommand::EndAudioStream)
+            | (SessionCommand::DiscardInput, SessionCommand::DiscardInput) => {}
+            _ => panic!("unexpected session command: {actual:?}; expected {expected:?}"),
         }
     }
 }
@@ -243,6 +295,8 @@ impl<C> Probe<C> {
         if matches!(&reply, Ok(Reply::Events(_))) {
             state.streams += 1;
         }
+        drop(state);
+        self.drained.notify_waiters();
         reply
     }
 }
@@ -285,8 +339,22 @@ pub struct ScriptedSession<C> {
     id: String,
     model: ModelId,
     probe: Arc<Probe<C>>,
+    sequence: u64,
+    drained: bool,
     // SessionBackend requires Send, never Sync or Clone.
     _not_sync: std::marker::PhantomData<std::cell::Cell<()>>,
+}
+
+pub struct ScriptedCommands<'a, C> {
+    id: &'a str,
+    probe: &'a Arc<Probe<C>>,
+    sequence: &'a mut u64,
+}
+
+pub struct ScriptedEvents<'a, C> {
+    id: &'a str,
+    probe: &'a Arc<Probe<C>>,
+    drained: &'a mut bool,
 }
 
 impl<C: Clone + Send + Sync + 'static> ProviderBackend for ScriptedProvider<C> {
@@ -519,36 +587,35 @@ impl<C: Clone + Send + Sync + 'static> ModelBackend for ScriptedModel<C> {
             id,
             model: self.id.clone(),
             probe: Arc::clone(&self.probe),
+            sequence: 0,
+            drained: false,
             _not_sync: std::marker::PhantomData,
         })
     }
 }
 
 impl<C: Clone + Send + Sync + 'static> SessionBackend for ScriptedSession<C> {
+    type Commands<'a> = ScriptedCommands<'a, C>;
+    type Events<'a> = ScriptedEvents<'a, C>;
     fn id(&self) -> &str {
         &self.id
     }
     fn model_id(&self) -> &ModelId {
         &self.model
     }
-    async fn send(&mut self, input: SessionInput) -> Result<(), KitError> {
-        let Reply::Unit = self.probe.call(
-            Request::Send(self.id.clone(), input),
-            Operation::SessionSend,
-        )?
-        else {
-            panic!("send reply")
-        };
-        Ok(())
-    }
-    async fn recv(&mut self) -> Result<SessionEvent, KitError> {
-        let Reply::Event(value) = self
-            .probe
-            .call(Request::Recv(self.id.clone()), Operation::SessionReceive)?
-        else {
-            panic!("receive reply")
-        };
-        Ok(value)
+    fn split(&mut self) -> (Self::Commands<'_>, Self::Events<'_>) {
+        (
+            ScriptedCommands {
+                id: &self.id,
+                probe: &self.probe,
+                sequence: &mut self.sequence,
+            },
+            ScriptedEvents {
+                id: &self.id,
+                probe: &self.probe,
+                drained: &mut self.drained,
+            },
+        )
     }
     async fn close(self) -> Result<(), KitError> {
         self.probe.closes.fetch_add(1, Ordering::SeqCst);
@@ -559,6 +626,62 @@ impl<C: Clone + Send + Sync + 'static> SessionBackend for ScriptedSession<C> {
             panic!("close reply")
         };
         Ok(())
+    }
+}
+
+impl<C: Clone + Send + Sync + 'static> SessionCommands for ScriptedCommands<'_, C> {
+    async fn submit(&mut self, input: SessionCommand) -> Result<CommandId, KitError> {
+        let Reply::Unit = self.probe.call(
+            Request::Send(self.id.to_owned(), input),
+            Operation::SessionSend,
+        )?
+        else {
+            panic!("send reply")
+        };
+        *self.sequence += 1;
+        CommandId::new(self.id, NonZeroU64::new(*self.sequence).unwrap())
+    }
+}
+
+impl<C: Clone + Send + Sync + 'static> SessionEvents for ScriptedEvents<'_, C> {
+    async fn recv(&mut self) -> Option<SessionEvent> {
+        loop {
+            if *self.drained {
+                return None;
+            }
+            let notified = self.probe.drained.notified();
+            let ready = {
+                let state = self.probe.state.lock().unwrap();
+                !matches!(state.admission, Admission::Open)
+                    || state.script.front().is_some_and(
+                        |step| matches!(&step.request, Request::Recv(id) if id == self.id),
+                    )
+            };
+            if !ready {
+                notified.await;
+                continue;
+            }
+            return match self
+                .probe
+                .call(Request::Recv(self.id.to_owned()), Operation::SessionReceive)
+            {
+                Ok(Reply::Event(value)) => {
+                    *self.drained = matches!(value, SessionEvent::Terminated { .. });
+                    Some(value)
+                }
+                Err(reason) => {
+                    *self.drained = true;
+                    Some(SessionEvent::Terminated {
+                        reason,
+                        continuity: SessionContinuity::Closed,
+                        unfinished_commands: Vec::new(),
+                        unfinished_responses: Vec::new(),
+                        outstanding_tools: Vec::new(),
+                    })
+                }
+                _ => panic!("receive reply"),
+            };
+        }
     }
 }
 
@@ -624,6 +747,16 @@ pub enum CallerModel {
 pub enum CallerSession {
     Alpha(ScriptedSession<Alpha>),
     Beta(ScriptedSession<Beta>),
+}
+
+pub enum CallerCommands<'a> {
+    Alpha(ScriptedCommands<'a, Alpha>),
+    Beta(ScriptedCommands<'a, Beta>),
+}
+
+pub enum CallerEvents<'a> {
+    Alpha(ScriptedEvents<'a, Alpha>),
+    Beta(ScriptedEvents<'a, Beta>),
 }
 
 impl Continuation {
@@ -825,6 +958,8 @@ impl ModelBackend for CallerModel {
 }
 
 impl SessionBackend for CallerSession {
+    type Commands<'a> = CallerCommands<'a>;
+    type Events<'a> = CallerEvents<'a>;
     fn id(&self) -> &str {
         match self {
             Self::Alpha(s) => s.id(),
@@ -837,22 +972,40 @@ impl SessionBackend for CallerSession {
             Self::Beta(s) => s.model_id(),
         }
     }
-    async fn send(&mut self, r: SessionInput) -> Result<(), KitError> {
+    fn split(&mut self) -> (Self::Commands<'_>, Self::Events<'_>) {
         match self {
-            Self::Alpha(s) => s.send(r).await,
-            Self::Beta(s) => s.send(r).await,
-        }
-    }
-    async fn recv(&mut self) -> Result<SessionEvent, KitError> {
-        match self {
-            Self::Alpha(s) => s.recv().await,
-            Self::Beta(s) => s.recv().await,
+            Self::Alpha(s) => {
+                let (commands, events) = s.split();
+                (CallerCommands::Alpha(commands), CallerEvents::Alpha(events))
+            }
+            Self::Beta(s) => {
+                let (commands, events) = s.split();
+                (CallerCommands::Beta(commands), CallerEvents::Beta(events))
+            }
         }
     }
     async fn close(self) -> Result<(), KitError> {
         match self {
             Self::Alpha(s) => s.close().await,
             Self::Beta(s) => s.close().await,
+        }
+    }
+}
+
+impl SessionCommands for CallerCommands<'_> {
+    async fn submit(&mut self, command: SessionCommand) -> Result<CommandId, KitError> {
+        match self {
+            Self::Alpha(commands) => commands.submit(command).await,
+            Self::Beta(commands) => commands.submit(command).await,
+        }
+    }
+}
+
+impl SessionEvents for CallerEvents<'_> {
+    async fn recv(&mut self) -> Option<SessionEvent> {
+        match self {
+            Self::Alpha(events) => events.recv().await,
+            Self::Beta(events) => events.recv().await,
         }
     }
 }

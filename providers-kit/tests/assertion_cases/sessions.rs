@@ -1,5 +1,9 @@
-use providers_kit::generation::FunctionCall;
-use providers_kit::session::{SessionEvent, SessionInput};
+use providers_kit::generation::{ContentPart, FunctionCall, Message};
+use providers_kit::session::{
+    CancelTarget, CancellationResolution, CommandId, OutputSegmentId, ResponseId, ResponseOutcome,
+    SessionCommand, SessionContinuity, SessionEvent, SessionToolResult, ToolRequestId,
+    TranscriptionSource,
+};
 
 use crate::live_failures::CaseFailure;
 
@@ -10,26 +14,100 @@ struct SessionFixture;
 impl SessionFixture {
     const PHRASE: &str = "Amber willow cedar river.";
 
+    fn response(sequence: u64) -> ResponseId {
+        ResponseId::new("fixture", std::num::NonZeroU64::new(sequence).unwrap()).unwrap()
+    }
+    fn command() -> CommandId {
+        CommandId::new("fixture", std::num::NonZeroU64::new(20).unwrap()).unwrap()
+    }
+    fn request() -> ToolRequestId {
+        ToolRequestId::new("fixture", std::num::NonZeroU64::new(10).unwrap()).unwrap()
+    }
+    fn segment() -> OutputSegmentId {
+        OutputSegmentId::new("fixture", std::num::NonZeroU64::new(30).unwrap()).unwrap()
+    }
+    fn started() -> SessionEvent {
+        SessionEvent::ResponseStarted {
+            command: Some(Self::command()),
+            response: Self::response(2),
+        }
+    }
+    fn completed() -> SessionEvent {
+        SessionEvent::ResponseFinished {
+            response: Self::response(2),
+            outcome: ResponseOutcome::Completed,
+            continuity: SessionContinuity::Reusable,
+            output: None,
+        }
+    }
+    fn cancelled() -> SessionEvent {
+        SessionEvent::Cancellation {
+            command: Self::command(),
+            target: CancelTarget::Response(Self::response(2)),
+            resolution: CancellationResolution::Stopped,
+            continuity: SessionContinuity::Reusable,
+        }
+    }
+    fn submit_cancel(evidence: &mut SessionTurnEvidence) {
+        evidence
+            .input(&SessionCommand::Cancel(CancelTarget::Response(
+                Self::response(2),
+            )))
+            .unwrap();
+        evidence.sent(&Ok(Self::command())).unwrap();
+    }
+    fn transcript(text: String) -> SessionEvent {
+        SessionEvent::Transcription {
+            source: TranscriptionSource::Output {
+                response: Self::response(2),
+                segment: Self::segment(),
+            },
+            text,
+            finalized: false,
+        }
+    }
+    fn input_transcript(text: String) -> SessionEvent {
+        SessionEvent::Transcription {
+            source: TranscriptionSource::Input { command: None },
+            text,
+            finalized: false,
+        }
+    }
+    fn text(text: String) -> SessionEvent {
+        SessionEvent::Output {
+            response: Self::response(2),
+            segment: Some(Self::segment()),
+            content: ContentPart::Text { text },
+        }
+    }
+
     fn call() -> SessionEvent {
-        SessionEvent::FunctionCall(
-            FunctionCall::new(
+        SessionEvent::ToolRequested {
+            response: SessionFixture::response(1),
+            request: SessionFixture::request(),
+            call: FunctionCall::new(
                 Some("fixture-call".into()),
                 "strict_live_session_probe",
                 serde_json::json!({}),
             )
             .unwrap(),
-        )
-    }
-
-    fn audio() -> SessionEvent {
-        SessionEvent::Audio {
-            media_type: "audio/pcm;rate=24000".into(),
-            data: vec![1, 0, 2, 0],
         }
     }
 
-    fn result() -> SessionInput {
-        SessionInput::FunctionResult(
+    fn audio() -> SessionEvent {
+        SessionEvent::Output {
+            response: SessionFixture::response(2),
+            segment: Some(SessionFixture::segment()),
+            content: ContentPart::Audio {
+                media_type: "audio/pcm;rate=24000".into(),
+                data: vec![1, 0, 2, 0],
+            },
+        }
+    }
+
+    fn result() -> SessionCommand {
+        SessionCommand::ToolResults(vec![SessionToolResult::new(
+            SessionFixture::request(),
             providers_kit::generation::FunctionResult::new(
                 Some("fixture-call".into()),
                 "strict_live_session_probe",
@@ -39,17 +117,15 @@ impl SessionFixture {
                 false,
             )
             .unwrap(),
-        )
+        )])
     }
 
     fn text_events() -> Vec<SessionEvent> {
         vec![
             Self::call(),
             Self::audio(),
-            SessionEvent::OutputTranscriptionDelta {
-                delta: Self::PHRASE.into(),
-            },
-            SessionEvent::Completed,
+            SessionFixture::transcript(Self::PHRASE.into()),
+            SessionFixture::completed(),
         ]
     }
 
@@ -57,9 +133,10 @@ impl SessionFixture {
         let mut evidence = SessionTurnEvidence::new(Self::PHRASE, audio_input);
         for event in events {
             evidence.observe(event)?;
-            if matches!(event, SessionEvent::FunctionCall(_)) {
+            if matches!(event, SessionEvent::ToolRequested { .. }) {
                 evidence.input(&Self::result())?;
-                evidence.sent(&Ok(()))?;
+                evidence.sent(&Ok(Self::command()))?;
+                evidence.observe(&Self::started())?;
             }
         }
         Ok(evidence)
@@ -74,16 +151,17 @@ impl SessionFixture {
 fn session_copy_quality_is_separate_from_sdk_progress() {
     let mut evidence = SessionTurnEvidence::awaiting_function();
     evidence
-        .observe(&SessionEvent::OutputTranscriptionDelta {
-            delta: "I will check that value first. ".into(),
-        })
+        .observe(&SessionFixture::transcript(
+            "I will check that value first. ".into(),
+        ))
         .unwrap();
     evidence.observe(&SessionFixture::call()).unwrap();
     evidence
         .expect_after_function(SessionFixture::PHRASE.into())
         .unwrap();
     evidence.input(&SessionFixture::result()).unwrap();
-    evidence.sent(&Ok(())).unwrap();
+    evidence.sent(&Ok(SessionFixture::command())).unwrap();
+    evidence.observe(&SessionFixture::started()).unwrap();
     for event in &SessionFixture::text_events()[1..] {
         evidence.observe(event).unwrap();
     }
@@ -107,8 +185,9 @@ fn session_requires_progress_after_successful_function_result() {
         evidence.observe(event).unwrap();
     }
     evidence.input(&SessionFixture::result()).unwrap();
-    evidence.sent(&Ok(())).unwrap();
-    evidence.observe(&SessionEvent::Completed).unwrap();
+    evidence.sent(&Ok(SessionFixture::command())).unwrap();
+    evidence.observe(&SessionFixture::started()).unwrap();
+    evidence.observe(&SessionFixture::completed()).unwrap();
     assert!(
         evidence.verify().is_err(),
         "pre-result transcription and audio cannot prove continuation progress"
@@ -145,9 +224,9 @@ fn session_completed_invalid_evidence_has_no_copy_grade() {
         SessionFixture::evidence(&SessionFixture::text_events(), false).unwrap();
     assert!(
         failed_capture
-            .input(&SessionInput::Text {
-                text: "x".repeat(384 * 1024),
-            })
+            .input(&SessionCommand::Input(
+                Message::user_text("x".repeat(384 * 1024)).unwrap()
+            ))
             .is_err()
     );
     assert!(failed_capture.verify().is_err());
@@ -172,7 +251,8 @@ fn session_result_checkpoint_requires_success_and_exact_call_identity() {
             (None, "strict_live_session_probe"),
             (Some("fixture-call"), "wrong-function"),
         ] {
-            let wrong = SessionInput::FunctionResult(
+            let wrong = SessionCommand::ToolResults(vec![SessionToolResult::new(
+                SessionFixture::request(),
                 providers_kit::generation::FunctionResult::new(
                     id.map(str::to_owned),
                     name,
@@ -182,18 +262,21 @@ fn session_result_checkpoint_requires_success_and_exact_call_identity() {
                     false,
                 )
                 .unwrap(),
-            );
+            )]);
             assert!(evidence.input(&wrong).is_err());
         }
         evidence.input(&SessionFixture::result()).unwrap();
         assert!(evidence.input(&SessionFixture::result()).is_err());
         if let Some(succeeded) = send_outcome {
             let sent = if succeeded {
-                Ok(())
+                Ok(SessionFixture::command())
             } else {
                 Err(CaseFailure::from("original result-send failure"))
             };
             evidence.sent(&sent).unwrap();
+            if sent.is_ok() {
+                evidence.observe(&SessionFixture::started()).unwrap();
+            }
             assert!(evidence.input(&SessionFixture::result()).is_err());
         }
         for event in &SessionFixture::text_events()[1..] {
@@ -223,21 +306,18 @@ fn session_post_result_progress_requires_both_audio_and_nonblank_transcription()
             .unwrap();
         evidence.observe(&SessionFixture::audio()).unwrap();
         evidence
-            .observe(&SessionEvent::OutputTranscriptionDelta {
-                delta: SessionFixture::PHRASE.into(),
-            })
+            .observe(&SessionFixture::transcript(SessionFixture::PHRASE.into()))
             .unwrap();
         evidence.input(&SessionFixture::result()).unwrap();
-        evidence.sent(&Ok(())).unwrap();
+        evidence.sent(&Ok(SessionFixture::command())).unwrap();
+        evidence.observe(&SessionFixture::started()).unwrap();
         if audio_after {
             evidence.observe(&SessionFixture::audio()).unwrap();
         }
         evidence
-            .observe(&SessionEvent::OutputTranscriptionDelta {
-                delta: transcript_after.into(),
-            })
+            .observe(&SessionFixture::transcript(transcript_after.into()))
             .unwrap();
-        evidence.observe(&SessionEvent::Completed).unwrap();
+        evidence.observe(&SessionFixture::completed()).unwrap();
         assert_eq!(
             evidence.verify().is_ok(),
             audio_after && transcript_after == "continued"
@@ -252,21 +332,12 @@ fn session_post_result_progress_requires_both_audio_and_nonblank_transcription()
 #[test]
 fn session_receipts_require_three_boolean_grades_without_raw_output() {
     let mut changed = SessionFixture::text_events();
-    changed.insert(
-        0,
-        SessionEvent::OutputTranscriptionDelta {
-            delta: "Preamble. ".into(),
-        },
-    );
+    changed.insert(0, SessionFixture::transcript("Preamble. ".into()));
     let audio_events = [
         SessionFixture::audio(),
-        SessionEvent::OutputTranscriptionDelta {
-            delta: "A different answer.".into(),
-        },
-        SessionEvent::Completed,
-        SessionEvent::InputTranscriptionDelta {
-            delta: "Actual caller speech".into(),
-        },
+        SessionFixture::transcript("A different answer.".into()),
+        SessionFixture::completed(),
+        SessionFixture::input_transcript("Actual caller speech".into()),
     ];
     let ordinary = [
         SessionFixture::evidence(&SessionFixture::text_events(), false).unwrap(),
@@ -288,7 +359,8 @@ fn session_receipts_require_three_boolean_grades_without_raw_output() {
     assert!(!receipt.to_string().contains(SessionFixture::PHRASE));
     let mut cancelled = SessionTurnEvidence::interrupting_audio();
     cancelled.observe(&SessionFixture::audio()).unwrap();
-    cancelled.observe(&SessionEvent::TurnCancelled).unwrap();
+    SessionFixture::submit_cancel(&mut cancelled);
+    cancelled.observe(&SessionFixture::cancelled()).unwrap();
     let cancellation = [
         cancelled,
         SessionFixture::evidence(&changed, false).unwrap(),
@@ -378,9 +450,7 @@ fn reaudit_session_raw_copy_grade_preserves_full_phrase_comparison() {
         "Amber willow",
     ] {
         let mut events = SessionFixture::text_events();
-        events[2] = SessionEvent::OutputTranscriptionDelta {
-            delta: incorrect.into(),
-        };
+        events[2] = SessionFixture::transcript(incorrect.into());
         let evidence = SessionFixture::evidence(&events, false).unwrap();
         assert_eq!(evidence.verify().is_ok(), !incorrect.is_empty());
         assert_eq!(
@@ -394,12 +464,8 @@ fn reaudit_session_raw_copy_grade_preserves_full_phrase_comparison() {
         assert_eq!(evidence.observation()["output_transcript"], incorrect);
     }
     for substitute in [
-        SessionEvent::TextDelta {
-            delta: SessionFixture::PHRASE.into(),
-        },
-        SessionEvent::InputTranscriptionDelta {
-            delta: SessionFixture::PHRASE.into(),
-        },
+        SessionFixture::text(SessionFixture::PHRASE.into()),
+        SessionFixture::input_transcript(SessionFixture::PHRASE.into()),
     ] {
         let mut events = SessionFixture::text_events();
         events[2] = substitute;
@@ -408,19 +474,13 @@ fn reaudit_session_raw_copy_grade_preserves_full_phrase_comparison() {
     let events = [
         SessionFixture::call(),
         SessionFixture::audio(),
-        SessionEvent::OutputTranscriptionDelta {
-            delta: "Amber wil".into(),
-        },
-        SessionEvent::OutputTranscriptionDelta {
-            delta: "low cedar river.".into(),
-        },
-        SessionEvent::Completed,
+        SessionFixture::transcript("Amber wil".into()),
+        SessionFixture::transcript("low cedar river.".into()),
+        SessionFixture::completed(),
     ];
     SessionFixture::check(&events, false).unwrap();
     let mut late = SessionFixture::text_events();
-    late.push(SessionEvent::OutputTranscriptionDelta {
-        delta: "late".into(),
-    });
+    late.push(SessionFixture::transcript("late".into()));
     assert!(SessionFixture::check(&late, false).is_err());
 }
 
@@ -430,9 +490,7 @@ fn session_answer_assignment_preserves_pre_call_transcription() {
         let mut evidence = SessionTurnEvidence::awaiting_function();
         if let Some(preamble) = preamble {
             evidence
-                .observe(&SessionEvent::OutputTranscriptionDelta {
-                    delta: preamble.into(),
-                })
+                .observe(&SessionFixture::transcript(preamble.into()))
                 .unwrap();
         }
         evidence.observe(&SessionFixture::call()).unwrap();
@@ -440,16 +498,15 @@ fn session_answer_assignment_preserves_pre_call_transcription() {
             .expect_after_function(SessionFixture::PHRASE.into())
             .unwrap();
         evidence.input(&SessionFixture::result()).unwrap();
-        evidence.sent(&Ok(())).unwrap();
+        evidence.sent(&Ok(SessionFixture::command())).unwrap();
+        evidence.observe(&SessionFixture::started()).unwrap();
         evidence.observe(&SessionFixture::audio()).unwrap();
         for delta in ["Amber willow ", "cedar river."] {
             evidence
-                .observe(&SessionEvent::OutputTranscriptionDelta {
-                    delta: delta.into(),
-                })
+                .observe(&SessionFixture::transcript(delta.into()))
                 .unwrap();
         }
-        evidence.observe(&SessionEvent::Completed).unwrap();
+        evidence.observe(&SessionFixture::completed()).unwrap();
         assert!(evidence.ready());
         evidence.verify().unwrap();
         assert_eq!(
@@ -463,20 +520,25 @@ fn session_answer_assignment_preserves_pre_call_transcription() {
 fn reaudit_session_rejects_duplicate_wrong_and_cancelled_functions() {
     for bad in [
         SessionFixture::call(),
-        SessionEvent::FunctionCall(
-            FunctionCall::new(Some("wrong".into()), "wrong_tool", serde_json::json!({})).unwrap(),
-        ),
-        SessionEvent::FunctionCall(
-            FunctionCall::new(
+        SessionEvent::ToolRequested {
+            response: SessionFixture::response(1),
+            request: SessionFixture::request(),
+            call: FunctionCall::new(Some("wrong".into()), "wrong_tool", serde_json::json!({}))
+                .unwrap(),
+        },
+        SessionEvent::ToolRequested {
+            response: SessionFixture::response(1),
+            request: SessionFixture::request(),
+            call: FunctionCall::new(
                 Some("wrong".into()),
                 "strict_live_session_probe",
                 serde_json::json!({"unexpected":true}),
             )
             .unwrap(),
-        ),
-        SessionEvent::TurnCancelled,
-        SessionEvent::FunctionCallsCancelled {
-            call_ids: vec!["fixture-call".into()],
+        },
+        SessionFixture::cancelled(),
+        SessionEvent::ToolsInvalidated {
+            requests: vec![SessionFixture::request()],
         },
     ] {
         let mut events = SessionFixture::text_events();
@@ -490,13 +552,9 @@ fn reaudit_session_audio_turn_requires_its_own_output_and_allows_late_input_tran
     SessionFixture::check(&SessionFixture::text_events(), false).unwrap();
     let events = vec![
         SessionFixture::audio(),
-        SessionEvent::OutputTranscriptionDelta {
-            delta: SessionFixture::PHRASE.into(),
-        },
-        SessionEvent::Completed,
-        SessionEvent::InputTranscriptionDelta {
-            delta: "Please say the phrase.".into(),
-        },
+        SessionFixture::transcript(SessionFixture::PHRASE.into()),
+        SessionFixture::completed(),
+        SessionFixture::input_transcript("Please say the phrase.".into()),
     ];
     SessionFixture::check(&events, true).unwrap();
     let mut evidence = SessionTurnEvidence::new(SessionFixture::PHRASE, true);
@@ -545,7 +603,8 @@ fn session_evidence_assigns_expected_answer_only_after_the_validated_call() {
             .is_err()
     );
     evidence.input(&SessionFixture::result()).unwrap();
-    evidence.sent(&Ok(())).unwrap();
+    evidence.sent(&Ok(SessionFixture::command())).unwrap();
+    evidence.observe(&SessionFixture::started()).unwrap();
     for event in &SessionFixture::text_events()[1..] {
         evidence.observe(event).unwrap();
     }
@@ -561,7 +620,8 @@ async fn session_evidence_retains_partial_turn_after_observation_timeout() {
         evidence
             .expect_after_function(SessionFixture::PHRASE.into())
             .unwrap();
-        let input = SessionInput::FunctionResult(
+        let input = SessionCommand::ToolResults(vec![SessionToolResult::new(
+            SessionFixture::request(),
             providers_kit::generation::FunctionResult::new(
                 Some("fixture-call".into()),
                 "strict_live_session_probe",
@@ -571,14 +631,13 @@ async fn session_evidence_retains_partial_turn_after_observation_timeout() {
                 false,
             )
             .unwrap(),
-        );
+        )]);
         evidence.input(&input).unwrap();
-        evidence.sent(&Ok(())).unwrap();
+        evidence.sent(&Ok(SessionFixture::command())).unwrap();
+        evidence.observe(&SessionFixture::started()).unwrap();
         evidence.observe(&SessionFixture::audio()).unwrap();
         evidence
-            .observe(&SessionEvent::OutputTranscriptionDelta {
-                delta: "Amber ".into(),
-            })
+            .observe(&SessionFixture::transcript("Amber ".into()))
             .unwrap();
         std::future::pending::<()>().await;
     })
@@ -597,18 +656,21 @@ async fn session_evidence_retains_partial_turn_after_observation_timeout() {
     );
     assert_eq!(
         observed["events"][0]["received"],
-        serde_json::to_value(SessionFixture::call()).unwrap()
+        serde_json::json!({"event":"tool_requested","response":{"session":"fixture","sequence":1},"request":{"session":"fixture","sequence":10},"call":FunctionCall::new(Some("fixture-call".into()),"strict_live_session_probe",serde_json::json!({})).unwrap()})
     );
     let result_value = observed["events"][1]["send_attempt"].clone();
-    let input: SessionInput = serde_json::from_value(result_value).unwrap();
-    let SessionInput::FunctionResult(result) = input else {
-        panic!("complete function result retained");
-    };
+    assert_eq!(result_value["type"], "tool_results");
+    assert_eq!(
+        result_value["results"][0]["request"],
+        serde_json::json!({"session":"fixture","sequence":10})
+    );
+    let result: providers_kit::generation::FunctionResult =
+        serde_json::from_value(result_value["results"][0]["result"].clone()).unwrap();
     assert_eq!(result.call_id(), Some("fixture-call"));
     assert_eq!(result.name(), "strict_live_session_probe");
     assert_eq!(
         result.content(),
-        &[providers_kit::generation::ContentPart::Json {
+        &[ContentPart::Json {
             value: serde_json::json!({"value":SessionFixture::PHRASE})
         }]
     );
@@ -622,15 +684,19 @@ fn session_pcm_sidecars_preserve_complete_bytes_without_json_expansion() {
     let mut evidence = SessionTurnEvidence::new("Audio input received.", true);
     let audio = vec![0x5a; 4_320_000]; // Ninety seconds of 24-kHz, 16-bit mono PCM.
     evidence
-        .input(&SessionInput::Audio {
+        .input(&SessionCommand::Audio {
             media_type: "audio/pcm;rate=24000".into(),
             data: audio.clone(),
         })
         .unwrap();
     evidence
-        .observe(&SessionEvent::Audio {
-            media_type: "audio/pcm;rate=24000".into(),
-            data: audio.clone(),
+        .observe(&SessionEvent::Output {
+            response: SessionFixture::response(2),
+            segment: Some(SessionFixture::segment()),
+            content: ContentPart::Audio {
+                media_type: "audio/pcm;rate=24000".into(),
+                data: audio.clone(),
+            },
         })
         .unwrap();
     let (observed, exported) = evidence.export(directory.path(), "complete");
@@ -672,22 +738,24 @@ fn session_pcm_sidecars_preserve_complete_bytes_without_json_expansion() {
         let data = vec![u8::try_from(index % 251).unwrap(); 960];
         expected_audio.extend_from_slice(&data);
         chunked
-            .observe(&SessionEvent::Audio {
-                media_type: "audio/pcm;rate=24000".into(),
-                data,
+            .observe(&SessionEvent::Output {
+                response: SessionFixture::response(2),
+                segment: Some(SessionFixture::segment()),
+                content: ContentPart::Audio {
+                    media_type: "audio/pcm;rate=24000".into(),
+                    data,
+                },
             })
             .unwrap();
     }
     chunked
-        .observe(&SessionEvent::OutputTranscriptionDelta {
-            delta: "Audio input received.".into(),
-        })
+        .observe(&SessionFixture::transcript("Audio input received.".into()))
         .unwrap();
-    chunked.observe(&SessionEvent::Completed).unwrap();
+    chunked.observe(&SessionFixture::completed()).unwrap();
     chunked
-        .observe(&SessionEvent::InputTranscriptionDelta {
-            delta: "Please say audio input received.".into(),
-        })
+        .observe(&SessionFixture::input_transcript(
+            "Please say audio input received.".into(),
+        ))
         .unwrap();
     chunked.verify().unwrap();
     chunked.finish(&Ok(()));
@@ -708,7 +776,7 @@ fn session_pcm_export_reports_each_failure_and_preserves_primary_evidence() {
     let directory = tempfile::tempdir().unwrap();
     let mut evidence = SessionTurnEvidence::new("expected", true);
     evidence
-        .input(&SessionInput::Audio {
+        .input(&SessionCommand::Audio {
             media_type: "audio/pcm;rate=16000".into(),
             data: vec![1, 2],
         })
@@ -753,30 +821,30 @@ fn session_evidence_limits_fail_visibly_without_silent_truncation() {
     let mut evidence = SessionTurnEvidence::awaiting_function();
     evidence.observe(&SessionFixture::call()).unwrap();
     let error = evidence
-        .observe(&SessionEvent::Audio {
-            media_type: "audio/pcm;rate=24000".into(),
-            data: vec![0; 8 * 1024 * 1024 + 1],
+        .observe(&SessionEvent::Output {
+            response: SessionFixture::response(2),
+            segment: Some(SessionFixture::segment()),
+            content: ContentPart::Audio {
+                media_type: "audio/pcm;rate=24000".into(),
+                data: vec![0; 8 * 1024 * 1024 + 1],
+            },
         })
         .unwrap_err();
     assert!(error.contains("8 MiB"));
     assert_eq!(evidence.observation()["capture_failure"], error);
     assert!(evidence.verify().is_err());
-    assert!(evidence.observe(&SessionEvent::Completed).is_err());
+    assert!(evidence.observe(&SessionFixture::completed()).is_err());
     let mut text = SessionTurnEvidence::new("expected", true);
     assert!(
-        text.observe(&SessionEvent::OutputTranscriptionDelta {
-            delta: "x".repeat(32 * 1024 + 1)
-        })
-        .is_err()
+        text.observe(&SessionFixture::transcript("x".repeat(32 * 1024 + 1)))
+            .is_err()
     );
     assert!(!text.observation()["capture_failure"].is_null());
     let mut events = SessionTurnEvidence::new("expected", true);
     let mut limited = false;
     for _ in 0..=8192 {
         if events
-            .observe(&SessionEvent::TextDelta {
-                delta: "small".into(),
-            })
+            .observe(&SessionFixture::text("small".into()))
             .is_err()
         {
             limited = true;
@@ -802,21 +870,193 @@ fn session_interruption_requires_actual_audio_cancellation() {
     let mut evidence = SessionTurnEvidence::interrupting_audio();
     evidence.observe(&SessionFixture::audio()).unwrap();
     assert!(!evidence.ready());
-    evidence.observe(&SessionEvent::TurnCancelled).unwrap();
+    SessionFixture::submit_cancel(&mut evidence);
+    evidence.observe(&SessionFixture::cancelled()).unwrap();
     assert!(evidence.ready());
     evidence.verify().unwrap();
     assert_eq!(evidence.observation()["model_exact_copy"], "not_applicable");
-    assert!(evidence.observe(&SessionEvent::Completed).is_err());
+    assert!(evidence.observe(&SessionFixture::completed()).is_err());
     assert!(evidence.observe(&SessionFixture::audio()).is_err());
 }
 
 #[test]
 fn session_interruption_rejects_completion_and_missing_progress() {
     let mut no_progress = SessionTurnEvidence::interrupting_audio();
-    let cancelled = no_progress.observe(&SessionEvent::TurnCancelled);
+    let cancelled = no_progress.observe(&SessionFixture::cancelled());
     assert!(cancelled.is_err() || no_progress.verify().is_err());
     let mut completed = SessionTurnEvidence::interrupting_audio();
     completed.observe(&SessionFixture::audio()).unwrap();
-    let terminal = completed.observe(&SessionEvent::Completed);
+    let terminal = completed.observe(&SessionFixture::completed());
     assert!(terminal.is_err() || completed.verify().is_err());
+}
+
+#[test]
+fn session_evidence_requires_completion_of_the_correlated_result_response() {
+    let mut evidence = SessionTurnEvidence::awaiting_function();
+    evidence.observe(&SessionFixture::call()).unwrap();
+    evidence
+        .expect_after_function(SessionFixture::PHRASE.into())
+        .unwrap();
+    evidence.input(&SessionFixture::result()).unwrap();
+    evidence.sent(&Ok(SessionFixture::command())).unwrap();
+    // These bytes alone do not establish the response that owns the accepted result.
+    evidence.observe(&SessionFixture::audio()).unwrap();
+    evidence
+        .observe(&SessionFixture::transcript(SessionFixture::PHRASE.into()))
+        .unwrap();
+    evidence.observe(&SessionFixture::completed()).unwrap();
+    assert!(
+        evidence.verify().is_err(),
+        "post-result bytes with no correlated ResponseStarted cannot establish continuation completion"
+    );
+}
+
+#[test]
+fn session_evidence_tool_response_completion_does_not_end_continuation() {
+    let mut evidence = SessionTurnEvidence::awaiting_function();
+    evidence.observe(&SessionFixture::call()).unwrap();
+    evidence
+        .expect_after_function(SessionFixture::PHRASE.into())
+        .unwrap();
+    evidence.input(&SessionFixture::result()).unwrap();
+    evidence.sent(&Ok(SessionFixture::command())).unwrap();
+    evidence
+        .observe(&SessionEvent::ResponseFinished {
+            response: SessionFixture::response(1),
+            outcome: ResponseOutcome::Completed,
+            continuity: SessionContinuity::Reusable,
+            output: None,
+        })
+        .unwrap();
+    assert!(!evidence.ready());
+    evidence.observe(&SessionFixture::started()).unwrap();
+    evidence.observe(&SessionFixture::audio()).unwrap();
+    evidence
+        .observe(&SessionFixture::transcript(SessionFixture::PHRASE.into()))
+        .unwrap();
+    evidence.observe(&SessionFixture::completed()).unwrap();
+    evidence.verify().unwrap();
+}
+
+#[test]
+fn session_evidence_late_prior_output_cannot_prove_result_continuation() {
+    let mut evidence = SessionTurnEvidence::awaiting_function();
+    evidence.observe(&SessionFixture::call()).unwrap();
+    evidence
+        .expect_after_function(SessionFixture::PHRASE.into())
+        .unwrap();
+    evidence.input(&SessionFixture::result()).unwrap();
+    evidence.sent(&Ok(SessionFixture::command())).unwrap();
+    evidence.observe(&SessionFixture::started()).unwrap();
+    let mut audio = SessionFixture::audio();
+    if let SessionEvent::Output { response, .. } = &mut audio {
+        *response = SessionFixture::response(1);
+    }
+    let mut transcript = SessionFixture::transcript(SessionFixture::PHRASE.into());
+    if let SessionEvent::Transcription {
+        source: TranscriptionSource::Output { response, .. },
+        ..
+    } = &mut transcript
+    {
+        *response = SessionFixture::response(1);
+    }
+    evidence.observe(&audio).unwrap();
+    evidence.observe(&transcript).unwrap();
+    evidence.observe(&SessionFixture::completed()).unwrap();
+    assert!(
+        evidence.verify().is_err(),
+        "late original-response audio cannot satisfy the result response's progress"
+    );
+}
+
+#[test]
+fn session_evidence_final_transcript_replaces_its_segment_snapshot() {
+    for final_text in [SessionFixture::PHRASE, "Authoritative replacement.", ""] {
+        let mut evidence = SessionTurnEvidence::awaiting_function();
+        evidence.observe(&SessionFixture::call()).unwrap();
+        evidence
+            .expect_after_function(SessionFixture::PHRASE.into())
+            .unwrap();
+        evidence.input(&SessionFixture::result()).unwrap();
+        evidence.sent(&Ok(SessionFixture::command())).unwrap();
+        evidence.observe(&SessionFixture::started()).unwrap();
+        evidence.observe(&SessionFixture::audio()).unwrap();
+        evidence
+            .observe(&SessionFixture::transcript(SessionFixture::PHRASE.into()))
+            .unwrap();
+        let mut finalized = SessionFixture::transcript(final_text.into());
+        if let SessionEvent::Transcription { finalized, .. } = &mut finalized {
+            *finalized = true;
+        }
+        evidence.observe(&finalized).unwrap();
+        evidence.observe(&SessionFixture::completed()).unwrap();
+        assert_eq!(
+            evidence.observation()["output_transcript"],
+            final_text,
+            "final transcript replaces prior same-segment deltas"
+        );
+        assert_eq!(evidence.verify().is_ok(), !final_text.is_empty());
+        assert_eq!(
+            evidence.observation()["model_exact_copy"],
+            if final_text.is_empty() {
+                serde_json::json!("unavailable")
+            } else {
+                serde_json::json!(final_text == SessionFixture::PHRASE)
+            }
+        );
+    }
+}
+
+#[test]
+fn session_evidence_final_only_transcript_proves_correlated_output() {
+    let mut evidence = SessionTurnEvidence::awaiting_function();
+    evidence.observe(&SessionFixture::call()).unwrap();
+    evidence
+        .expect_after_function(SessionFixture::PHRASE.into())
+        .unwrap();
+    evidence.input(&SessionFixture::result()).unwrap();
+    evidence.sent(&Ok(SessionFixture::command())).unwrap();
+    evidence.observe(&SessionFixture::started()).unwrap();
+    evidence.observe(&SessionFixture::audio()).unwrap();
+    let mut finalized = SessionFixture::transcript(SessionFixture::PHRASE.into());
+    if let SessionEvent::Transcription { finalized, .. } = &mut finalized {
+        *finalized = true;
+    }
+    evidence.observe(&finalized).unwrap();
+    evidence.observe(&SessionFixture::completed()).unwrap();
+    evidence
+        .verify()
+        .expect("affirmative final-only transcript is usable evidence");
+}
+
+#[test]
+fn session_evidence_cancellation_requires_accepted_receipt_and_target() {
+    for wrong_receipt in [true, false] {
+        let mut evidence = SessionTurnEvidence::interrupting_audio();
+        evidence.observe(&SessionFixture::audio()).unwrap();
+        evidence
+            .input(&SessionCommand::Cancel(CancelTarget::Response(
+                SessionFixture::response(2),
+            )))
+            .unwrap();
+        evidence.sent(&Ok(SessionFixture::command())).unwrap();
+        let event = SessionEvent::Cancellation {
+            command: if wrong_receipt {
+                CommandId::new("fixture", std::num::NonZeroU64::new(21).unwrap()).unwrap()
+            } else {
+                SessionFixture::command()
+            },
+            target: CancelTarget::Response(SessionFixture::response(if wrong_receipt {
+                2
+            } else {
+                99
+            })),
+            resolution: CancellationResolution::Stopped,
+            continuity: SessionContinuity::Reusable,
+        };
+        assert!(
+            evidence.observe(&event).is_err(),
+            "unrelated cancellation acknowledgement cannot prove requested interruption"
+        );
+    }
 }

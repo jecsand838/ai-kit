@@ -157,8 +157,8 @@ backend's wire mapping, actor behavior, persistence, or service compatibility.
 
 This matrix names required behavior and test owners for the eighteen approved
 public traits. Exact signatures remain in the owning public API documentation.
-The Session rows describe the approved target under implementation; their
-presence is not a claim of current passing coverage.
+The matrix defines required coverage; recorded gate results establish passing
+coverage.
 
 | Trait | Methods/behavior exercised | Primary evidence |
 | --- | --- | --- |

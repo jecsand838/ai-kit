@@ -20,7 +20,7 @@ struct VerifierFixture {
 }
 
 impl VerifierFixture {
-    const REQUIRED: [&'static str; 22] = [
+    const REQUIRED: [&'static str; 23] = [
         "TEST_OPENAI_API_KEY",
         "TEST_OPENAI_BASE_URL",
         "TEST_OPENAI_MODEL_DEFAULT",
@@ -34,6 +34,7 @@ impl VerifierFixture {
         "TEST_GEMINI_API_KEY",
         "TEST_GEMINI_BASE_URL",
         "TEST_GEMINI_MODEL_DEFAULT",
+        "TEST_GEMINI_MODEL_INTERACTIVE",
         "TEST_GEMINI_MODEL_EMBEDDINGS",
         "TEST_GEMINI_MODEL_THINKING_LEVEL",
         "TEST_GEMINI_SERVICE_TIER",
@@ -1434,13 +1435,17 @@ async fn strict_live_verifier_bounds_stalled_ollama_tags_body() {
 
 #[test]
 fn current_model_roles_fail_before_commands_when_missing() {
-    let name = "TEST_GEMINI_MODEL_FILE_SEARCH";
-    let fixture = VerifierFixture::new();
-    let output = fixture.command(None, 0).env_remove(name).output().unwrap();
-    assert_eq!(output.status.code(), Some(1), "{name}");
-    assert_eq!(
-        String::from_utf8(output.stderr).unwrap(),
-        format!("missing required strict-live variable: {name}\n")
-    );
-    assert!(!fixture.directory.path().join("calls").exists());
+    for name in [
+        "TEST_GEMINI_MODEL_FILE_SEARCH",
+        "TEST_GEMINI_MODEL_INTERACTIVE",
+    ] {
+        let fixture = VerifierFixture::new();
+        let output = fixture.command(None, 0).env_remove(name).output().unwrap();
+        assert_eq!(output.status.code(), Some(1), "{name}");
+        assert_eq!(
+            String::from_utf8(output.stderr).unwrap(),
+            format!("missing required strict-live variable: {name}\n")
+        );
+        assert!(!fixture.directory.path().join("calls").exists());
+    }
 }

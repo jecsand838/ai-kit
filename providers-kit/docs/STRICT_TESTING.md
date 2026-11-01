@@ -1,9 +1,9 @@
 # Strict Testing
 
 Provider validation separates portable contract proof from native provider
-proof. The Session requirements below are the approved target under
-implementation. Documentation pre-work does not claim that the replacement
-interface, expanded test inventory or live qualification already passes.
+proof. The Session requirements below define required deterministic and native
+coverage. Recorded validation of the exact source and invocation establishes
+qualification.
 
 Before Session production edits, add meaningful tests and record red evidence.
 Existing-API regressions must reproduce the actual defect; new-API compile
@@ -165,13 +165,35 @@ configured model ids. It must exercise complete Provider-to-Model selection,
 generation/streaming, supported embeddings/files/batches/hosted tools,
 continuation replay, all four Conversation baselines, native OpenAI Realtime
 and Gemini Live, provider-wide shutdown, and honest unsupported paths. The
-canonical live inventory must add two exchanges and a tool round trip for each
+canonical live inventory includes two exchanges and a tool round trip for each
 Conversation provider plus independently implemented Gemini native scenarios.
-Passing the old inventory does not qualify the replacement.
+Passing a prior inventory does not qualify added scenarios.
 
-The environment example, verifier, `strict_env_contract`, assertions and evidence
-exporters migrate together. `TEST_GEMINI_MODEL_INTERACTIVE` is required and
-initially selects exact `models/gemini-3.8-live`; it cannot inherit the ordinary
+The Session cases live under `live::sessions`:
+
+- `openai_conversation_session`, `anthropic_conversation_session`,
+  `gemini_conversation_session`, and `ollama_conversation_session` each require
+  two remembered-history exchanges and a correlated caller-executed tool round trip.
+- `gemini_live_text_audio_transcription` covers native output audio and its
+  transcription after text input.
+- `gemini_live_tool_round_trip` submits a valid result while native interaction
+  remains active and requires subsequent progress.
+- `gemini_live_manual_audio_activity` keeps input activity boundaries separate
+  from response completion and checks unsupported narrow controls explicitly.
+- `gemini_live_tool_cancellation_and_recovery` withholds a delivered tool result,
+  interrupts through manual audio activity, requires exact tool invalidation and
+  stale-result rejection, then proves a distinct correlated recovery response.
+
+These cases retain ordinary blocking assertions. They do not inherit the
+two existing OpenAI verbatim-copy grading exceptions. Each records exact model,
+command/response correlation, terminal outcome, cleanup and required media
+evidence. The executable inventory, rather than historical case counts, governs
+the final full run.
+
+Keep the environment example, verifier, `strict_env_contract`, assertions and
+evidence exporters synchronized with the inventory.
+`TEST_GEMINI_MODEL_INTERACTIVE` is required and initially selects exact
+`models/gemini-3.8-live`; it cannot inherit the ordinary
 Gemini role or silently fall back. Existing configured Conversation roles remain
 exact. Missing credentials/models/services are incomplete evidence, never a pass.
 The approved session-refactor qualification runs the full workspace wrapper and

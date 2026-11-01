@@ -119,7 +119,7 @@ fn removed_ingress_routers_mutable_fields_and_synthetic_sessions_are_rejected() 
         },
         CompileCase {
             name: "removed-session-decomposition",
-            source: "use providers_kit::session::SessionConfig; fn main() { let _ = SessionConfig::default().into_parts(); }\n",
+            source: "use providers_kit::session::{SessionConfig, SessionProfile}; fn main() { let _ = SessionConfig::new(SessionProfile::Conversation).into_parts(); }\n",
             expected: &["SessionConfig", "into_parts"],
         },
         CompileCase {
@@ -184,6 +184,46 @@ fn removed_ingress_routers_mutable_fields_and_synthetic_sessions_are_rejected() 
             name: "session-not-clone",
             source: "fn assert_clone<T: Clone>() {} fn main() { assert_clone::<providers_kit::Session>(); }\n",
             expected: &["Session", "Clone"],
+        },
+        CompileCase {
+            name: "session-profile-is-explicit",
+            source: "use providers_kit::session::SessionConfig; fn main() { let _ = SessionConfig::default(); }\n",
+            expected: &["SessionConfig", "default"],
+        },
+        CompileCase {
+            name: "command-half-cannot-escape",
+            source: "use providers_kit::{Session, SessionBackend}; use providers_kit::session::SessionCommandHalf; fn escape(session: &mut Session) -> SessionCommandHalf<'static> { session.split().0 } fn main() {}\n",
+            expected: &["lifetime may not live long enough"],
+        },
+        CompileCase {
+            name: "event-half-cannot-escape",
+            source: "use providers_kit::{Session, SessionBackend}; use providers_kit::session::SessionEventHalf; fn escape(session: &mut Session) -> SessionEventHalf<'static> { session.split().1 } fn main() {}\n",
+            expected: &["lifetime may not live long enough"],
+        },
+        CompileCase {
+            name: "cannot-close-borrowed-session",
+            source: "use providers_kit::{Session, SessionBackend}; fn invalid(mut session: Session) { let (commands, events) = session.split(); let _ = session.close(); drop(commands); drop(events); } fn main() {}\n",
+            expected: &["cannot move out"],
+        },
+        CompileCase {
+            name: "command-half-cannot-close",
+            source: "use providers_kit::{Session, SessionBackend}; fn invalid(session: &mut Session) { let (commands, _) = session.split(); let _ = commands.close(); } fn main() {}\n",
+            expected: &["close", "SessionCommandHalf"],
+        },
+        CompileCase {
+            name: "command-half-cannot-clone",
+            source: "fn assert_clone<T: Clone>() {} fn main() { assert_clone::<providers_kit::session::SessionCommandHalf<'static>>(); }\n",
+            expected: &["SessionCommandHalf", "Clone"],
+        },
+        CompileCase {
+            name: "event-half-cannot-clone",
+            source: "fn assert_clone<T: Clone>() {} fn main() { assert_clone::<providers_kit::session::SessionEventHalf<'static>>(); }\n",
+            expected: &["SessionEventHalf", "Clone"],
+        },
+        CompileCase {
+            name: "owner-has-no-send-facade",
+            source: "use providers_kit::{Session, SessionBackend}; use providers_kit::session::SessionCommand; fn invalid(session: &mut Session, command: SessionCommand) { let _ = session.send(command); } fn main() {}\n",
+            expected: &["send", "Session"],
         },
     ] {
         case.run();

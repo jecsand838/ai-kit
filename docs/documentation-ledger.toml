@@ -1,6 +1,6 @@
-version = 24
+version = 25
 scope_date = "2026-11-01"
-scope_source = "User-approved provider Session refactor target-state pre-work on 2026-11-01, including two static borrowed-half traits and tests-first implementation; preserves the PR #39 documentation baseline and historical evidence within its recorded scopes"
+scope_source = "User-approved provider Session refactor integration on 2026-11-01, following target-state documentation pre-work committed as eca58db and tests-first implementation; preserves the PR #39 documentation baseline and historical evidence within its recorded scopes"
 notes = [
   "This ledger covers the five compiled Kit crates and their active repository-owned guidance.",
   "The root README owns package selection, installation and runnable entrypoints; architecture, exact validation and release policy remain in their canonical owners. Crate introductions describe pre-1.0 compatibility without announcing unpublished releases.",
@@ -12,8 +12,8 @@ notes = [
   "The active architecture has no public factory or conformance framework, LoopDriver, public KnowledgeBase backend, storage-to-tool adapter, or portable database realtime API.",
   "Toolset is the sole erased root ingress; provider, storage, and agent callers implement their public hierarchies directly.",
   "ModelBackend owns both its Session and Continuation associated types; Custom Agent keeps continuation prompt-local and durable history provider-neutral.",
-  "The approved Session target adds SessionCommands and SessionEvents in the session module: eleven backend traits, two borrowed-half traits and five App traits. Supplied halves retain opaque closed dispatch, concrete associated types and the Session owner's sole consuming close authority.",
-  "Conversation sessions must compose the existing generation and exact-continuation paths for all four providers; native OpenAI Realtime and Gemini Live remain explicit separate profiles. Target-state pre-work does not establish current implementation or live qualification.",
+  "The Session contract includes SessionCommands and SessionEvents in the session module: eleven backend traits, two borrowed-half traits and five App traits. Supplied halves retain opaque closed dispatch, concrete associated types and the Session owner's sole consuming close authority.",
+  "Conversation sessions must compose the existing generation and exact-continuation paths for all four providers; native OpenAI Realtime and Gemini Live remain explicit separate profiles. Qualification is established separately by recorded validation of the exact source and invocation.",
   "Session implementation follows reviewed agentic documentation pre-work, failing tests before production changes, passing behavioral regressions and independent review of each actual implementation diff. Full workspace gates remain required without batch exclusions for this refactor.",
   "Agent preserves direct ToolsetBackend and its associated Handler; App adds five workflow traits without widening lower-crate seams.",
   "Direct public-trait mocks are the primary deterministic lane; native integration and strict-live proof remain separate. Known defects and dated receipts never weaken release requirements.",

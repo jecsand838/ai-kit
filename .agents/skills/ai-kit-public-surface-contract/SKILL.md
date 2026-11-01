@@ -157,7 +157,7 @@ Never restore:
   generation/streaming/embedding/batch/session behavior, normalized
   function-call/result values, portable hosted-tool configuration, wire
   adaptation, and provider lifecycle.
-  Its Session target explicitly selects Conversation or Realtime: all four
+  Sessions explicitly select Conversation or Realtime: all four
   supplied providers retain exact conversational continuity through existing
   generation paths, while OpenAI and Gemini own their native realtime
   mappings. These requirements do not grant tool execution or agent policy.

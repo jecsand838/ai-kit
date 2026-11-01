@@ -94,6 +94,11 @@ historical result current. Ordinary links must still resolve. These checks do
 not interpret YAML policies or prose authority, and do not replace Rust source
 contracts, doctests, or App's existing public-surface and guide/example checks.
 
+The documentation contract also compares literal explicit toolchain selections
+in active shell instructions with the workspace pin. This narrow check ignores
+quoted prompt data, prose, Rust snippets, and historical, template, or excluded
+sources; it does not evaluate arbitrary shell expressions.
+
 ## Rules
 
 - Never suppress warnings or doc-test failures.

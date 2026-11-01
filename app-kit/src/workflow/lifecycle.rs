@@ -311,6 +311,13 @@ impl LifecycleEvent<'_> {
     /// unsupported timestamp, malformed span attributes, or exceeded record bounds.
     /// Codec errors propagate from state serialization. This explicit export may
     /// contain caller content; it is separate from safe operational tracing.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a registered field encoder panics while exporting a
+    /// `StepFinished` state projection. As with [`WorkflowState::serialize`],
+    /// the registry lock is released before callbacks run. The authoritative
+    /// checkpoint remains unchanged.
     pub fn tracking_records(&self, observed_at: SystemTime) -> Result<Vec<Value>, AppError> {
         let records = match self {
             Self::Registered {

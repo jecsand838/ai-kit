@@ -86,9 +86,10 @@ collaboration-mode selector.
 Say plainly that codex exec does not expose a collaboration-mode selector.
 
 ```bash
+repo_root="$(git rev-parse --show-toplevel)"
 mkdir -p /tmp/codex-skill-forwardtest
 CODEX_HOME=/tmp/codex-skill-forwardtest codex exec --ephemeral --sandbox read-only \
-  -C /Users/connorsanders/scratch/ai-kit \
+  -C "$repo_root" \
   -o /tmp/remove-workspace-shims-boundary.txt \
   $'Use $remove-workspace-shims to clean up providers-kit shims without any prior audit findings.'
 ```

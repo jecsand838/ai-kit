@@ -19,6 +19,8 @@ use crate::workflow::run::RunRecord;
 ///
 /// # Example
 ///
+/// Setup follows [the dedicated-runtime cleanup pattern](crate#local-workflow).
+///
 /// ```
 /// use agents_kit::Agent;
 /// use app_kit::{App, AppConfig, Shutdown, WorkspaceConfig};
@@ -51,7 +53,7 @@ use crate::workflow::run::RunRecord;
 ///     }
 /// }
 /// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-/// # runtime.block_on(async {
+/// # let result = runtime.block_on(async {
 /// let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
 /// let definition = WorkflowDefinition::parse(r#"{
 ///  "schema":"app-kit.workflow/v2","id":"counter","revision":"r1",
@@ -77,16 +79,23 @@ use crate::workflow::run::RunRecord;
 ///     let workflow = workspace.workflow("counter".parse()?).await?;
 ///     let mut run = workflow.prepare(WorkflowState::default()).await?;
 ///     let terminal = run.execution(ExecutionOptions::default()).await?.finish().await?;
-///     assert_eq!(terminal.state.values()["sum"], 5);
 ///     #
-///     Ok::<(), Box<dyn std::error::Error>>(())
+///     Ok::<_, Box<dyn std::error::Error>>(terminal)
 /// }.await;
 /// let cleanup = app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }).await;
 /// if let Err(error) = &cleanup { eprintln!("App shutdown: {error}"); }
-/// outcome?;
+/// let terminal = outcome?;
 /// cleanup?;
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// # })?;
+/// # Ok::<_, Box<dyn std::error::Error>>(terminal)
+/// # });
+/// # let metrics = runtime.metrics();
+/// # runtime.block_on(async {
+/// #     while metrics.num_alive_tasks() != 0 {
+/// #         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+/// #     }
+/// # });
+/// # let terminal = result?;
+/// assert_eq!(terminal.state.values()["sum"], 5);
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 pub trait ChildExecutor: Send + Sync + 'static {
@@ -256,7 +265,7 @@ impl<F> ChildBatch<F> {
     ///     }
     /// }
     /// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-    /// # runtime.block_on(async {
+    /// # let result = runtime.block_on(async {
     /// # let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
     /// # let definition = WorkflowDefinition::parse(r#"{
     /// #  "schema":"app-kit.workflow/v2","id":"counter","revision":"r1",
@@ -282,16 +291,23 @@ impl<F> ChildBatch<F> {
     /// #     let workflow = workspace.workflow("counter".parse()?).await?;
     /// #     let mut run = workflow.prepare(WorkflowState::default()).await?;
     ///     let terminal = run.execution(ExecutionOptions::default()).await?.finish().await?;
-    ///     assert_eq!(terminal.state.values()["sum"], 5);
     ///     #
-    /// #     Ok::<(), Box<dyn std::error::Error>>(())
+    /// #     Ok::<_, Box<dyn std::error::Error>>(terminal)
     /// # }.await;
     /// # let cleanup = app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }).await;
     /// # if let Err(error) = &cleanup { eprintln!("App shutdown: {error}"); }
-    /// # outcome?;
+    /// # let terminal = outcome?;
     /// # cleanup?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// # })?;
+    /// # Ok::<_, Box<dyn std::error::Error>>(terminal)
+    /// # });
+    /// # let metrics = runtime.metrics();
+    /// # runtime.block_on(async {
+    /// #     while metrics.num_alive_tasks() != 0 {
+    /// #         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    /// #     }
+    /// # });
+    /// # let terminal = result?;
+    /// assert_eq!(terminal.state.values()["sum"], 5);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn into_tasks(self) -> Result<Vec<Pin<Box<F>>>, AppError> {

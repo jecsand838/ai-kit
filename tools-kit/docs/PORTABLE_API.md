@@ -108,8 +108,9 @@ ToolHandlerOutput::Completed(
 )
 ```
 
-ToolResult owns content, optional structured content, and `is_error`. It does
-not repeat call id or tool name. The caller retains correlation.
+ToolResult owns content, optional structured content, `is_error`, and
+uninterpreted source-neutral result metadata. It does not repeat call id or tool
+name. The caller retains correlation.
 
 Outer ToolError represents rejected input/state transitions, protocol or
 transport failure, cancellation, timeout, unsupported behavior, or closed

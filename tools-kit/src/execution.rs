@@ -159,7 +159,11 @@ pub enum ToolContent {
 pub struct ToolResult {
     /// Ordered model-visible content items.
     pub content: Vec<ToolContent>,
-    /// Optional structured value validated against the tool output schema.
+    /// Optional structured output.
+    ///
+    /// The owning handler validates successful results against the declared
+    /// output schema, when present. Error results are exempt. Constructing this
+    /// value alone does not perform schema validation.
     pub structured_content: Option<serde_json::Value>,
     /// Whether this completed result represents a model-visible tool failure.
     pub is_error: bool,

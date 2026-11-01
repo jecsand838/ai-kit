@@ -51,9 +51,10 @@ If there are no actionable findings, respond exactly:
 ## Read-Only Forward Test
 
 ```bash
+repo_root="$(git rev-parse --show-toplevel)"
 mkdir -p /tmp/codex-skill-forwardtest
 CODEX_HOME=/tmp/codex-skill-forwardtest codex exec --ephemeral --sandbox read-only \
-  -C /Users/connorsanders/scratch/ai-kit \
+  -C "$repo_root" \
   -o /tmp/ai-kit-audit-forwardtest.txt \
   $'Use $ai-kit-audit. Audit the ai-kit workspace skill catalog for stale workflow entries. Do not edit files.'
 ```

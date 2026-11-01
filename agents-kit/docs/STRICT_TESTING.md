@@ -58,9 +58,8 @@ Conversation<S,D,P,T>` preservation. Supplied-handle behavior requires the
 corresponding public trait in scope; compile-negative cases guard against
 duplicate inherent forwarding contracts.
 
-The disposable downstream Cargo roots select the same approved Geo 0.32.0
-source as the workspace root: Cargo does not inherit patches from dependency
-manifests. These test projects copy the workspace lockfile and resolve offline.
+The disposable downstream Cargo roots depend on the local `agents-kit` package,
+copy the workspace lockfile, and resolve dependencies offline.
 Compile-negative checks must reach rustc diagnostics; dependency-resolution
 failures cannot prove a rejected public API. Module placement and invariant-field
 privacy have separate cases with the corresponding compiler error codes.
@@ -275,16 +274,33 @@ ordering, exclusive delivery, replay, exact output, exit status, terminal drain,
 and the original observation and cleanup bounds remain required. Changing this
 prompt changes model input and requires fresh live qualification.
 
-A failed cloud-stream output assertion retains its original panic before
-bounded native readback. Before cleanup, at most three read-only requests inspect
-the owned OpenCode service's health, unique session, and exact prompt's terminal
-history. Capture ends at the earlier of the original scenario deadline and ten
-seconds. A diagnostic of at most 4 KiB reports lengths, fingerprints, and exact
-comparisons of native and incremental text with the portable and expected output,
-without native identities or raw content. This later history snapshot does not
-establish the original HTTP response or model authorship. Missing, interrupted, or failed
-capture preserves the original assertion failure and all cleanup obligations;
-the successful path performs no additional native requests.
+The cloud case installs the existing private boundary observer in its owned
+OpenCode process. Its OpenAI Responses decoder retains provider deltas and
+finalized text as separate observations, alongside the existing Chat Completions
+decoder. Exact prompt, model, response, item, content, and native parent
+correlation is required before capture is complete. The observer forwards the
+original request and response bytes without retries, output correction, or
+runtime-setting changes. A provider final snapshot never replaces the native
+foreground HTTP response that owns the portable terminal result.
+
+The fresh stream token uses the unchanged PID-and-clock factory, but is generated
+before process startup so the observer can bind its exact expectation. After
+the public terminal arrives, at most three read-only requests inspect the owned
+service's health, unique session, and exact prompt's terminal history on success
+as well as failure. Capture ends at the earlier of the original scenario deadline
+and ten seconds. The public/native diagnostic is bounded to 4 KiB; provider
+receipts retain the observer's existing 128 KiB total bound. Raw text remains in
+bounded private memory; receipts expose lengths, comparisons, and completeness
+facts, without credentials, native identities, or raw response contents.
+
+A failed cloud-stream assertion retains its original panic before readback.
+Missing, interrupted, or failed capture preserves that failure and every cleanup
+obligation. Native history alone proves neither the original HTTP response nor
+model authorship, and a passing test with incomplete capture cannot establish a
+root cause. The scenario's exact delta/terminal equality assertion does not
+widen the shared PromptStream contract: each backend retains its own terminal
+authority, and other scenarios may legitimately have different incremental and
+terminal text.
 
 Kit correctness assertions run for every configured model. Prompts that request
 an exact token or interaction answer require exact raw terminal equality, with
@@ -543,7 +559,7 @@ inspection. Run exactly once, with a nonempty inventory and outer process
 supervision; do not retry an unchanged failure:
 
 ```bash
-cargo +1.94.1 test --locked -p agents-kit --test codex_direct_live -- \
+cargo test --locked -p agents-kit --test codex_direct_live -- \
   codex_direct_interactive_answer_is_exact --exact --nocapture --test-threads=1
 ```
 

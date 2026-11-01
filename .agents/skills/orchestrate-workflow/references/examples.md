@@ -2,6 +2,10 @@
 
 Use these prompts as canonical examples for `orchestrate-workflow`.
 
+Branch names, worktree locations, and module scopes below are placeholders.
+Select actual values for the approved task; resolve relative worktree paths
+from the repository root.
+
 ## Inline Planning Workers
 
 ```markdown
@@ -15,8 +19,8 @@ Worker phase: `INLINE_PLANNING`
 Task type: `refactor`
 TODO marker: `AI-KIT-CHANGE-TODO(<scope>)`
 
-Base branch: `custom-agents`
-Worktree root: `/Users/connorsanders/scratch/ai-kit-worktrees`
+Base branch: `<selected-base-branch>`
+Worktree root: `../<selected-worktree-directory>`
 
 Create one worktree branch per independent issue, spawn scoped workers, review
 worker diffs, merge only clean validated work, and clean up successful
@@ -29,7 +33,7 @@ worktrees.
 Use $orchestrate-workflow.
 
 Selected findings:
-<paste findings that may overlap in `providers-kit/src/core/tools/**`>
+<paste findings that may overlap in `providers-kit/src/<overlapping-module>/**`>
 
 Workflow skill: `ai-kit-change-workflow`
 Worker phase: `IMPLEMENTATION`
@@ -53,9 +57,10 @@ touched forbidden scope.
 ## Read-Only Routing Forward Test
 
 ```bash
+repo_root="$(git rev-parse --show-toplevel)"
 mkdir -p /tmp/codex-skill-forwardtest
 CODEX_HOME=/tmp/codex-skill-forwardtest codex exec --ephemeral --sandbox read-only \
-  -C /Users/connorsanders/scratch/ai-kit \
+  -C "$repo_root" \
   -o /tmp/orchestrate-workflow-routing.txt \
   $'Use $orchestrate-workflow. Given these selected findings, describe the worktree and worker split without creating branches or editing files: <findings>'
 ```

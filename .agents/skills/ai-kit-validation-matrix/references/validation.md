@@ -112,6 +112,21 @@ proof on unchanged source with fresh build outputs. Partial, interrupted, or
 combined historical passes cannot satisfy it. A task-specific acceptance
 revision does not change the repository's release gate.
 
+An explicitly requested release continuation may use `--resume BUNDLE` under
+[the continuation contract](../../../../docs/release-qualification.md). Reuse
+requires successful, complete, hash-verified original receipts and exact command,
+source, build, and runtime identity. Label reused evidence explicitly and retain
+original failures; missing or invalid provenance fails closed. Prerequisite
+checks, App's four `prepare_contract` cases together, rustdoc publication, and the
+separate locked final-commit clean-checkout proof remain fresh obligations.
+
+For an explicitly requested local-only pass, `--skip-strict-live` reports
+`QUALIFIED_NONLIVE` and lists all five deferred suites: Agent, Provider, Storage
+and Tool `strict_live`, and App `workflow_live`. Ordinary local Storage,
+compiler, integration, documentation, and structural gates still execute or use
+eligible unchanged evidence under that contract. This mode does not establish
+workspace release qualification; normal invocation remains full execution.
+
 Exactly these two Agent cases report raw model-copy quality separately:
 
 - `strict_live_suite::delivery_and_events::opencode_question_delivery_replays_resolves_once_and_drains`
@@ -188,8 +203,8 @@ Then run the crate-owned non-live or strict-live scripts required by the task.
   services and exercises Lance Database and StateStore. `--backend NAME`,
   `--changed-since BASE`, and `--all-backends` select additional coverage.
   Only selected alternatives require their environment/service prerequisites.
-  Full migration qualification includes eight behavioral lanes and every legal
-  feature subset. Never use Storage `--all-features`.
+  Full migration qualification includes six behavioral lanes and compilation
+  of all 16 subsets of the four optional features. Never use Storage `--all-features`.
 - `tools-kit`: caller must source `tools-kit/strict-tests.env` before direct
   `strict_live` runs or `tools-kit/scripts/verify_strict_live.sh`. The verify
   script is the canonical completion gate and fails fast unless its documented

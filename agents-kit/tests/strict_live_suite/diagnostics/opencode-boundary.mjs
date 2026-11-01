@@ -16,6 +16,7 @@ class BoundaryCapture {
 
   constructor(options) {
     this.options = options;
+    this.provider = options.expectedProvider ?? "ollama";
     this.flow = 0;
     this.written = 0;
     this.capture = randomUUID();
@@ -89,8 +90,8 @@ class BoundaryCapture {
         || message.sessionID !== input.sessionID || part.sessionID !== input.sessionID
         || part.messageID !== message.id || !BoundaryCapture.identity(part.id)
         || (input.messageID !== undefined && input.messageID !== message.id)
-        || input.model?.providerID !== "ollama" || input.model?.modelID !== this.expectedNativeModel
-        || message.model?.providerID !== "ollama" || message.model?.modelID !== this.expectedNativeModel) {
+        || input.model?.providerID !== this.provider || input.model?.modelID !== this.expectedNativeModel
+        || message.model?.providerID !== this.provider || message.model?.modelID !== this.expectedNativeModel) {
         this.freshIncomplete("user_ownership");
         return;
       }
@@ -129,7 +130,7 @@ class BoundaryCapture {
         }
         return;
       }
-      if (!BoundaryCapture.identity(info.id) || info.providerID !== "ollama" || info.modelID !== this.expectedNativeModel) {
+      if (!BoundaryCapture.identity(info.id) || info.providerID !== this.provider || info.modelID !== this.expectedNativeModel) {
         this.freshIncomplete("assistant_identity_or_model");
         return;
       }
@@ -193,16 +194,17 @@ class BoundaryCapture {
 
   freshRequest(request, init, flow) {
     if (!this.fresh || this.fresh.incomplete) return false;
-    if (!Array.isArray(request.messages) || request.messages.length > 256) {
+    const messages = this.provider === "openai" ? request.input : request.messages;
+    if (!Array.isArray(messages) || messages.length > 256) {
       this.freshIncomplete("request_messages_shape");
       return false;
     }
-    const user = request.messages.findLast((message) => message?.role === "user");
+    const user = messages.findLast((message) => message?.role === "user");
     if (!user) return false;
     let texts;
     if (typeof user.content === "string") texts = [user.content];
     else if (Array.isArray(user.content) && user.content.length <= BoundaryCapture.FRESH_PART_LIMIT
-      && user.content.every((part) => part?.type === "text" && typeof part.text === "string")) {
+      && user.content.every((part) => part?.type === (this.provider === "openai" ? "input_text" : "text") && typeof part.text === "string")) {
       texts = user.content.map((part) => part.text);
     } else {
       this.freshIncomplete("request_user_content_shape");
@@ -220,10 +222,12 @@ class BoundaryCapture {
     const temperatureExpected = Object.hasOwn(this.options, "expectedTemperature");
     this.emit({ event: "fresh_request", flow, capture: matches === 1 && modelMatches && sessionMatches ? "complete" : "incomplete",
       model_matches_configured: modelMatches, session_matches_fresh_user: sessionMatches, exact_prompt_parts: matches,
+      ...(this.provider === "openai" ? { user_text_parts: texts.length, other_user_text_parts: texts.length - matches } : {}),
       temperature_present: temperaturePresent, temperature_numeric: temperatureNumeric,
       temperature_value: temperatureNumeric ? request.temperature : null,
       temperature_matches_scenario: temperatureExpected ? temperatureNumeric && request.temperature === this.options.expectedTemperature : null });
-    if (matches !== 1 || !modelMatches || !sessionMatches) {
+    if (matches !== 1 || !modelMatches || !sessionMatches
+      || (this.provider === "openai" && request.stream !== true)) {
       this.freshIncomplete("request_correlation");
       return false;
     }
@@ -235,14 +239,37 @@ class BoundaryCapture {
     return true;
   }
 
-  freshResponse(flow, complete, text, reason) {
+  freshResponse(flow, complete, text, reason, snapshots) {
     const response = this.fresh?.flows.get(flow);
     if (!response) return;
     response.complete = complete;
     response.text = complete ? text : "";
+    if (snapshots !== undefined) {
+      response.finalText = complete ? snapshots.final : "";
+      response.providerFacts = {
+        provider_delta_complete: complete,
+        provider_done_complete: complete,
+        provider_final_complete: complete,
+        ...(complete ? {
+          provider_delta_bytes: Buffer.byteLength(text),
+          provider_done_bytes: Buffer.byteLength(snapshots.done),
+          provider_final_bytes: Buffer.byteLength(snapshots.final),
+          provider_delta_equals_expected: text === this.fresh.expected,
+          provider_done_equals_expected: snapshots.done === this.fresh.expected,
+          provider_final_equals_expected: snapshots.final === this.fresh.expected,
+          provider_delta_equals_done: text === snapshots.done,
+          provider_delta_equals_final: text === snapshots.final,
+          provider_done_equals_final: snapshots.done === snapshots.final,
+          provider_content_part_equals_done: snapshots.part === snapshots.done,
+          provider_item_equals_done: snapshots.item === snapshots.done,
+          provider_reported_model_matches_requested: snapshots.model === this.expectedModel,
+        } : {}),
+      };
+    }
     this.emit({ event: "fresh_provider_text", flow, capture: complete ? "complete" : "incomplete",
       ...(complete ? { text_bytes: Buffer.byteLength(text), text_equals_expected: text === this.fresh.expected,
         text_equals_asterisk_wrapped_expected: text === `*${this.fresh.expected}*` } : { reason }),
+      ...response.providerFacts,
       foreground_http_body_observed: false });
     if (!complete) this.freshIncomplete("provider_text_incomplete");
     this.freshSummary(false);
@@ -266,6 +293,12 @@ class BoundaryCapture {
         provider_equals_asterisk_wrapped_expected: flows[0].text === `*${this.fresh.expected}*`,
         native_equals_expected: native === this.fresh.expected, native_equals_provider: native === flows[0].text,
         native_text_parts: assistants[0].parts.size, native_text_bytes: Buffer.byteLength(native),
+        ...flows[0].providerFacts,
+        ...(flows[0].providerFacts ? {
+          native_equals_provider_delta: native === flows[0].text,
+          native_equals_provider_final: native === flows[0].finalText,
+          native_text_is_hook_checkpoint: true,
+        } : {}),
       } : {}),
     });
     if (final) {
@@ -309,8 +342,11 @@ class BoundaryCapture {
   }
 
   install(config) {
-    const provider = config.provider?.ollama;
-    if (provider?.npm !== "@ai-sdk/openai-compatible" || !provider.options) {
+    const provider = config.provider?.[this.provider];
+    const supported = this.provider === "ollama"
+      ? provider?.npm === "@ai-sdk/openai-compatible"
+      : this.provider === "openai" && (provider?.npm === undefined || provider.npm === "@ai-sdk/openai");
+    if (!supported || !provider?.options) {
       this.emit({ event: "unavailable", reason: "provider_shape" });
       return;
     }
@@ -330,7 +366,7 @@ class BoundaryCapture {
     provider.options.fetch = function (...args) {
       return owner.fetch(delegate, this, args);
     };
-    this.emit({ event: "installed", boundary: "serialized_provider_http", expected_role: this.options.expectedRole === "opencode_default" ? "opencode_default" : "opencode_shell", flow_limit: BoundaryCapture.FLOW_LIMIT });
+    this.emit({ event: "installed", boundary: "serialized_provider_http", expected_role: this.provider === "openai" ? "opencode_cloud" : this.options.expectedRole === "opencode_default" ? "opencode_default" : "opencode_shell", flow_limit: BoundaryCapture.FLOW_LIMIT });
   }
 
   async fetch(delegate, receiver, args) {
@@ -350,7 +386,8 @@ class BoundaryCapture {
           const request = JSON.parse(body);
           observation.fresh = this.freshRequest(request, args[1], flow);
           const tools = Array.isArray(request.tools) ? request.tools : [];
-          const questions = tools.filter((tool) => tool?.type === "function" && tool.function?.name === "question");
+          const questions = tools.filter((tool) => tool?.type === "function"
+            && (this.provider === "openai" ? tool.name : tool.function?.name) === "question");
           const facts = {
             event: "request", flow, capture: "complete",
             model_matches_configured: request.model === this.expectedModel,
@@ -361,7 +398,7 @@ class BoundaryCapture {
             tool_choice: ["auto", "none", "required"].includes(request.tool_choice) ? request.tool_choice : BoundaryCapture.shape(request.tool_choice),
           };
           if (questions.length === 1) {
-            const schema = questions[0].function.parameters;
+            const schema = this.provider === "openai" ? questions[0].parameters : questions[0].function.parameters;
             facts.question_schema = BoundaryCapture.schema(schema);
             facts.question_schema_sha256 = createHash("sha256").update(JSON.stringify(schema) ?? "undefined").digest("hex");
           }
@@ -415,6 +452,9 @@ class BoundaryResponse {
     this.freshTextComplete = true;
     this.freshTerminalSeen = false;
     this.freshDone = false;
+    if (owner.provider === "openai") {
+      this.responses = { phase: "awaiting", sequence: -1, items: new Map(), bytes: 0 };
+    }
   }
 
   observe(response) {
@@ -504,7 +544,211 @@ class BoundaryResponse {
     this.data = [];
     this.dataBytes = 0;
     this.calls.clear();
+    this.responses?.items.clear();
     this.owner.emit({ event: "response_incomplete", flow: this.flow, reason });
+  }
+
+  responsesRequire(condition, reason) {
+    if (!condition) throw new Error(reason);
+  }
+
+  responsesIndex(value) {
+    return Number.isSafeInteger(value) && value >= 0 && value < BoundaryCapture.FRESH_PART_LIMIT;
+  }
+
+  responsesText(value) {
+    this.responsesRequire(typeof value === "string", "responses_text_shape");
+    this.responses.bytes += Buffer.byteLength(value);
+    this.responsesRequire(this.responses.bytes <= BoundaryCapture.FRESH_TEXT_LIMIT, "responses_text_bound");
+    return value;
+  }
+
+  responsesItem(frame, kind) {
+    const item = this.responses.items.get(frame.output_index);
+    this.responsesRequire(this.responsesIndex(frame.output_index) && item !== undefined && item.id === frame.item_id
+      && item.kind === kind && !item.done, "responses_item_correlation");
+    return item;
+  }
+
+  responsesContent(frame) {
+    const item = this.responsesItem(frame, "message");
+    const part = item.parts.get(frame.content_index);
+    this.responsesRequire(this.responsesIndex(frame.content_index) && part !== undefined,
+      "responses_content_correlation");
+    return part;
+  }
+
+  responsesReasoning(item) {
+    this.responsesRequire((item.status === undefined || item.status === "completed")
+      && Array.isArray(item.summary) && item.summary.length <= BoundaryCapture.FRESH_PART_LIMIT
+      && item.summary.every((part) => part?.type === "summary_text" && typeof part.text === "string"),
+    "responses_reasoning_shape");
+  }
+
+  responsesMessage(item, observed, field) {
+    this.responsesRequire(item.role === "assistant" && item.status === "completed"
+      && Array.isArray(item.content) && item.content.length === observed.parts.size
+      && item.content.length > 0, "responses_message_shape");
+    for (const [index, value] of item.content.entries()) {
+      const part = observed.parts.get(index);
+      this.responsesRequire(value?.type === "output_text" && part?.phase === "part_done",
+        "responses_message_content");
+      part[field] = this.responsesText(value.text);
+    }
+  }
+
+  responsesSnapshot(response, status) {
+    const state = this.responses;
+    this.responsesRequire(response && typeof response === "object" && !Array.isArray(response)
+      && response.id === state.id && response.model === state.model && response.status === status
+      && response.error == null && response.incomplete_details == null && Array.isArray(response.output),
+    "responses_snapshot_correlation");
+    return response;
+  }
+
+  // Responses text is observed at each boundary independently. Disagreement
+  // between a delta and a terminal snapshot is evidence, never a repair rule.
+  responsesFrame(frame) {
+    try {
+      const state = this.responses;
+      this.responsesRequire(frame && typeof frame === "object" && !Array.isArray(frame)
+        && Number.isSafeInteger(frame.sequence_number) && frame.sequence_number === state.sequence + 1
+        && state.phase !== "completed", "responses_event_sequence");
+      state.sequence = frame.sequence_number;
+      if (frame.type === "response.created") {
+        const response = frame.response;
+        this.responsesRequire(state.phase === "awaiting" && BoundaryCapture.identity(response?.id)
+          && BoundaryCapture.identity(response.model), "responses_created_shape");
+        state.id = response.id;
+        state.model = response.model;
+        this.responsesRequire(this.responsesSnapshot(response, "in_progress").output.length === 0,
+          "responses_created_output");
+        state.phase = "active";
+        return;
+      }
+      this.responsesRequire(state.phase === "active", "responses_missing_created");
+      switch (frame.type) {
+        case "response.in_progress":
+          this.responsesRequire(this.responsesSnapshot(frame.response, "in_progress").output.length === 0,
+            "responses_progress_output");
+          break;
+        case "response.output_item.added": {
+          const item = frame.item;
+          this.responsesRequire(this.responsesIndex(frame.output_index) && frame.output_index === state.items.size
+            && BoundaryCapture.identity(item?.id) && ![...state.items.values()].some((known) => known.id === item.id),
+          "responses_added_item_identity");
+          this.responsesRequire(item.type === "message" || item.type === "reasoning", "responses_nontext_output");
+          if (item.type === "message") {
+            this.responsesRequire(item.role === "assistant" && item.status === "in_progress"
+              && Array.isArray(item.content) && item.content.length === 0, "responses_added_message_shape");
+          } else {
+            this.responsesRequire((item.status === undefined || item.status === "in_progress")
+              && Array.isArray(item.summary) && item.summary.length === 0, "responses_added_reasoning_shape");
+          }
+          state.items.set(frame.output_index, { id: item.id, kind: item.type, parts: new Map(), done: false });
+          break;
+        }
+        case "response.content_part.added": {
+          const item = this.responsesItem(frame, "message");
+          this.responsesRequire(this.responsesIndex(frame.content_index) && frame.content_index === item.parts.size
+            && frame.part?.type === "output_text" && frame.part.text === "", "responses_added_content_shape");
+          item.parts.set(frame.content_index, { phase: "streaming", delta: "" });
+          break;
+        }
+        case "response.output_text.delta": {
+          const part = this.responsesContent(frame);
+          this.responsesRequire(part.phase === "streaming", "responses_delta_after_done");
+          part.delta += this.responsesText(frame.delta);
+          this.textBytes += Buffer.byteLength(frame.delta);
+          break;
+        }
+        case "response.output_text.done": {
+          const part = this.responsesContent(frame);
+          this.responsesRequire(part.phase === "streaming" && frame.status !== "incomplete", "responses_text_done_order");
+          part.doneText = this.responsesText(frame.text);
+          part.phase = "done";
+          break;
+        }
+        case "response.content_part.done": {
+          const part = this.responsesContent(frame);
+          this.responsesRequire(part.phase === "done" && frame.part?.type === "output_text"
+            && frame.status !== "incomplete", "responses_content_done_order");
+          part.partText = this.responsesText(frame.part.text);
+          part.phase = "part_done";
+          break;
+        }
+        case "response.output_item.done": {
+          const item = state.items.get(frame.output_index);
+          this.responsesRequire(this.responsesIndex(frame.output_index) && item !== undefined && !item.done
+            && item.id === frame.item?.id && item.kind === frame.item.type, "responses_done_item_correlation");
+          if (item.kind === "message") this.responsesMessage(frame.item, item, "itemText");
+          else this.responsesReasoning(frame.item);
+          item.done = true;
+          break;
+        }
+        case "response.reasoning_summary_part.added":
+        case "response.reasoning_summary_part.done":
+          this.responsesItem(frame, "reasoning");
+          this.responsesRequire(this.responsesIndex(frame.summary_index) && frame.part?.type === "summary_text"
+            && typeof frame.part.text === "string" && frame.status !== "incomplete", "responses_reasoning_part_shape");
+          break;
+        case "response.reasoning_summary_text.delta":
+        case "response.reasoning_summary_text.done":
+          this.responsesItem(frame, "reasoning");
+          this.responsesRequire(this.responsesIndex(frame.summary_index)
+            && typeof (frame.type.endsWith(".delta") ? frame.delta : frame.text) === "string"
+            && frame.status !== "incomplete", "responses_reasoning_text_shape");
+          break;
+        case "response.reasoning_text.delta":
+        case "response.reasoning_text.done":
+          this.responsesItem(frame, "reasoning");
+          this.responsesRequire(this.responsesIndex(frame.content_index)
+            && typeof (frame.type.endsWith(".delta") ? frame.delta : frame.text) === "string"
+            && frame.status !== "incomplete", "responses_reasoning_text_shape");
+          break;
+        case "response.completed": {
+          const response = this.responsesSnapshot(frame.response, "completed");
+          this.responsesRequire(response.output.length === state.items.size && state.items.size > 0,
+            "responses_completed_inventory");
+          for (const [index, item] of response.output.entries()) {
+            const observed = state.items.get(index);
+            this.responsesRequire(observed?.done && item?.id === observed.id && item.type === observed.kind,
+              "responses_completed_item_correlation");
+            if (item.type === "message") this.responsesMessage(item, observed, "finalText");
+            else this.responsesReasoning(item);
+          }
+          this.responsesRequire([...state.items.values()].some((item) => item.kind === "message"),
+            "responses_missing_text_message");
+          state.phase = "completed";
+          this.finish.add("stop");
+          break;
+        }
+        default:
+          this.responsesRequire(false, "responses_unsupported_event");
+      }
+    } catch (error) {
+      this.bound(error instanceof Error && /^responses_[a-z_]+$/.test(error.message)
+        ? error.message : "responses_observer_error");
+    }
+  }
+
+  responsesEnd(outcome) {
+    const state = this.responses;
+    const complete = this.complete && this.invalidFrames === 0 && outcome === "eof"
+      && this.status >= 200 && this.status < 300 && this.format === "sse" && state.phase === "completed";
+    const parts = complete ? [...state.items].sort(([left], [right]) => left - right)
+      .flatMap(([, item]) => item.kind === "message"
+        ? [...item.parts].sort(([left], [right]) => left - right).map(([, part]) => part) : []) : [];
+    const snapshots = {
+      done: parts.map((part) => part.doneText).join(""),
+      part: parts.map((part) => part.partText).join(""),
+      item: parts.map((part) => part.itemText).join(""),
+      final: parts.map((part) => part.finalText).join(""),
+      model: state.model,
+    };
+    this.owner.freshResponse(this.flow, complete, parts.map((part) => part.delta).join(""),
+      "responses_terminal_or_capture_shape", snapshots);
+    state.items.clear();
   }
 
   static knownUsage(value) {
@@ -542,6 +786,11 @@ class BoundaryResponse {
   }
 
   frame(text) {
+    if (this.responses && this.fresh && !this.complete) return;
+    if (this.responses && this.fresh && text === "[DONE]") {
+      this.bound("responses_unexpected_done_sentinel");
+      return;
+    }
     if (text === "[DONE]") {
       if (this.fresh && this.freshDone) this.freshTextComplete = false;
       this.freshDone = true;
@@ -553,6 +802,10 @@ class BoundaryResponse {
       frame = JSON.parse(text);
     } catch {
       this.invalidFrames++;
+      return;
+    }
+    if (this.responses && this.fresh) {
+      this.responsesFrame(frame);
       return;
     }
     if (this.fresh && !this.freshFrame(frame)) {
@@ -623,7 +876,10 @@ class BoundaryResponse {
           return { arguments_json: false };
         }
       });
-      this.owner.emit({ event: "response_end", flow: this.flow, outcome, capture: this.complete && this.invalidFrames === 0 ? "complete" : "incomplete",
+      const parsed = this.complete && this.invalidFrames === 0
+        && (!this.responses || (this.fresh && this.responses.phase === "completed"));
+      this.owner.emit({ event: "response_end", flow: this.flow, outcome, capture: parsed ? "complete" : "incomplete",
+        ...(this.responses ? { target_prompt: this.fresh, provider_terminal_observed: this.responses.phase === "completed" } : {}),
         frames: this.frames, invalid_json_frames: this.invalidFrames, text_bytes: this.textBytes,
         structured_tool_call_count: this.calls.size, question_call_count: questions.length,
         question_argument_shapes: shapes, finish_reasons: [...this.finish] });
@@ -631,7 +887,9 @@ class BoundaryResponse {
       this.owner.emit({ event: "response_end", flow: this.flow, outcome, capture: "incomplete" });
       this.complete = false;
     }
-    if (this.fresh) {
+    if (this.fresh && this.responses) {
+      this.responsesEnd(outcome);
+    } else if (this.fresh) {
       const complete = this.complete && this.invalidFrames === 0 && outcome === "eof"
         && this.freshTextComplete && this.status >= 200 && this.status < 300
         && this.finish.size === 1 && this.finish.has("stop") && this.calls.size === 0;

@@ -191,12 +191,13 @@ require the variable to be unset. Candidate qualification also uses the unset
 default. The setting remains part of frozen-executable runtime identity;
 comparisons must not bypass the existing identity checks.
 
-The runner compiles before timing execution, with Rust 1.94.1, `--locked` and
-one build job. It uses the same profile for compilation, inventory and execution,
-verifies optimization/assertion/overflow settings from Cargo artifact messages,
-and rejects conflicting compiler overrides. Verified binaries execute from the
-`app-kit` directory, matching Cargo's test working directory. Optional OS resource
-accounting is probed before workload admission; unavailable metrics are recorded
+The runner compiles before timing execution with the repository-pinned Rust
+toolchain, `--locked`, and one build job. It uses the same profile for compilation,
+inventory and execution, verifies optimization/assertion/overflow settings from
+Cargo artifact messages, and rejects conflicting compiler overrides. Verified
+binaries execute from the `app-kit` directory, matching Cargo's test working
+directory. Optional OS resource accounting is probed before workload admission;
+unavailable metrics are recorded
 without replaying the workload. Build failure is incomplete capacity
 evidence. Preserve recorded failures and available resource measurements; do not
 silently change the profile or delete unrelated files to finish a build.

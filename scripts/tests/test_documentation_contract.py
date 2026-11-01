@@ -1,6 +1,8 @@
-"""Repository documentation inventory and navigation, not prose snapshots."""
+"""Documentation inventory, navigation, and runnable toolchain contracts."""
 
+import fnmatch
 import re
+import shlex
 import tempfile
 import tomllib
 import unittest
@@ -95,6 +97,177 @@ class DocumentationContractTests(unittest.TestCase):
 
     def test_current_guides_specs_and_skills_are_inventoried(self) -> None:
         self.assertEqual(self.missing_current_documents(), [], "active documentation missing from the ledger")
+
+    def instruction_paths(self) -> set[Path]:
+        inactive = [
+            pattern
+            for category in ("historical", "templates", "excluded")
+            for pattern in self.ledger.get("document_sets", {}).get(category, [])
+        ]
+        return {
+            path for path in self.active_paths()
+            if path.suffix == ".md" and not any(
+                fnmatch.fnmatchcase(str(path.relative_to(self.workspace)), pattern)
+                for pattern in inactive
+            )
+        }
+
+    def shell_commands(self, source: str) -> list[list[str]]:
+        # Inspect simple shell commands, not prose, quoted prompts, or shell
+        # expansion. Retain continued lines and quoted multiline arguments.
+        commands = []
+        fence = None
+        shell = False
+        pending = ""
+        here_documents = []
+        for line in source.splitlines():
+            marker = re.match(r"^\s*(`{3,}|~{3,})(.*)$", line)
+            if marker:
+                if fence is None:
+                    fence = marker[1]
+                    shell = marker[2].strip() in {"bash", "sh", "shell", "zsh"}
+                elif marker[1][0] == fence[0] and len(marker[1]) >= len(fence) and not marker[2].strip():
+                    fence = None
+                    shell = False
+                    pending = ""
+                    here_documents = []
+                continue
+            if not shell:
+                continue
+            if here_documents:
+                delimiter, strip_tabs = here_documents[0]
+                if (line.lstrip("\t") if strip_tabs else line) == delimiter:
+                    here_documents.pop(0)
+                continue
+            pending += line + "\n"
+            if line.rstrip().endswith("\\"):
+                continue
+            try:
+                tokens = shlex.split(self.shell_continuations(pending), comments=True, posix=True)
+            except ValueError:
+                continue
+            commands.append(tokens)
+            # Here-document bodies are input data even when they contain text
+            # that resembles a command. Preserve quotes while locating actual
+            # redirection tokens so a quoted '<<PROMPT' argument is not one.
+            raw = []
+            if "<<" in pending:
+                lexer = shlex.shlex(pending, posix=False, punctuation_chars="<")
+                lexer.whitespace_split = True
+                try:
+                    raw = list(lexer)
+                except ValueError:
+                    # Unsupported redirection syntax stays opaque through the
+                    # fence; this check never evaluates arbitrary shell input.
+                    here_documents = [(None, False)]
+            for index, token in enumerate(raw[:-1]):
+                if token != "<<":
+                    continue
+                delimiter = raw[index + 1]
+                strip_tabs = delimiter.startswith("-")
+                if strip_tabs:
+                    delimiter = delimiter[1:]
+                if len(delimiter) >= 2 and delimiter[0] in "\"'" and delimiter[-1] == delimiter[0]:
+                    delimiter = delimiter[1:-1]
+                here_documents.append((delimiter, strip_tabs))
+            pending = ""
+        return commands
+
+    def shell_continuations(self, source: str) -> str:
+        # shlex retains escaped newlines; shells remove them outside single
+        # quotes. Preserve literal quoted data and escaped quote characters.
+        folded = []
+        quote = None
+        index = 0
+        while index < len(source):
+            character = source[index]
+            if character == "#" and quote is None:
+                end = source.find("\n", index)
+                end = len(source) if end < 0 else end + 1
+                folded.append(source[index:end])
+                index = end
+                continue
+            if character == "\\" and quote != "'" and index + 1 < len(source):
+                following = source[index + 1]
+                if following != "\n":
+                    folded.extend((character, following))
+                index += 2
+                continue
+            if character in "\"'":
+                if quote is None:
+                    quote = character
+                elif quote == character:
+                    quote = None
+            folded.append(character)
+            index += 1
+        return "".join(folded)
+
+    def shell_toolchain_failures(self) -> list[str]:
+        with (self.workspace / "rust-toolchain.toml").open("rb") as handle:
+            pinned = tomllib.load(handle)["toolchain"]["channel"]
+        failures = []
+        for path in sorted(self.instruction_paths()):
+            for command in self.shell_commands(path.read_text(encoding="utf-8")):
+                tokens = list(command)
+                if tokens and tokens[0] in {"env", "export"}:
+                    tokens.pop(0)
+                selections = []
+                while tokens and re.match(r"^[A-Za-z_][A-Za-z_0-9]*=", tokens[0]):
+                    name, value = tokens.pop(0).split("=", 1)
+                    if name == "RUSTUP_TOOLCHAIN":
+                        selections.append(value)
+                if len(tokens) >= 2 and tokens[0] == "cargo" and tokens[1].startswith("+"):
+                    selections.append(tokens[1][1:])
+                for selected in selections:
+                    if not any(marker in selected for marker in ("$", "`")) and selected != pinned:
+                        failures.append(f"{path.relative_to(self.workspace)}: toolchain {selected!r} != {pinned!r}")
+        return failures
+
+    def test_active_shell_commands_use_pinned_toolchain(self) -> None:
+        self.assertEqual(self.shell_toolchain_failures(), [], "stale explicit toolchain in active shell instructions")
+
+    def test_shell_toolchain_guard_boundaries(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = Path(temporary)
+            (workspace / "rust-toolchain.toml").write_text('[toolchain]\nchannel = "1.99.0"\n', encoding="utf-8")
+            guide = workspace / "guide.md"
+            inactive = ["history/receipt.md", "templates/example.md", "tmp/nested/old.md"]
+            for name in inactive:
+                path = workspace / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("```bash\ncargo +1.94.1 test\n```\n", encoding="utf-8")
+            ledger = {
+                "canonical_owners": {"workspace": ["guide.md", *inactive]},
+                "document_sets": {"historical": ["history/**"], "templates": ["templates/**"], "excluded": ["tmp/**"]},
+            }
+            cases = [
+                ("```bash\ncargo +1.99.0 test\n```", True),
+                ("```sh\ncargo +1.94.1 test\n```", False),
+                ("```shell\nexport RUSTUP_TOOLCHAIN='1.99.0'\ncargo test\n```", True),
+                ("```zsh\nenv RUSTUP_TOOLCHAIN=1.94.1 cargo test\n```", False),
+                ('```bash\nRUSTUP_TOOLCHAIN="1.94.1" cargo test\n```', False),
+                ("```bash\ncargo test --locked\n```", True),
+                ('```bash\nexport RUSTUP_TOOLCHAIN="$selected"\ncargo +"${selected}" test\n```', True),
+                ("```bash\ncargo \\\n  +1.94.1 test\n```", False),
+                ("```bash\n# cargo +1.94.1 test\ncargo +1.99.0 test # current\ncargo +1.94.1 test\n```", False),
+                ("Prose: `cargo +1.94.1 test`.\n```rust\ncargo +1.94.1 test\n```", True),
+                ("```bash\ncodex exec $'Illustrative prompt:\ncargo +1.94.1 test'\n```", True),
+                ("```bash\nprintf '%s\\n' 'RUSTUP_TOOLCHAIN=1.94.1'\n```", True),
+                ("```bash\ncodex exec <<'PROMPT'\ncargo +1.94.1 test\nPROMPT\n```", True),
+                ("```bash\ncat <<'DATA'\nRUSTUP_TOOLCHAIN=1.94.1\nDATA\ncargo +1.94.1 test\n```", False),
+                ('```bash\ncodex exec <<-"PROMPT"\n\tcargo +1.94.1 test\n\tPROMPT\ncargo test\n```', True),
+                ("```bash\nprintf '%s' '<<PROMPT'\ncargo +1.94.1 test\n```", False),
+                ('```bash\ncargo +"1.\\\n99.0" test\n```', True),
+                ("```bash\nRUSTUP_TOOLCHAIN='1.\\\n99.0' cargo test\n```", False),
+                ("```bash\n# Don't interpret this comment as a quote.\ncargo \\\n  +1.94.1 test\n```", False),
+                ("~~~sh\ncargo +1.94.1 test\n~~~", False),
+            ]
+            with patch.object(self, "workspace", workspace), patch.object(self, "ledger", ledger):
+                self.assertEqual(self.instruction_paths(), {guide})
+                for source, valid in cases:
+                    with self.subTest(source=source):
+                        guide.write_text(source + "\n", encoding="utf-8")
+                        self.assertEqual(self.shell_toolchain_failures() == [], valid)
 
     def test_root_guides_require_ownership_without_activating_history(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

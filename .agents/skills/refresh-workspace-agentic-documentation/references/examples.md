@@ -12,9 +12,10 @@ execution until the surrounding flow permits edits.
 Use a fresh temporary Codex home and capture the last message to a file:
 
 ```bash
+repo_root="$(git rev-parse --show-toplevel)"
 mkdir -p /tmp/codex-skill-forwardtest
 CODEX_HOME=/tmp/codex-skill-forwardtest codex exec --ephemeral --sandbox read-only \
-  -C /Users/connorsanders/scratch/ai-kit \
+  -C "$repo_root" \
   -o /tmp/refresh-workspace-agentic-documentation-routing.txt \
   $'Use $refresh-workspace-agentic-documentation ...'
 ```
@@ -24,32 +25,40 @@ For an authorized execution pass after planning, switch the sandbox to
 
 ## Workspace-Write Temp Worktree Pass
 
+Replace `approved_plan` with the absolute path to an existing approved plan
+outside the disposable worktree. The fresh ephemeral agent reads that file;
+it does not inherit the planning chat.
+
 ```bash
+repo_root="$(git rev-parse --show-toplevel)"
+approved_plan="/absolute/path/to/approved-plan.md"
+test -f "$approved_plan" || exit 1
 tmp_root="$(mktemp -d /tmp/ai-kit-skill-docs.XXXXXX)"
 tmp_repo="${tmp_root}/workspace"
-git -C /Users/connorsanders/scratch/ai-kit worktree add --detach "${tmp_repo}" HEAD
+git -C "$repo_root" worktree add --detach "${tmp_repo}" HEAD
 mkdir -p /tmp/codex-skill-forwardtest
 CODEX_HOME=/tmp/codex-skill-forwardtest codex exec --ephemeral --sandbox workspace-write \
   -C "${tmp_repo}" \
   -o /tmp/refresh-workspace-agentic-documentation-worktree.txt \
-  $'Use $refresh-workspace-agentic-documentation to implement the approved plan in this disposable worktree. Preserve its selected authority and history; reconcile docs, skill/agent metadata, ledger and docs-contract tests, then run the prescribed documentation gates.'
-git -C /Users/connorsanders/scratch/ai-kit worktree remove --force "${tmp_repo}"
+  "$(printf 'Use $refresh-workspace-agentic-documentation. Read the approved plan at "%s" before editing, then implement it in this disposable worktree. Preserve its selected authority and history; reconcile docs, skill/agent metadata, ledger and docs-contract tests, then run the prescribed documentation gates.' "$approved_plan")"
+git -C "$repo_root" worktree remove --force "${tmp_repo}"
 rmdir "${tmp_root}"
 ```
 
 Expected checks:
 
-- Execution follows a decision-complete approved plan and the surrounding flow
-  permits edits.
+- The fresh agent reads the supplied approved plan before editing. Execution
+  follows that decision-complete plan and the surrounding flow permits edits.
 - Work stays inside the disposable worktree, not the live checkout.
 - The response uses the matching crate contract skills and validation gates.
 
 ## Workspace Refresh Happy Path
 
 ```bash
+repo_root="$(git rev-parse --show-toplevel)"
 mkdir -p /tmp/codex-skill-forwardtest
 CODEX_HOME=/tmp/codex-skill-forwardtest codex exec --ephemeral --sandbox read-only \
-  -C /Users/connorsanders/scratch/ai-kit \
+  -C "$repo_root" \
   -o /tmp/refresh-workspace-agentic-documentation-happy.txt \
   $'Use $refresh-workspace-agentic-documentation from /plan. Reconcile all repo-owned ai-kit docs and skill/agent metadata against current owning contracts and this branch implementation. Select this authority before reading the diff; plan the ledger, docs-contract and validation updates while preserving historical evidence.'
 ```
@@ -67,9 +76,10 @@ Expected checks:
 ## No-Op Audit
 
 ```bash
+repo_root="$(git rev-parse --show-toplevel)"
 mkdir -p /tmp/codex-skill-forwardtest
 CODEX_HOME=/tmp/codex-skill-forwardtest codex exec --ephemeral --sandbox read-only \
-  -C /Users/connorsanders/scratch/ai-kit \
+  -C "$repo_root" \
   -o /tmp/refresh-workspace-agentic-documentation-noop.txt \
   $'Use $refresh-workspace-agentic-documentation from /plan. Check whether the current branch introduces any workspace documentation drift versus main and describe the no-op outcome if the docs are already aligned. Do not implement.'
 ```
@@ -83,9 +93,10 @@ Expected checks:
 ## Boundary Check
 
 ```bash
+repo_root="$(git rev-parse --show-toplevel)"
 mkdir -p /tmp/codex-skill-forwardtest
 CODEX_HOME=/tmp/codex-skill-forwardtest codex exec --ephemeral --sandbox read-only \
-  -C /Users/connorsanders/scratch/ai-kit \
+  -C "$repo_root" \
   -o /tmp/refresh-workspace-agentic-documentation-boundary.txt \
   $'Use $refresh-workspace-agentic-documentation from /plan. Refresh the public rustdoc comments and doctestable examples across all crates without changing the markdown docs.'
 ```

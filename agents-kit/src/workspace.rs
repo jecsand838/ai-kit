@@ -1296,27 +1296,22 @@ pub trait WorkspaceBackend: Send + Sync + 'static {
     ///     )?).await?;
     ///     let id = conversation.id();
     ///     let info = conversation.info().await?;
-    ///     assert_eq!(info.id(), &id);
-    ///     assert_eq!(info.workspace_id(), &workspace_id);
-    ///     assert_eq!(info.title(), Some("Review"));
     ///     let inventory = workspace.list_conversations().await?;
-    ///     assert_eq!(inventory.len(), 1);
-    ///     assert_eq!(inventory[0].id(), &id);
-    ///     assert_eq!(workspace.conversation_info(id.clone()).await?.id(), &id);
-    ///     assert!(workspace.list_tools().await?.is_empty());
-    ///     Ok::<_, agents_kit::KitError>(id)
+    ///     let listed = workspace.conversation_info(id.clone()).await?;
+    ///     let tools = workspace.list_tools().await?;
+    ///     Ok::<_, agents_kit::KitError>((id, (info, inventory, listed, tools)))
     /// }.await;
     /// // Parent close settles children and preserves quiescent records for reopen.
     /// let close = workspace.close().await;
-    /// let conversation_id = match (result, close) {
+    /// let (conversation_id, created) = match (result, close) {
     ///     (Err(primary), Err(cleanup)) => Err(primary.with_supplementary(cleanup)),
     ///     (Err(error), _) | (_, Err(error)) => Err(error),
-    ///     (Ok(id), Ok(())) => Ok(id),
+    ///     (Ok(observed), Ok(())) => Ok(observed),
     /// }?;
     /// let workspace = agent.get_workspace(workspace_id.clone()).await?;
     /// let result = async {
-    ///     assert_eq!(workspace.id(), workspace_id);
-    ///     assert_eq!(workspace.info().await?.id(), &workspace_id);
+    ///     let reopened_id = workspace.id();
+    ///     let reopened_info = workspace.info().await?;
     ///     let conversation = workspace.get_conversation(conversation_id.clone()).await?;
     ///     let observed = conversation.info().await;
     ///     // Explicit child close is terminal; unlike parent close, it ends reopenability.
@@ -1326,26 +1321,39 @@ pub trait WorkspaceBackend: Send + Sync + 'static {
     ///         (Err(error), _) | (_, Err(error)) => Err(error),
     ///         (Ok(info), Ok(())) => Ok(info),
     ///     }?;
-    ///     assert_eq!(info.id(), &conversation_id);
-    ///     assert_eq!(info.workspace_id(), &workspace_id);
-    ///     assert_eq!(info.title(), Some("Review"));
-    ///     assert!(workspace.list_conversations().await?.is_empty());
-    ///     Ok::<(), agents_kit::KitError>(())
+    ///     let remaining = workspace.list_conversations().await?;
+    ///     Ok::<_, agents_kit::KitError>((reopened_id, reopened_info, info, remaining))
     /// }.await;
     /// let close = workspace.close().await;
-    /// match (result, close) {
+    /// let reopened = match (result, close) {
     ///     (Err(primary), Err(cleanup)) => Err(primary.with_supplementary(cleanup)),
     ///     (Err(error), _) | (_, Err(error)) => Err(error),
-    ///     (Ok(()), Ok(())) => Ok(()),
+    ///     (Ok(observed), Ok(())) => Ok(observed),
     /// }?;
-    /// # Ok::<(), agents_kit::KitError>(())
+    /// # Ok::<_, agents_kit::KitError>((workspace_id, conversation_id, created, reopened))
     /// # }.await;
     /// # let cleanup = agent.shutdown().await;
-    /// # match (outcome, cleanup) {
+    /// # let (workspace_id, conversation_id, created, reopened) = match (outcome, cleanup) {
     /// #     (Err(primary), Err(cleanup)) => Err(primary.with_supplementary(cleanup)),
     /// #     (Err(error), _) | (_, Err(error)) => Err(error),
-    /// #     (Ok(()), Ok(())) => Ok(()),
+    /// #     (Ok(observed), Ok(())) => Ok(observed),
     /// # }?;
+    /// // Check both phases after consuming shutdown has settled cleanup.
+    /// let (info, inventory, listed, tools) = created;
+    /// assert_eq!(info.id(), &conversation_id);
+    /// assert_eq!(info.workspace_id(), &workspace_id);
+    /// assert_eq!(info.title(), Some("Review"));
+    /// assert_eq!(inventory.len(), 1);
+    /// assert_eq!(inventory[0].id(), &conversation_id);
+    /// assert_eq!(listed.id(), &conversation_id);
+    /// assert!(tools.is_empty());
+    /// let (reopened_id, reopened_info, info, remaining) = reopened;
+    /// assert_eq!(reopened_id, workspace_id);
+    /// assert_eq!(reopened_info.id(), &workspace_id);
+    /// assert_eq!(info.id(), &conversation_id);
+    /// assert_eq!(info.workspace_id(), &workspace_id);
+    /// assert_eq!(info.title(), Some("Review"));
+    /// assert!(remaining.is_empty());
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// # })?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())

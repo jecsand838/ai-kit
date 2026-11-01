@@ -10,11 +10,24 @@ use crate::error::ValidationViolation;
 /// requests can use [`RetryPolicy`] within the same logical request deadline,
 /// while non-replayable requests still use the same transport defaults without
 /// retrying.
+/// Defaults are a 120-second request deadline, a 15-second connection timeout,
+/// a 90-second idle connection timeout, and the default [`RetryPolicy`]. Use
+/// [`TransportConfig::new`] to supply other validated settings.
 ///
 /// # Examples
 /// ```rust
-/// let transport = providers_kit::config::TransportConfig::default();
-/// let _ = transport;
+/// use std::time::Duration;
+/// use providers_kit::config::{RetryPolicy, TransportConfig};
+/// assert_eq!(
+///     TransportConfig::default(),
+///     TransportConfig::new(
+///         Duration::from_secs(120),
+///         Duration::from_secs(15),
+///         Duration::from_secs(90),
+///         RetryPolicy::default(),
+///     )?,
+/// );
+/// # Ok::<(), providers_kit::KitError>(())
 /// ```
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TransportConfig {

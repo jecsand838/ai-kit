@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE svg
+  PUBLIC '-//W3C//DTD SVG 1.0//EN'
+  'http://www.w3.org/TR/2001/REC-SVG-20010904/DTD/svg10.dtd'>
+<svg role="img" aria-labelledby="architecture-title architecture-desc" width="1800" height="1400" preserveAspectRatio="xMinYMin meet" viewBox="0 0 1800 1400" xmlns="http://www.w3.org/2000/svg" version="1.0" fill-rule="evenodd" xmlns:xlink="http://www.w3.org/1999/xlink">
+<title id="architecture-title">ai-kit high-level crate architecture</title>
+<desc id="architecture-desc">app-kit composes caller-built agents-kit implementations and separate application StateStore storage. agents-kit uses StateStore for its own durable state and an optional Database for managed knowledge. Its Custom implementation uses providers-kit for model calls and tools-kit for local and MCP tools. Native Codex and OpenCode runtimes have their own provider integration.</desc>
+<metadata>Source: https://github.com/jecsand838/ai-kit/blob/8184f485d8ac517976409e2953355753c155ee0a/ARCHITECTURE.md</metadata>
+
+
+
+	<clipPath id="clip">
+		<rect x="0" y="0" width="1800" height="1400"/>
+	</clipPath>
+	<g id="group" transform="scale(1,-1) translate(0,-1400)" style="clip-path: url(#clip)">
+		<g transform="">
+			<rect x="0" y="0" width="1800" height="1400" style="stroke: none; stroke-linecap: butt; stroke-width: 2; fill: rgb(98%,97%,96%); fill-rule: evenodd;"/>
+			<rect x="90" y="1324" width="74" height="8" rx="4" ry="4" style="stroke: none; stroke-linecap: butt; stroke-width: 2; fill: rgb(96%,41%,3%); fill-rule: evenodd;"/>
+			<text x="90" y="1268" style="font-family: 'DejaVu Sans', Arial, sans-serif; font-weight: bold; font-size: 52px;fill: rgb(12%,13%,16%); stroke:none;" transform="translate(0,2536) scale(1,-1)">ai-kit architecture</text>
+			<text x="90" y="1220" style="font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 27px;fill: rgb(38%,41%,45%); stroke:none;" transform="translate(0,2440) scale(1,-1)">Compose the layers your application needs through public Rust traits.</text>
+			<rect x="120" y="964" width="900" height="190" rx="23" ry="23" style="stroke: none; stroke-linecap: butt; stroke-width: 2; fill: rgb(93%,93%,92%); fill-rule: evenodd;"/>
+			<rect x="120" y="970" width="900" height="190" rx="23" ry="23" style="stroke: rgb(96%,41%,3%); stroke-linecap: butt; stroke-width: 2.5; fill: rgb(100%,95%,90%); fill-rule: evenodd;"/>
+			<rect x="148" y="1098" width="6" height="32" rx="3" ry="3" style="stroke: none; stroke-linecap: butt; stroke-width: 2; fill: rgb(96%,41%,3%); fill-rule: evenodd;"/>
+			<text x="174" y="1105" style="font-family: 'DejaVu Sans', Arial, sans-serif; font-weight: bold; font-size: 37px;fill: rgb(12%,13%,16%); stroke:none;" transform="translate(0,2210) scale(1,-1)">app-kit</text>
+			<text x="865.2568359375" y="1106" style="font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 19px;fill: rgb(65%,24%,0%); stroke:none;" transform="translate(0,2212) scale(1,-1)">APPLICATION</text>
+			<text x="174" y="1059" style="font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 30px;fill: rgb(12%,13%,16%); stroke:none;" transform="translate(0,2118) scale(1,-1)">Stateful workflows, checkpoints, and recovery</text>
+			<text x="174" y="1011" style="font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 24px;fill: rgb(38%,41%,45%); stroke:none;" transform="translate(0,2022) scale(1,-1)">App  →  Workspace  →  Workflow  →  WorkflowRun</text>
+			<rect x="120" y="564" width="900" height="220" rx="23" ry="23" style="stroke: none; stroke-linecap: butt; stroke-width: 2; fill: rgb(93%,93%,92%); fill-rule: evenodd;"/>
+			<rect x="120" y="570" width="900" height="220" rx="23" ry="23" style="stroke: rgb(84%,85%,86%); stroke-linecap: butt; stroke-width: 2; fill: rgb(100%,100%,100%); fill-rule: evenodd;"/>
+			<rect x="148" y="728" width="6" height="32" rx="3" ry="3" style="stroke: none; stroke-linecap: butt; stroke-width: 2; fill: rgb(64%,66%,69%); fill-rule: evenodd;"/>
+			<text x="174" y="735" style="font-family: 'DejaVu Sans', Arial, sans-serif; font-weight: bold; font-size: 37px;fill: rgb(12%,13%,16%); stroke:none;" transform="translate(0,1470) scale(1,-1)">agents-kit</text>
+			<text x="831.4873046875" y="736" style="font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 19px;fill: rgb(38%,41%,45%); stroke:none;" transform="translate(0,1472) scale(1,-1)">AGENT RUNTIME</text>
+			<text x="174" y="689" style="font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 30px;fill: rgb(12%,13%,16%); stroke:none;" transform="translate(0,1378) scale(1,-1)">Conversations, interactions, and agent lifecycles</text>
+			<text x="174" y="645" style="font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 24px;fill: rgb(38%,41%,45%); stroke:none;" transform="translate(0,1290) scale(1,-1)">Agent  →  Workspace  →  Conversation</text>
+			<text x="174" y="604" style="font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 23px;fill: rgb(38%,41%,45%); stroke:none;" transform="translate(0,1208) scale(1,-1)">Custom  ·  Codex App Server  ·  OpenCode Server</text>
+			<rect x="120" y="184" width="420" height="200" rx="23" ry="23" style="stroke: none; stroke-linecap: butt; stroke-width: 2; fill: rgb(93%,93%,92%); fill-rule: evenodd;"/>
+			<rect x="120" y="190" width="420" height="200" rx="23" ry="23" style="stroke: rgb(84%,85%,86%); stroke-linecap: butt; stroke-width: 2; fill: rgb(100%,100%,100%); fill-rule: evenodd;"/>
+			<rect x="148" y="328" width="6" height="32" rx="3" ry="3" style="stroke: none; stroke-linecap: butt; stroke-width: 2; fill: rgb(64%,66%,69%); fill-rule: evenodd;"/>
+			<text x="174" y="335" style="font-family: 'DejaVu Sans', Arial, sans-serif; font-weight: bold; font-size: 37px;fill: rgb(12%,13%,16%); stroke:none;" transform="translate(0,670) scale(1,-1)">providers-kit</text>
+			<text x="510.0" y="336" style="font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 19px;fill: rgb(38%,41%,45%); stroke:none;" transform="translate(0,672) scale(1,-1)"></text>
+			<text x="154" y="290" style="font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 24px;fill: rgb(12%,13%,16%); stroke:none;" transform="translate(0,580) scale(1,-1)">Model calls and sessions</text>
+			<text x="154" y="247" style="font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 23px;fill: rgb(38%,41%,45%); stroke:none;" transform="translate(0,494) scale(1,-1)">OpenAI  ·  Anthropic</text>
+			<text x="154" y="216" style="font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 23px;fill: rgb(38%,41%,45%); stroke:none;" transform="translate(0,432) scale(1,-1)">Gemini  ·  Ollama</text>
+			<rect x="600" y="184" width="420" height="200" rx="23" ry="23" style="stroke: none; stroke-linecap: butt; stroke-width: 2; fill: rgb(93%,93%,92%); fill-rule: evenodd;"/>
+			<rect x="600" y="190" width="420" height="200" rx="23" ry="23" style="stroke: rgb(84%,85%,86%); stroke-linecap: butt; stroke-width: 2; fill: rgb(100%,100%,100%); fill-rule: evenodd;"/>
+			<rect x="628" y="328" width="6" height="32" rx="3" ry="3" style="stroke: none; stroke-linecap: butt; stroke-width: 2; fill: rgb(64%,66%,69%); fill-rule: evenodd;"/>
+			<text x="654" y="335" style="font-family: 'DejaVu Sans', Arial, sans-serif; font-weight: bold; font-size: 37px;fill: rgb(12%,13%,16%); stroke:none;" transform="translate(0,670) scale(1,-1)">tools-kit</text>
+			<text x="990.0" y="336" style="font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 19px;fill: rgb(38%,41%,45%); stroke:none;" transform="translate(0,672) scale(1,-1)"></text>
+			<text x="634" y="290" style="font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 23px;fill: rgb(12%,13%,16%); stroke:none;" transform="translate(0,580) scale(1,-1)">Executable local + MCP tools</text>
+			<text x="634" y="247" style="font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 23px;fill: rgb(38%,41%,45%); stroke:none;" transform="translate(0,494) scale(1,-1)">Toolset  →  ToolHandler</text>
+			<text x="634" y="216" style="font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 22px;fill: rgb(38%,41%,45%); stroke:none;" transform="translate(0,432) scale(1,-1)">Optional MCP serving</text>
+			<rect x="1290" y="184" width="420" height="970" rx="23" ry="23" style="stroke: none; stroke-linecap: butt; stroke-width: 2; fill: rgb(93%,93%,92%); fill-rule: evenodd;"/>
+			<rect x="1290" y="190" width="420" height="970" rx="23" ry="23" style="stroke: rgb(84%,85%,86%); stroke-linecap: butt; stroke-width: 2; fill: rgb(100%,100%,100%); fill-rule: evenodd;"/>
+			<rect x="1318" y="1098" width="6" height="32" rx="3" ry="3" style="stroke: none; stroke-linecap: butt; stroke-width: 2; fill: rgb(64%,66%,69%); fill-rule: evenodd;"/>
+			<text x="1344" y="1105" style="font-family: 'DejaVu Sans', Arial, sans-serif; font-weight: bold; font-size: 37px;fill: rgb(12%,13%,16%); stroke:none;" transform="translate(0,2210) scale(1,-1)">storage-kit</text>
+			<text x="1680.0" y="1106" style="font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 19px;fill: rgb(38%,41%,45%); stroke:none;" transform="translate(0,2212) scale(1,-1)"></text>
+			<text x="1324" y="1057" style="font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 24px;fill: rgb(38%,41%,45%); stroke:none;" transform="translate(0,2114) scale(1,-1)">Two distinct products</text>
+			<path d="M 1324,1025 L 1676,1025 Z" style="stroke: rgb(84%,85%,86%); stroke-linecap: round; stroke-width: 2;"/>
+			<rect x="1324" y="690" width="352" height="300" rx="16" ry="16" style="stroke: none; stroke-linecap: butt; stroke-width: 2; fill: rgb(95%,95%,96%); fill-rule: evenodd;"/>
+			<text x="1348" y="938" style="font-family: 'DejaVu Sans', Arial, sans-serif; font-weight: bold; font-size: 30px;fill: rgb(12%,13%,16%); stroke:none;" transform="translate(0,1876) scale(1,-1)">StateStore</text>
+			<text x="1348" y="891" style="font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 24px;fill: rgb(38%,41%,45%); stroke:none;" transform="translate(0,1782) scale(1,-1)">Transactional</text>
+			<text x="1348" y="857" style="font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 24px;fill: rgb(38%,41%,45%); stroke:none;" transform="translate(0,1714) scale(1,-1)">control state</text>
+			<rect x="1348" y="783" width="304" height="43" rx="10" ry="10" style="stroke: none; stroke-linecap: butt; stroke-width: 2; fill: rgb(100%,100%,100%); fill-rule: evenodd;"/>
+			<text x="1370" y="796" style="font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 22px;fill: rgb(12%,13%,16%); stroke:none;" transform="translate(0,1592) scale(1,-1)">App-owned store</text>
+			<rect x="1348" y="722" width="304" height="43" rx="10" ry="10" style="stroke: none; stroke-linecap: butt; stroke-width: 2; fill: rgb(100%,100%,100%); fill-rule: evenodd;"/>
+			<text x="1370" y="735" style="font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 22px;fill: rgb(12%,13%,16%); stroke:none;" transform="translate(0,1470) scale(1,-1)">Agent-owned store</text>
+			<rect x="1324" y="435" width="352" height="205" rx="16" ry="16" style="stroke: none; stroke-linecap: butt; stroke-width: 2; fill: rgb(95%,95%,96%); fill-rule: evenodd;"/>
+			<text x="1348" y="588" style="font-family: 'DejaVu Sans', Arial, sans-serif; font-weight: bold; font-size: 30px;fill: rgb(12%,13%,16%); stroke:none;" transform="translate(0,1176) scale(1,-1)">Database</text>
+			<text x="1348" y="541" style="font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 24px;fill: rgb(38%,41%,45%); stroke:none;" transform="translate(0,1082) scale(1,-1)">Data, search,</text>
+			<text x="1348" y="507" style="font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 24px;fill: rgb(38%,41%,45%); stroke:none;" transform="translate(0,1014) scale(1,-1)">and indexes</text>
+			<text x="1324" y="367" style="font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 24px;fill: rgb(38%,41%,45%); stroke:none;" transform="translate(0,734) scale(1,-1)">App and Agent stores</text>
+			<text x="1324" y="331" style="font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 24px;fill: rgb(38%,41%,45%); stroke:none;" transform="translate(0,662) scale(1,-1)">have separate ownership.</text>
+			<text x="1324" y="252" style="font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 22px;fill: rgb(65%,24%,0%); stroke:none;" transform="translate(0,504) scale(1,-1)">Caller-supplied backends</text>
+			<path d="M 570,970 L 570,790 Z" style="stroke: rgb(39%,42%,47%); stroke-linecap: round; stroke-width: 3;"/>
+			<polygon points="570 790, 563 804, 577 804" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(39%,42%,47%); fill-rule: evenodd;"/>
+			<rect x="447.5" y="851" width="245.0" height="49" rx="12" ry="12" style="stroke: none; stroke-linecap: butt; stroke-width: 2; fill: rgb(100%,100%,100%); fill-rule: evenodd;"/>
+			<text x="490.013671875" y="869" style="font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 22px;fill: rgb(12%,13%,16%); stroke:none;" transform="translate(0,1738) scale(1,-1)">AgentBackend</text>
+			<path d="M 1020,1066 L 1290,1066 Z" style="stroke: rgb(39%,42%,47%); stroke-linecap: round; stroke-width: 3;"/>
+			<polygon points="1290 1066, 1276 1073, 1276 1059" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(39%,42%,47%); fill-rule: evenodd;"/>
+			<text x="1099.74609375" y="1108" style="font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 23px;fill: rgb(38%,41%,45%); stroke:none;" transform="translate(0,2216) scale(1,-1)">App state</text>
+			<text x="1063.576416015625" y="1080" style="font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 19px;fill: rgb(38%,41%,45%); stroke:none;" transform="translate(0,2160) scale(1,-1)">StateStoreBackend</text>
+			<path d="M 1020,723 L 1290,723 Z" style="stroke: rgb(39%,42%,47%); stroke-linecap: round; stroke-width: 3;"/>
+			<polygon points="1290 723, 1276 730, 1276 716" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(39%,42%,47%); fill-rule: evenodd;"/>
+			<text x="1088.173095703125" y="765" style="font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 23px;fill: rgb(38%,41%,45%); stroke:none;" transform="translate(0,1530) scale(1,-1)">Agent state</text>
+			<text x="1063.576416015625" y="737" style="font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 19px;fill: rgb(38%,41%,45%); stroke:none;" transform="translate(0,1474) scale(1,-1)">StateStoreBackend</text>
+			<path d="M 1020,614 L 1290,614 Z" style="stroke: rgb(39%,42%,47%); stroke-linecap: round; stroke-width: 3; stroke-dasharray: 9, 8;"/>
+			<polygon points="1290 614, 1276 621, 1276 607" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(39%,42%,47%); fill-rule: evenodd;"/>
+			<text x="1041.20263671875" y="661" style="font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 22px;fill: rgb(38%,41%,45%); stroke:none;" transform="translate(0,1322) scale(1,-1)">Managed knowledge</text>
+			<text x="1031.7181396484375" y="632" style="font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 17.5px;fill: rgb(38%,41%,45%); stroke:none;" transform="translate(0,1264) scale(1,-1)">DatabaseBackend · optional</text>
+			<path d="M 570,570 L 570,470 Z" style="stroke: rgb(96%,41%,3%); stroke-linecap: round; stroke-width: 3.5;"/>
+			<path d="M 330,470 L 810,470 Z" style="stroke: rgb(96%,41%,3%); stroke-linecap: round; stroke-width: 3.5;"/>
+			<path d="M 330,470 L 330,390 Z" style="stroke: rgb(96%,41%,3%); stroke-linecap: round; stroke-width: 3.5;"/>
+			<polygon points="330 390, 323 404, 337 404" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(96%,41%,3%); fill-rule: evenodd;"/>
+			<path d="M 810,470 L 810,390 Z" style="stroke: rgb(96%,41%,3%); stroke-linecap: round; stroke-width: 3.5;"/>
+			<polygon points="810 390, 803 404, 817 404" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(96%,41%,3%); fill-rule: evenodd;"/>
+			<rect x="425.0" y="493" width="290.0" height="49" rx="12" ry="12" style="stroke: none; stroke-linecap: butt; stroke-width: 2; fill: rgb(98%,97%,96%); fill-rule: evenodd;"/>
+			<text x="459.267578125" y="511" style="font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 23px;fill: rgb(65%,24%,0%); stroke:none;" transform="translate(0,1022) scale(1,-1)">Custom agent path</text>
+			<rect x="210.0" y="405" width="240.0" height="49" rx="12" ry="12" style="stroke: none; stroke-linecap: butt; stroke-width: 2; fill: rgb(98%,97%,96%); fill-rule: evenodd;"/>
+			<text x="245.3173828125" y="423" style="font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 20px;fill: rgb(65%,24%,0%); stroke:none;" transform="translate(0,846) scale(1,-1)">ProviderBackend</text>
+			<rect x="690.0" y="405" width="240.0" height="49" rx="12" ry="12" style="stroke: none; stroke-linecap: butt; stroke-width: 2; fill: rgb(98%,97%,96%); fill-rule: evenodd;"/>
+			<text x="730.478515625" y="423" style="font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 20px;fill: rgb(65%,24%,0%); stroke:none;" transform="translate(0,846) scale(1,-1)">ToolsetBackend</text>
+			<path d="M 120,129 L 1710,129 Z" style="stroke: rgb(84%,85%,86%); stroke-linecap: round; stroke-width: 2;"/>
+			<path d="M 120,90 L 175,90 Z" style="stroke: rgb(39%,42%,47%); stroke-linecap: round; stroke-width: 2.5;"/>
+			<polygon points="175 90, 161 97, 161 83" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(39%,42%,47%); fill-rule: evenodd;"/>
+			<text x="196" y="82" style="font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 22px;fill: rgb(38%,41%,45%); stroke:none;" transform="translate(0,164) scale(1,-1)">Uses a caller-supplied implementation</text>
+			<path d="M 730,90 L 785,90 Z" style="stroke: rgb(39%,42%,47%); stroke-linecap: round; stroke-width: 2.5; stroke-dasharray: 8, 7;"/>
+			<text x="806" y="82" style="font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 22px;fill: rgb(38%,41%,45%); stroke:none;" transform="translate(0,164) scale(1,-1)">Optional integration</text>
+			<text x="120" y="40" style="font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 22px;fill: rgb(38%,41%,45%); stroke:none;" transform="translate(0,80) scale(1,-1)">High-level composition; each crate can also be used independently.</text>
+		</g>
+	</g>
+</svg>

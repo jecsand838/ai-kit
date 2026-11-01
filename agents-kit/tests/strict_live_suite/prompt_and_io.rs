@@ -1,4 +1,6 @@
+use crate::cloud_output_evidence::CloudOutputEvidence;
 use crate::native_cleanup::NativeCleanup;
+use crate::opencode_foreground_evidence::OpenCodeForegroundCapture;
 
 use std::future::Future;
 use std::io::Write;
@@ -340,140 +342,6 @@ impl PendingInteractionCrash {
     }
 }
 
-struct CloudOutputEvidence {
-    expected: String,
-    prompt: String,
-    model: String,
-    directory: PathBuf,
-    capture: Option<serde_json::Value>,
-}
-
-impl CloudOutputEvidence {
-    fn new(model: String) -> Self {
-        let expected = StrictFixture::unique("CLOUD_STREAM");
-        let prompt = format!("Do not call tools. Return only this exact token: {expected}");
-        let directory = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .expect("the crate belongs to its workspace")
-            .join("target/cloud-output-evidence")
-            .join(StrictFixture::unique("observation"));
-        std::fs::create_dir_all(&directory).expect("private cloud evidence directory must exist");
-        let directory = directory
-            .canonicalize()
-            .expect("private cloud evidence directory must canonicalize");
-        Self {
-            expected,
-            prompt,
-            model,
-            directory,
-            capture: None,
-        }
-    }
-
-    fn configure(&self, config: &mut serde_json::Value) {
-        let plugin = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/strict_live_suite/diagnostics/opencode-boundary.mjs")
-            .canonicalize()
-            .expect("the existing native boundary observer must exist");
-        let plugin = reqwest::Url::from_file_path(plugin)
-            .expect("the native boundary observer must have a file URL");
-        config["plugin"]
-            .as_array_mut()
-            .expect("the owned cloud configuration has a plugin inventory")
-            .push(serde_json::json!([
-                plugin.as_str(),
-                {
-                    "outputDirectory":self.directory,
-                    "expectedProvider":"openai",
-                    "expectedModelName":self.model,
-                    "freshOutput":{"prompt":self.prompt,"expected":self.expected},
-                }
-            ]));
-    }
-
-    fn request(&self) -> PromptRequest {
-        PromptRequest::new(self.prompt.clone())
-            .expect("the original cloud prompt must remain valid")
-    }
-
-    fn expected(&self) -> &str {
-        &self.expected
-    }
-
-    async fn observe(
-        &mut self,
-        endpoint: &str,
-        deadline: tokio::time::Instant,
-        incremental: &str,
-        portable: &str,
-    ) {
-        // This owner outlives the original observation timeout. Even interrupted
-        // native readback leaves the already observed public comparisons intact.
-        self.capture = Some(serde_json::json!({
-            "version":2,
-            "case":"strict_live_suite::prompt_and_io::opencode_cloud_generation_and_streaming_are_live",
-            "expected_bytes":self.expected.len(),
-            "portable_bytes":portable.len(),
-            "incremental_bytes":incremental.len(),
-            "portable_equals_expected":portable == self.expected,
-            "incremental_equals_portable":incremental == portable,
-            "incremental_equals_expected":incremental == self.expected,
-            "provider_observer_directory":self.directory,
-            "native":{"capture":"incomplete","reason":"interrupted"},
-        }));
-        let capture_deadline = deadline.min(tokio::time::Instant::now() + Duration::from_secs(10));
-        let diagnostic = NativeCleanup::observe(capture_deadline, async {
-            NativeQuestionReadback::new(endpoint, capture_deadline)
-                .await
-                .prompt_output(
-                    &self.prompt,
-                    "openai",
-                    &self.model,
-                    &self.expected,
-                    portable,
-                )
-                .await
-        })
-        .await;
-        let context = match diagnostic {
-            Ok(Ok(Ok(mut context))) => {
-                let fields = context
-                    .as_object_mut()
-                    .expect("native output evidence is an object");
-                for key in ["session", "user", "assistant"] {
-                    fields.remove(key);
-                }
-                context
-            }
-            Ok(Ok(Err(reason))) => serde_json::json!({"capture":"incomplete","reason":reason}),
-            Ok(Err(_)) => serde_json::json!({"capture":"incomplete","reason":"deadline"}),
-            Err(_) => serde_json::json!({"capture":"incomplete","reason":"readback_panic"}),
-        };
-        self.capture
-            .as_mut()
-            .expect("public output evidence remains owned")["native"] = context;
-    }
-
-    fn publish(&self) {
-        let Some(context) = &self.capture else {
-            return;
-        };
-        let mut context = context.to_string();
-        if context.len() > 4 * 1024 {
-            context = serde_json::json!({
-                "version":2,
-                "case":"strict_live_suite::prompt_and_io::opencode_cloud_generation_and_streaming_are_live",
-                "capture":"incomplete","reason":"diagnostic_bound",
-            })
-            .to_string();
-        }
-        let _ = writeln!(
-            std::io::stderr().lock(),
-            "\nAGENTS_KIT_CLOUD_OUTPUT_DIAGNOSTIC={context}"
-        );
-    }
-}
-
 pub(super) struct PromptScenario {
     backend: StrictBackend,
 }
@@ -610,18 +478,46 @@ impl PromptScenario {
                 "models":{(model.clone()):{"name":model}}
             }}
         });
-        let mut evidence = CloudOutputEvidence::new(model);
+        let stream_token = StrictFixture::unique("CLOUD_STREAM");
+        let directory = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("target/cloud-output-evidence")
+            .join(StrictFixture::unique("observation"));
+        let mut evidence = CloudOutputEvidence::new(model, stream_token, directory)
+            .expect("private cloud evidence directory must exist");
         evidence.configure(&mut config);
         let mut process = StrictOpenCodeProcess::configured("strict-cloud", config.to_string());
         let mut owned_agent = None;
         let mut owned_workspace = None;
         let mut owned_conversation = None;
         let mut primary_failure = None;
+        let mut foreground = None;
         let mut observed = NativeCleanup::observe(deadline, async {
             process.launch().await;
+            let native = process
+                .endpoint()
+                .strip_prefix("http://")
+                .unwrap()
+                .parse()
+                .unwrap();
+            let capture =
+                foreground.insert(OpenCodeForegroundCapture::start(native).await.unwrap());
+            capture
+                .expect(
+                    "stream",
+                    evidence.prompt(),
+                    evidence.model(),
+                    evidence.expected(),
+                )
+                .unwrap();
             let (agent, workspace, conversation) = fixture
                 .hierarchy_before(
-                    process.config("strict-opencode-cloud", Duration::from_secs(90)),
+                    StrictOpenCodeProcess::external_config(
+                        capture.endpoint(),
+                        "strict-opencode-cloud",
+                        Duration::from_secs(90),
+                    ),
                     "strict-opencode-cloud-workspace",
                     "cloud generation",
                     deadline,
@@ -634,18 +530,22 @@ impl PromptScenario {
                 StrictFixture::model(agent, StrictBackend::OpenCode, "TEST_OPENCODE_CLOUD_MODEL")
                     .await;
             let token = StrictFixture::unique("CLOUD_NATIVE");
+            let unary_prompt = evidence.begin_unary(&token);
+            capture
+                .expect("unary", &unary_prompt, evidence.model(), &token)
+                .unwrap();
             let response = conversation
                 .prompt(
-                    PromptRequest::new(format!(
-                        "Do not call tools. Return only this exact token: {token}"
-                    ))
-                    .unwrap()
-                    .with_model(model.clone())
-                    .with_timeout(Duration::from_secs(300))
-                    .unwrap(),
+                    PromptRequest::new(unary_prompt)
+                        .unwrap()
+                        .with_model(model.clone())
+                        .with_timeout(Duration::from_secs(300))
+                        .unwrap(),
                 )
                 .await
                 .unwrap();
+            evidence.unary_result(response.output());
+            capture.observe("unary", response.output());
             assert_eq!(response.output(), token);
             let mut stream = conversation
                 .prompt_stream(
@@ -661,11 +561,14 @@ impl PromptScenario {
             loop {
                 match stream.recv().await.unwrap().unwrap() {
                     PromptEvent::OutputDelta { text: delta } => {
+                        evidence.delta(&delta);
                         assert!(!delta.is_empty());
                         assert!(text.len().saturating_add(delta.len()) <= 64 * 1024);
                         text.push_str(&delta);
                     }
                     PromptEvent::Completed(response) => {
+                        evidence.terminal(response.output());
+                        capture.observe("stream", response.output());
                         if let Err(failure) =
                             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                                 assert!(!text.is_empty(), "real native streaming text is required");
@@ -677,20 +580,38 @@ impl PromptScenario {
                             // await can expire with the outer observation.
                             primary_failure = Some(failure);
                         }
+                        let endpoint = process.endpoint();
+                        let prompt = evidence.prompt().to_owned();
+                        let configured_model = evidence.model().to_owned();
+                        let expected = evidence.expected().to_owned();
+                        let capture_deadline =
+                            deadline.min(tokio::time::Instant::now() + Duration::from_secs(10));
                         evidence
-                            .observe(&process.endpoint(), deadline, &text, response.output())
+                            .observe_native(capture_deadline, async {
+                                NativeQuestionReadback::new(&endpoint, capture_deadline)
+                                    .await
+                                    .prompt_output(
+                                        &prompt,
+                                        "openai",
+                                        &configured_model,
+                                        &expected,
+                                        response.output(),
+                                    )
+                                    .await
+                            })
                             .await;
                         if primary_failure.is_some() {
                             break;
                         }
-                        assert!(stream.recv().await.is_none());
+                        let fused = stream.recv().await.is_none();
+                        evidence.fused(fused);
+                        assert!(fused);
                         break;
                     }
                 }
             }
         })
         .await;
-        evidence.publish();
         if let Some(failure) = primary_failure {
             observed = Err(failure);
         }
@@ -704,10 +625,34 @@ impl PromptScenario {
         if let Some(agent) = owned_agent {
             cleanup.settle(agent.shutdown()).await;
         }
+        if let Some(capture) = &mut foreground {
+            capture.finish(&mut cleanup).await;
+        }
         cleanup
             .settle::<agents_kit::KitError>(async {
                 process.shutdown().await;
                 Ok(())
+            })
+            .await;
+        let case_passed = matches!(&observed, Ok(Ok(())));
+        let cleanup_passed = cleanup.diagnostics().is_empty();
+        let mut diagnostic_errors = Vec::new();
+        let foreground_summary = if let Some(capture) = &foreground {
+            if capture.stage_private_bodies(evidence.directory()).is_err() {
+                diagnostic_errors.push("foreground_staging_failed");
+            }
+            capture.summary()
+        } else {
+            serde_json::json!({"capture":"incomplete","reason":"not_started"})
+        };
+        cleanup
+            .settle(async {
+                evidence.publish(
+                    case_passed,
+                    cleanup_passed,
+                    foreground_summary,
+                    &diagnostic_errors,
+                )
             })
             .await;
         cleanup.finish(observed);

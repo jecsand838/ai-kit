@@ -275,32 +275,103 @@ and the original observation and cleanup bounds remain required. Changing this
 prompt changes model input and requires fresh live qualification.
 
 The cloud case installs the existing private boundary observer in its owned
-OpenCode process. Its OpenAI Responses decoder retains provider deltas and
-finalized text as separate observations, alongside the existing Chat Completions
-decoder. Exact prompt, model, response, item, content, and native parent
-correlation is required before capture is complete. The observer forwards the
-original request and response bytes without retries, output correction, or
-runtime-setting changes. A provider final snapshot never replaces the native
-foreground HTTP response that owns the portable terminal result.
+OpenCode process. Its OpenAI Responses decoder observes provider deltas, text,
+content-part, item, and final-response snapshots independently. It requires exact
+prompt, configured model, response, item, content, and native-parent correlation.
+Aggregate and per-part comparisons remain separate: different parts can have the
+same concatenated text. Complete evidence of disagreement is not incomplete
+capture. A failed receipt write permanently disqualifies retained provenance.
 
-The fresh stream token uses the unchanged PID-and-clock factory, but is generated
-before process startup so the observer can bind its exact expectation. After
-the public terminal arrives, at most three read-only requests inspect the owned
-service's health, unique session, and exact prompt's terminal history on success
-as well as failure. Capture ends at the earlier of the original scenario deadline
-and ten seconds. The public/native diagnostic is bounded to 4 KiB; provider
-receipts retain the observer's existing 128 KiB total bound. Raw text remains in
-bounded private memory; receipts expose lengths, comparisons, and completeness
-facts, without credentials, native identities, or raw response contents.
+Only this case routes its existing external Kit attachment through a test-local
+TCP relay. The relay forwards the received bytes unchanged with awaited writes,
+observes both foreground prompts and the existing parent-verification reads,
+and supports fragmented HTTP/1 headers, pooled connections, informational
+responses, Content-Length, and chunked bodies with trailers. The global event
+connection remains concurrent. Unsupported or ambiguous framing, encoding,
+partial forwarding, or capture overflow is inconclusive; body capture limits do
+not truncate forwarded traffic. Native process settings, retries, prompts,
+model selection, token generation and assertions remain unchanged. The added
+loopback hop changes the attachment authority/Host port and may affect timing;
+this is instrumentation, not proof of timing neutrality.
 
-A failed cloud-stream assertion retains its original panic before readback.
-Missing, interrupted, or failed capture preserves that failure and every cleanup
-obligation. Native history alone proves neither the original HTTP response nor
-model authorship, and a passing test with incomplete capture cannot establish a
-root cause. The scenario's exact delta/terminal equality assertion does not
-widen the shared PromptStream contract: each backend retains its own terminal
-authority, and other scenarios may legitimately have different incremental and
-terminal text.
+Relay limits are 8 KiB forwarding buffers, 64 KiB header and trailer sections,
+8 KiB chunk lines, 256 KiB framing metadata per selected exchange, 2 MiB request
+bodies, 16 MiB response bodies, 16 concurrent connections, 128 exchange
+descriptors, and 64 MiB retained capture bytes. The response bound matches Kit's
+foreground transport; the other bounds are diagnostic policy. Exhausting socket
+ownership fails the harness explicitly. Unrelated event-stream shutdown does
+not invalidate an independently complete foreground exchange.
+
+The stream token uses the unchanged PID-and-clock factory before process startup
+so the provider observer can bind its exact expectation. The unary token remains
+generated after model selection; its provider exchange is not independently
+captured. An early unary failure retains available public/foreground observations
+and stops the campaign without attributing a provider cause. Public observations
+are retained before unary, delta, terminal and fusion assertions can fail.
+After stream terminal delivery, the existing at-most-three read-only requests
+inspect health, the unique session and correlated history within the earlier of
+the original deadline and ten seconds. History and hook observations remain
+separate from the actual foreground HTTP response that owns the portable result.
+
+Cloud receipts expose bounded lengths, comparison facts, completeness and SHA-256
+fingerprints, not raw text or native identities. Provider receipts retain the
+128 KiB bound and the native readback receipt retains its 4 KiB bound. Provider
+staging allows at most 2 MiB of request and 8 MiB of response body for the single
+correlated flow, separately from the relay bounds. Bounded provider
+request/response bodies, foreground and parent entity bodies, and generated
+scenario/public text are temporarily staged in private files (`0600`, directories
+`0700`). Transport headers and authentication metadata are excluded; serialized
+body content remains exact and private. The campaign removes
+staged bodies only after successful assertions, complete correlated evidence,
+agreement, and joined cleanup. Failed, incomplete or interrupted attempts retain
+private evidence. Raw evidence must never be committed or pasted into the PR.
+
+Conversation, Workspace and Agent cleanup runs while the relay remains available;
+relay tasks are then joined and the native process reaped before owned directories
+are removed. Diagnostic and cleanup errors cannot replace an original assertion
+or timeout. Each backend keeps its own terminal authority: this scenario's exact
+delta/terminal equality does not widen the portable PromptStream contract.
+
+### Focused cloud capture campaign
+
+The diagnostic-only targets are `cloud_output_evidence_contract` and
+`opencode_foreground_capture` (Agent all features), the `OpenAI Responses:` Node
+cases in `tests/strict_live_suite/diagnostics/opencode-boundary.test.mjs`, and
+`test_cloud_capture_campaign.py` alongside the observer. Directly affected
+existing receipt, cancellation and error-forwarding cases also apply when those
+shared observer paths change. These fixtures prove diagnostic behavior, not live
+provider behavior. Keep Cargo commands serial, with `CARGO_INCREMENTAL=0` and
+`CARGO_BUILD_JOBS=1` for this investigation.
+
+Run an explicitly authorized campaign with the narrow
+`tests/strict_live_suite/diagnostics/cloud_capture_campaign.py` runner. Supply
+`--campaign` for a new ignored evidence directory, `--environment` for the existing
+private environment, and repeat `--prior-evidence` for each original evidence
+root or file. The runner executes one invocation of the exact cloud case per call:
+
+```bash
+cargo test --locked -p agents-kit --test strict_live --all-features \
+  strict_live_suite::prompt_and_io::opencode_cloud_generation_and_streaming_are_live \
+  -- --exact --nocapture --test-threads=1
+```
+
+Preflight requires a clean reviewed commit and records source, lock, observer,
+runner, native runtime and private-environment identities without credential
+values. A fresh campaign has at most three immutable invocation slots; every
+reserved slot counts, even if launch fails. Old baseline receipts are never
+reset. A subsequent invocation is permitted only after a clean case pass,
+complete required evidence, no observed divergence, settled ownership, and
+unchanged source/runtime/prior evidence. Failure, incomplete capture, cleanup or
+provenance errors stop the campaign. The runner never retries or probes a model.
+
+The report separates assertion outcomes, capture completeness, first observed
+divergence and cleanup/provenance. Comparisons bind the actual generated literal;
+38 bytes describes only the historical failure. An informative failure requires
+complete correlated observations locating a disagreement. Incorrect text already
+at the provider boundary does not establish an internal model cause. Three
+passing attempts establish neither the original cause nor statistical reliability.
+This focused campaign omits unchanged suites and release gates and is not full
+workspace qualification.
 
 Kit correctness assertions run for every configured model. Prompts that request
 an exact token or interaction answer require exact raw terminal equality, with

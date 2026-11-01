@@ -1121,7 +1121,6 @@ impl<
                 }
                 SessionState::Ready => {
                     self.ensure_owned()?;
-                    self.arm_notification()?;
                     let terminal = self
                         .observed
                         .as_ref()
@@ -2997,6 +2996,15 @@ impl<
         mut publication: SessionPublication,
         ordinary: bool,
     ) -> Result<(), AppError> {
+        if matches!(
+            &publication,
+            SessionPublication::Load { .. } | SessionPublication::Reload { .. }
+        ) {
+            // Keep changes observable while a read may return older authority.
+            // Reload follows a consumed notification and must register again
+            // before a concurrent cancellation can publish its wake.
+            self.arm_notification()?;
+        }
         let mut staged_prefix = Vec::new();
         let mut admitted_inputs = Vec::new();
         if let SessionPublication::Decision {

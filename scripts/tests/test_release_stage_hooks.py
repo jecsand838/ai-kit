@@ -71,7 +71,15 @@ with open(os.environ['TRACE'], 'a') as stream:
     stream.write(json.dumps({'command': 'cargo', 'args': args}) + '\n')
 if os.environ.get('CARGO_FAILURE'):
     raise SystemExit(int(os.environ['CARGO_FAILURE']))
-if '--test' in args and args[args.index('--test') + 1] == 'prepare_contract':
+if args[:1] == ['build'] and '--example' in args and args[args.index('--example') + 1] == 'history_and_recovery':
+    if os.environ.get('HISTORY_BUILD_EXIT'):
+        raise SystemExit(int(os.environ['HISTORY_BUILD_EXIT']))
+    artifact = pathlib.Path(os.environ['FIXTURE_ROOT']) / 'history-example'
+    artifact.write_text('fixture example artifact')
+    print(json.dumps({'reason': 'compiler-artifact', 'target': {'name': 'history_and_recovery', 'kind': ['example']},
+                      'executable': str(artifact)}))
+    print(json.dumps({'reason': 'build-finished', 'success': True}))
+elif '--test' in args and args[args.index('--test') + 1] == 'prepare_contract':
     cases = json.loads(os.environ['PREPARE_CASES'])
     if '--list' in args:
         for case in cases: print(case + ': test')
@@ -90,14 +98,21 @@ elif args and args[0] == 'doc':
     destination.write_text('fixture generated page')
 ''')
         self.executable("python3", f'''
-import json, os, sys
+import json, os, pathlib, sys
 args = sys.argv[1:]
 if (args[:2] == ['-m', 'unittest'] or args == ['app-kit/scripts/check_app_workloads.py', 'routine']
+        or args[:1] == ['app-kit/tests/history_and_recovery_contract.py']
         or args in [['agents-kit/tests/precheck_contract.py'], ['agents-kit/tests/question_grade_contract.py']]):
     with open(os.environ['TRACE'], 'a') as stream:
         stream.write(json.dumps({{'command': 'python3', 'args': args}}) + '\\n')
     if args[:2] == ['-m', 'unittest'] and os.environ.get('RUNNER_CONTRACT_EXIT'):
         raise SystemExit(int(os.environ['RUNNER_CONTRACT_EXIT']))
+    if args[:1] == ['app-kit/tests/history_and_recovery_contract.py']:
+        records = [json.loads(line) for line in pathlib.Path(args[1]).read_text().splitlines()]
+        assert records[-1] == {{'reason': 'build-finished', 'success': True}}
+        assert pathlib.Path(records[0]['executable']).is_file()
+        if os.environ.get('HISTORY_CONTRACT_EXIT'):
+            raise SystemExit(int(os.environ['HISTORY_CONTRACT_EXIT']))
 else:
     os.execv({sys.executable!r}, [{sys.executable!r}] + args)
 ''')
@@ -224,9 +239,45 @@ release_stage fixture.second cargo test
         self.assertEqual([row["stage"] for row in stages], ["app.prepare.inventory", "app.prepare.execution"])
         self.assertEqual([row["fresh"] for row in stages], ["1", "1"])
         examples = [args[args.index("--example") + 1] for args in calls if "--example" in args]
-        self.assertEqual(examples, "state graph pure_state actions_and_inputs controls_and_streaming history_and_recovery child_composition".split())
+        self.assertEqual(examples, ("state graph pure_state actions_and_inputs controls_and_streaming "
+                                    "history_and_recovery child_composition history_and_recovery").split())
         workloads = [row for row in rows if row.get("command") == "python3"]
-        self.assertEqual(workloads, [{"command": "python3", "args": ["app-kit/scripts/check_app_workloads.py", "routine"]}])
+        self.assertEqual(len(workloads), 2)
+        self.assertEqual(workloads[0], {"command": "python3", "args": ["app-kit/scripts/check_app_workloads.py", "routine"]})
+        self.assertEqual(workloads[1]["args"][0], "app-kit/tests/history_and_recovery_contract.py")
+        self.assertEqual(Path(workloads[1]["args"][1]).name, "history-example.jsonl")
+
+    def test_app_persistent_example_build_and_execution_remain_fresh_when_resuming(self):
+        self.prepare_app()
+        self.env["REUSE_ALL_NONFRESH"] = "1"
+        result = self.run_script("app-kit/scripts/check.sh", active=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        rows = self.observations()
+        stages = [row for row in rows if row.get("stage", "").startswith("app.example.history_and_recovery.")]
+        self.assertEqual([row["stage"] for row in stages],
+                         ["app.example.history_and_recovery.build", "app.example.history_and_recovery.persistence"])
+        self.assertEqual([row["fresh"] for row in stages], ["1", "1"])
+        self.assertEqual(stages[0]["args"], ["cargo", "build", "--locked", "-p", "app-kit",
+                                            "--example", "history_and_recovery", "--message-format=json"])
+        self.assertEqual(stages[1]["args"][:2], ["python3", "app-kit/tests/history_and_recovery_contract.py"])
+        commands = [row for row in rows if "command" in row]
+        self.assertEqual(commands[-2]["args"], stages[0]["args"][1:])
+        self.assertEqual(commands[-1]["args"], stages[1]["args"][1:])
+        self.assertFalse(Path(stages[1]["args"][2]).exists(), "invocation-local build output must be cleaned up")
+
+    def test_app_persistent_example_failures_stop_the_owner(self):
+        self.prepare_app()
+        for key in ("HISTORY_BUILD_EXIT", "HISTORY_CONTRACT_EXIT"):
+            with self.subTest(key=key):
+                self.env[key] = "43"
+                result = self.run_script("app-kit/scripts/check.sh", active=True)
+                self.assertEqual(result.returncode, 43, result.stdout + result.stderr)
+                rows = self.observations()
+                self.assertFalse(any(row.get("stage") == "app.clippy" for row in rows))
+                executed = any(row.get("stage") == "app.example.history_and_recovery.persistence" for row in rows)
+                self.assertEqual(executed, key == "HISTORY_CONTRACT_EXIT")
+                Path(self.env["TRACE"]).unlink()
+                del self.env[key]
 
     def test_app_missing_prepare_case_and_ignored_execution_fail(self):
         self.prepare_app()

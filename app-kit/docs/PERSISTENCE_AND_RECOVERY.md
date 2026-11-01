@@ -14,12 +14,24 @@ the workspace and workflow. These operations do not start a new run. App and
 lower stores can share a physical service only when their namespaces and
 lifecycle ownership remain independent.
 
-Run the complete [history and recovery example](../examples/history_and_recovery.rs)
-with `cargo run --locked -p app-kit --example history_and_recovery`. It constructs LanceDB in
-the caller with an empty Agent inventory, executes a two-step counter, restores
-a parked copy with an override, deletes the source, then finishes and reopens
-the fork. Its memory store survives these App instances within one process;
-use persistent storage for recovery after process exit.
+The complete [history and recovery example](../examples/history_and_recovery.rs)
+constructs embedded Lance storage in the caller with an empty Agent inventory.
+It executes a two-step counter, restores a parked copy with an override, deletes
+the source, then finishes the fork at `41`. Its no-argument mode reopens the
+result within one process using memory storage.
+
+For separate processes, use `create DIRECTORY` followed by `reopen DIRECTORY`.
+The first invocation stores the completed fork in `DIRECTORY/app-state` and
+saves public lookup identities in `DIRECTORY/run.json` after App cleanup. The
+second reconstructs the required configuration and opens that exact fork without
+executing the workflow again. The [quickstart](QUICKSTART.md#reopen-after-process-exit)
+contains prerequisites, full commands, and expected output. Keep the store and
+receipt together; the receipt is a caller-owned lookup aid, not a replacement
+for the persisted App records.
+
+These paths demonstrate checkpoint restoration and reopening completed results.
+They do not interrupt unfinished work or resolve uncertainty about external
+effects; those decisions follow [effect uncertainty](#effect-uncertainty).
 
 A logical RunId can have independent occurrences, each with its own state,
 controls and history. `RunSelector::Latest(id)` opens the occurrence whose App

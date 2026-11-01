@@ -166,6 +166,7 @@ enum ChildFault {
     ParentStopReadPermanent,
     ParentStopReadCorruption,
     ParentStopReadHeld,
+    StaleParentRead,
     StoppingRead {
         boundary: StoppingReadBoundary,
         failure: AuthorityReadFault,
@@ -1224,6 +1225,23 @@ impl StateStoreBackend for ChildStore {
             panic!("ready-only selected child read fault");
         }
         let mut snapshot = self.inner.load(key.clone()).await?;
+        if matches!(self.effects.fault, ChildFault::StaleParentRead)
+            && snapshot.as_ref().is_some_and(|row| {
+                key.key().starts_with("run/")
+                    && row.record.value["workflow_id"] == "executor-parent"
+            })
+            && self.effects.read_fault_armed.swap(false, Ordering::SeqCst)
+        {
+            // The native read has completed and released its ownership. Hold
+            // only this captured pre-cancellation response while another caller
+            // commits cancellation, then return the original read unchanged.
+            self.effects.faults.fetch_add(1, Ordering::SeqCst);
+            self.effects.verification_read_entered.notify_one();
+            self.effects.await_stop_read_release().await;
+            self.effects
+                .verification_read_returned
+                .store(true, Ordering::SeqCst);
+        }
         self.effects.reorder_admitted_input(&key, &mut snapshot);
         if after_panic_recovery && snapshot.is_some() {
             self.effects
@@ -1934,6 +1952,7 @@ impl ChildDefinitions {
             | ChildFault::ParentStopReadPermanent
             | ChildFault::ParentStopReadCorruption
             | ChildFault::ParentStopReadHeld
+            | ChildFault::StaleParentRead
             | ChildFault::StoppingRead { .. }
             | ChildFault::ChildInventoryRead { .. }
             | ChildFault::QueuedParentRead { .. } => {
@@ -2092,6 +2111,7 @@ impl ChildDefinitions {
             | ChildFault::ParentStopReadPermanent
             | ChildFault::ParentStopReadCorruption
             | ChildFault::ParentStopReadHeld
+            | ChildFault::StaleParentRead
             | ChildFault::StoppingRead { .. }
             | ChildFault::ChildInventoryRead { .. }
             | ChildFault::QueuedParentRead { .. } => {
@@ -2136,6 +2156,7 @@ enum IntegrityPolicy {
     CancelCompleted,
     HoldForeground,
     HoldSynchronous,
+    HoldAfterFirst,
 }
 
 impl IntegrityPolicy {
@@ -2167,6 +2188,7 @@ struct IntegrityEvidence {
     entered: Notify,
     holding: AtomicBool,
     released: AtomicBool,
+    stop_requested: AtomicBool,
     waker: futures_util::task::AtomicWaker,
     threads: Mutex<Vec<ThreadId>>,
 }
@@ -2184,6 +2206,11 @@ impl IntegrityEvidence {
         self.released.store(true, Ordering::SeqCst);
         self.waker.wake();
     }
+
+    fn request_stop(&self) {
+        self.stop_requested.store(true, Ordering::SeqCst);
+        self.waker.wake();
+    }
 }
 
 struct IntegrityExecutor {
@@ -2195,8 +2222,16 @@ struct IntegrityExecutor {
 
 struct IntegrityExecution<'a, F> {
     executor: &'a IntegrityExecutor,
-    batch: Pin<Box<ChildBatch<F>>>,
+    work: IntegrityWork<F>,
     thread: Rc<ThreadId>,
+}
+
+enum IntegrityWork<F> {
+    Batch(Pin<Box<ChildBatch<F>>>),
+    First {
+        tasks: Vec<Pin<Box<F>>>,
+        completed: Option<ChildCompletion>,
+    },
 }
 
 impl IntegrityExecutor {
@@ -2367,7 +2402,14 @@ impl ChildExecutor for IntegrityExecutor {
         }
         IntegrityExecution {
             executor: self,
-            batch: Box::pin(batch),
+            work: if matches!(self.policy, IntegrityPolicy::HoldAfterFirst) {
+                IntegrityWork::First {
+                    tasks: batch.into_tasks().expect("original unpolled child pins"),
+                    completed: None,
+                }
+            } else {
+                IntegrityWork::Batch(Box::pin(batch))
+            },
             thread: Rc::new(thread),
         }
     }
@@ -2389,7 +2431,9 @@ impl<F: Future<Output = Result<ChildCompletion, AppError>>> Future for Integrity
         assert_eq!(*execution.thread, std::thread::current().id());
         if matches!(
             execution.executor.policy,
-            IntegrityPolicy::HoldForeground | IntegrityPolicy::HoldSynchronous
+            IntegrityPolicy::HoldForeground
+                | IntegrityPolicy::HoldSynchronous
+                | IntegrityPolicy::HoldAfterFirst
         ) {
             let evidence = &execution.executor.evidence;
             evidence
@@ -2423,10 +2467,43 @@ impl<F: Future<Output = Result<ChildCompletion, AppError>>> Future for Integrity
                 "caller executor rejected its admitted batch".into(),
             )));
         }
-        let mut completed = match execution.batch.as_mut().poll(cx) {
-            Poll::Pending => return Poll::Pending,
-            Poll::Ready(Err(error)) => return Poll::Ready(Err(error)),
-            Poll::Ready(Ok(completed)) => completed,
+        let mut completed = match &mut execution.work {
+            IntegrityWork::Batch(batch) => match batch.as_mut().poll(cx) {
+                Poll::Pending => return Poll::Pending,
+                Poll::Ready(Err(error)) => return Poll::Ready(Err(error)),
+                Poll::Ready(Ok(completed)) => completed,
+            },
+            IntegrityWork::First { tasks, completed } => {
+                if execution
+                    .executor
+                    .evidence
+                    .stop_requested
+                    .load(Ordering::SeqCst)
+                {
+                    return Poll::Ready(Err(AppError::Integration(
+                        "test-owned executor stopped after a failed cancellation observation"
+                            .into(),
+                    )));
+                }
+                if completed.is_none() {
+                    match tasks[0].as_mut().poll(cx) {
+                        Poll::Pending => return Poll::Pending,
+                        Poll::Ready(Err(error)) => return Poll::Ready(Err(error)),
+                        Poll::Ready(Ok(first)) => {
+                            assert_eq!(first.ordinal(), 0);
+                            *completed = Some(first);
+                            // Child 0's original final checks and completion
+                            // have settled; child 1 stays owned and unpolled.
+                            execution
+                                .executor
+                                .effects
+                                .read_fault_armed
+                                .store(true, Ordering::SeqCst);
+                        }
+                    }
+                }
+                return Poll::Pending;
+            }
         };
         if matches!(execution.executor.policy, IntegrityPolicy::CancelCompleted) {
             // Both original child futures have returned their exact terminal
@@ -2460,6 +2537,7 @@ impl<F: Future<Output = Result<ChildCompletion, AppError>>> Future for Integrity
             }
             IntegrityPolicy::HoldForeground
             | IntegrityPolicy::HoldSynchronous
+            | IntegrityPolicy::HoldAfterFirst
             | IntegrityPolicy::CancelParked
             | IntegrityPolicy::CancelCompleted
             | IntegrityPolicy::StopReadFailure
@@ -2865,6 +2943,7 @@ impl ChildDefinitions {
                 | IntegrityPolicy::PanicConstruction
                 | IntegrityPolicy::PanicPolling => vec![],
                 IntegrityPolicy::Foreign => vec![10, 10, 20, 20],
+                IntegrityPolicy::HoldAfterFirst => vec![10],
                 IntegrityPolicy::Missing
                 | IntegrityPolicy::MissingRead { .. }
                 | IntegrityPolicy::HoldForeground
@@ -3457,6 +3536,165 @@ async fn shutdown_waits_for_the_original_cancelled_child_commit_receipt() {
         true,
     )
     .await;
+}
+
+#[tokio::test]
+async fn parent_cancellation_survives_a_stale_read_after_child_completion() {
+    let effects = Arc::new(ChildEffects {
+        fault: ChildFault::StaleParentRead,
+        hold_cancellation_receipt: true,
+        ..ChildEffects::default()
+    });
+    let evidence = Arc::new(IntegrityEvidence::default());
+    let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory()))
+        .await
+        .unwrap();
+    let config: AppConfig<ChildStore, Agent> = AppConfig::new(
+        ChildStore {
+            inner: store.clone(),
+            effects: Arc::clone(&effects),
+        },
+        Vec::new(),
+        ChildDefinitions::all(None, 2),
+    );
+    let mut app = App::open(
+        config
+            .with_state_typing(ChildTyping {
+                effects: Arc::clone(&effects),
+            })
+            .with_child_executor(IntegrityExecutor::new(
+                IntegrityPolicy::HoldAfterFirst,
+                &evidence,
+                &effects,
+            )),
+    )
+    .await
+    .unwrap();
+    let observed = AssertUnwindSafe(tokio::time::timeout(Duration::from_secs(12), async {
+        let workspace = app
+            .create_workspace(WorkspaceConfig {
+                name: None,
+                root: std::env::current_dir().unwrap(),
+            })
+            .await
+            .unwrap();
+        let workflow = workspace
+            .workflow("executor-parent".parse().unwrap())
+            .await
+            .unwrap();
+        let parent = workflow.start(ExecutionOptions::default()).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(3), evidence.entered.notified())
+            .await
+            .expect("the original caller executor owns both unpolled children");
+        let before = parent.snapshot().await.unwrap();
+        assert!(effects.values.lock().unwrap().is_empty());
+        assert_eq!(evidence.calls.load(Ordering::SeqCst), 1);
+        evidence.release();
+        tokio::time::timeout(
+            Duration::from_secs(3),
+            effects.verification_read_entered.notified(),
+        )
+        .await
+        .expect("child completion precedes a captured native parent read");
+        assert_eq!(effects.faults.load(Ordering::SeqCst), 1);
+        assert!(!effects.verification_read_returned.load(Ordering::SeqCst));
+        assert_eq!(*effects.values.lock().unwrap(), [10]);
+        let children = ChildDefinitions::admitted_records(&store, &parent.id().to_string()).await;
+        assert_eq!(children.len(), 2);
+        assert_eq!(children[0]["checkpoint"]["phase"]["state"], "succeeded");
+        assert_eq!(children[0]["checkpoint"]["state"]["item"], 11);
+        assert_eq!(children[1]["checkpoint"]["state"]["item"], 20);
+        assert_eq!(children[1]["checkpoint"]["outcomes"], json!([]));
+        let current = parent.snapshot().await.unwrap();
+        assert_eq!(current.state, before.state);
+        assert!(current.outcomes.is_empty());
+        assert_eq!(current.last_action_ordinal, None);
+        // The captured native read already released its ownership, so
+        // this independent cancellation must commit before that read returns.
+        parent.cancel(current.checkpoint).await.unwrap();
+        assert!(!effects.verification_read_returned.load(Ordering::SeqCst));
+        effects.release_stop_read();
+        tokio::time::timeout(
+            Duration::from_secs(4),
+            effects.cancellation_receipt_entered.notified(),
+        )
+        .await
+        .expect("cancellation accepted during the stale read reaches the original unpolled child");
+        assert!(effects.verification_read_returned.load(Ordering::SeqCst));
+        assert!(effects.cancellations.lock().unwrap().is_empty());
+        assert_eq!(*effects.values.lock().unwrap(), [10]);
+        let current = parent.snapshot().await.unwrap();
+        assert!(matches!(current.status, RunStatus::Cancelling));
+        assert_eq!(current.state, before.state);
+        assert!(current.outcomes.is_empty());
+        assert_eq!(current.last_action_ordinal, None);
+        let shutdown = app
+            .shutdown(Shutdown::CancelAndDrain {
+                timeout: Duration::from_secs(2),
+            })
+            .await;
+        assert!(
+            matches!(shutdown, Err(AppError::Timeout(_))),
+            "the original child cancellation receipt remains owned: {shutdown:?}"
+        );
+        (
+            parent.id().to_string(),
+            children[1]["id"].as_str().unwrap().to_owned(),
+            children[1]["occurrence"].as_str().unwrap().to_owned(),
+        )
+    }))
+    .catch_unwind()
+    .await;
+    // Release every test-owned hold before surfacing a red assertion or timeout.
+    effects.read_fault_armed.store(false, Ordering::SeqCst);
+    effects.release_stop_read();
+    evidence.release();
+    if !matches!(&observed, Ok(Ok(_))) {
+        // A failed wake-up assertion must not leave this caller's deliberate
+        // executor hold alive when the test runtime is destroyed. This signal
+        // is sent only after the original bounded observation already failed.
+        evidence.request_stop();
+    }
+    effects
+        .cancellation_receipt_released
+        .store(true, Ordering::SeqCst);
+    effects.cancellation_receipt_release.notify_waiters();
+    let cleanup = AssertUnwindSafe(tokio::time::timeout(
+        Duration::from_secs(5),
+        app.shutdown(Shutdown::CancelAndDrain {
+            timeout: Duration::from_secs(3),
+        }),
+    ))
+    .catch_unwind()
+    .await;
+    drop(app);
+    let (parent, child, occurrence) = match observed {
+        Ok(result) => result.expect("stale parent read cancellation remains bounded"),
+        Err(failure) => std::panic::resume_unwind(failure),
+    };
+    cleanup
+        .expect("stale-read cleanup does not panic")
+        .expect("stale-read cleanup remains bounded")
+        .unwrap();
+    assert_eq!(
+        *effects.cancellations.lock().unwrap(),
+        [ChildCancellation {
+            run: child,
+            occurrence,
+            parent: parent.clone(),
+            ordinal: 1,
+            item: 20
+        }]
+    );
+    assert_eq!(*effects.values.lock().unwrap(), [10]);
+    assert_eq!(evidence.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(evidence.dropped.load(Ordering::SeqCst), 1);
+    assert_eq!(evidence.executor_dropped.load(Ordering::SeqCst), 1);
+    let children = ChildDefinitions::admitted_records(&store, &parent).await;
+    assert_eq!(children[0]["checkpoint"]["phase"]["state"], "succeeded");
+    assert_eq!(children[1]["checkpoint"]["phase"]["state"], "cancelled");
+    assert_eq!(children[1]["checkpoint"]["state"]["item"], 20);
+    assert_eq!(children[1]["checkpoint"]["outcomes"], json!([]));
 }
 
 #[tokio::test]

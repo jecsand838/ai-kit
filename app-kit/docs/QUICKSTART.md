@@ -2,23 +2,90 @@
 
 Start with the complete
 [history and recovery example](../examples/history_and_recovery.rs). It runs
-locally without an LLM, external service or credentials:
+locally without an LLM, external service or credentials. You can first reopen
+a result within one process, then retain that result across separate processes.
+
+## Prerequisites and first run
+
+Install Git and Rust through rustup. This checkout selects Rust **1.99.0** and
+its components through [rust-toolchain.toml](../../rust-toolchain.toml). Native
+dependencies also require a C/C++ compiler, libclang, CMake, Protocol Buffers,
+pkg-config, and TLS development libraries. Follow the platform setup in
+[build prerequisites](../../CONTRIBUTING.md#get-started) before running the
+example. Allow time and disk space for the first native build.
+
+Clone the repository and run from its root. For an existing checkout, use that
+directory instead of cloning again:
 
 ```sh
+git clone https://github.com/jecsand838/ai-kit.git
+cd ai-kit
 cargo run --locked -p app-kit --example history_and_recovery
 ```
 
-Run the command from the ai-kit workspace root using its pinned Rust toolchain.
-App has no Cargo features. The example constructs storage-kit's supplied LanceDB
-StateStore in caller code. LanceDB is included in storage-kit's base dependency
+App has no Cargo features. The example constructs storage-kit's supplied embedded
+Lance StateStore in caller code. Lance is included in storage-kit's base dependency
 set and needs no additional feature. A caller implementing `StateStoreBackend`
-directly needs no App feature or supplied store implementation.
+directly needs no App feature or supplied store implementation; the base native
+dependencies still compile.
 
-The example prints a source result of 2, a copied initial value of 40 and a
-resumed result of 41. It then opens a new App generation over the same store
-and verifies the retained result and source lineage. Its in-memory store is
-deliberate: it demonstrates App reopen, while persistence across process exit
-requires a persistent caller-selected store.
+After compilation, the example prints (`<run-id>` represents a generated ID):
+
+```text
+Source count: 2; copied count: 40; completed fork count: 41
+Reopened fork <run-id> at count 41; source lineage remains readable
+```
+
+The source runs two increments. A restored fork overrides the checkpoint after
+the first increment with `40`, then executes only the remaining increment to
+reach `41`. After deleting the source, the example opens a new App generation
+and verifies the fork's result and source lineage. This default mode uses an
+in-memory store; its state lasts only within this process.
+
+## Reopen after process exit
+
+Use a fresh directory for the persistent variant. The following shell commands
+run the same executable twice; the first process exits before the second starts:
+
+```sh
+demo_root="$(mktemp -d)"
+cargo run --locked -p app-kit --example history_and_recovery -- create "$demo_root/history"
+cargo run --locked -p app-kit --example history_and_recovery -- reopen "$demo_root/history"
+```
+
+The `create` invocation prints:
+
+```text
+Source count: 2; copied count: 40; completed fork count: 41
+Saved fork <run-id> at count 41
+```
+
+The `reopen` invocation prints the same fork ID:
+
+```text
+Reopened fork <run-id> at count 41; source lineage remains readable
+```
+
+`create DIRECTORY` requires a directory that does not already exist. It builds
+caller-owned Lance storage in `DIRECTORY/app-state`, completes the fork, and
+joins App cleanup before saving public lookup identities in `DIRECTORY/run.json`.
+Keep the receipt and storage together: the receipt identifies the workspace,
+workflow, source run and fork run, including their exact occurrences. It contains
+no native storage records or lower credentials.
+
+`reopen DIRECTORY` reads that receipt, reconstructs the same workflow definition,
+and looks up the exact completed fork. It verifies the result and source lineage
+without creating a new workspace or run, or executing workflow steps. Repeat
+the `reopen` command to read the same result again. Missing or malformed receipts,
+missing storage, and an occupied `create` destination fail without resetting
+existing data. The example leaves the selected directory in place on success
+and failure. After both processes exit, you can remove the test directory created
+by the snippet; retain it if you want to reopen the result later.
+
+This demonstrates persistence of a completed result after a normal process
+exit. It does not interrupt unfinished work or establish whether an external
+effect completed before a crash. Such uncertainty needs explicit caller
+resolution; see [effect uncertainty](PERSISTENCE_AND_RECOVERY.md#effect-uncertainty).
 
 ## Build the application
 
@@ -75,8 +142,9 @@ different purposes; use the public selector appropriate to the operation.
 To reopen, rebuild the App configuration with the same store and required
 definition/binding revisions, then look up the saved WorkspaceId and workflow.
 Use `RunSelector::Exact` with the saved RunId and snapshot occurrence to reopen
-the same run. The example does this after joining the first App. A new App
-generation fences old handles; reopening a run does not replay completed actions.
+the same run. Memory mode does this after joining the first App; persistent mode
+also reconnects the store in a new process. A new App generation fences old
+handles; reopening a run does not replay completed actions.
 
 ## Finish owned work
 

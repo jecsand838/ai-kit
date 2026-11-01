@@ -77,7 +77,14 @@ Wait for the actual question reply. Then return the structured object with tool 
                     "prompt":[{"kind":"text", "text":prompt}],
                     "structured_schema":{
                         "type":"object", "properties":{
-                            "tool":{"type":"string"}, "knowledge":{"type":"string"}
+                            "tool":{
+                                "type":"string", "minLength":36, "maxLength":36,
+                                "pattern":"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            },
+                            "knowledge":{
+                                "type":"string", "minLength":36, "maxLength":36,
+                                "pattern":"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            }
                         }, "required":["tool","knowledge"], "additionalProperties":false
                     }, "structured_target":id
                 }})
@@ -641,6 +648,50 @@ Wait for the actual question reply. Then return the structured object with tool 
         .await
     }
 
+    async fn settle_cancellation<A: AgentBackend>(
+        run: &WorkflowRun<StateStore, A>,
+        mut current: RunSnapshot,
+    ) -> Result<RunSnapshot, AppError> {
+        tokio::time::timeout(Duration::from_secs(120), async {
+            loop {
+                if matches!(
+                    current.status,
+                    RunStatus::Succeeded | RunStatus::Failed(_) | RunStatus::Cancelled
+                ) {
+                    return Ok(current);
+                }
+                let observed = if let [
+                    Interaction::Unknown {
+                        sequence,
+                        generation,
+                        ..
+                    },
+                ] = current.interactions.as_slice()
+                {
+                    // This caller explicitly accepts the uncertain effect. A
+                    // conflict requires fresh authority, not a success marker
+                    // or a replay of the original lower operation.
+                    match run
+                        .resolve(*sequence, *generation, Resolution::Accept(Map::new()))
+                        .await
+                    {
+                        Ok(snapshot) => snapshot,
+                        Err(AppError::Conflict(_)) => run.snapshot().await?,
+                        Err(error) => return Err(error),
+                    }
+                } else {
+                    run.wait().await?
+                };
+                if observed.checkpoint == current.checkpoint {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                current = observed;
+            }
+        })
+        .await
+        .expect("the strict-live run must reach a terminal outcome in time")
+    }
+
     async fn wait(run: &WorkflowRun<StateStore, Agent>) -> RunSnapshot {
         tokio::time::timeout(Duration::from_secs(120), run.wait())
             .await
@@ -1117,30 +1168,12 @@ async fn caller_input_and_exact_real_agent_notification_resolve_publicly()
             panic!("the cancellation race must expose its real notification")
         };
         let settled = RecoveryJourney::submit_yes(&race, *sequence, *generation).await?;
-        let (mut current, cancellation_accepted) = match race.cancel(settled.checkpoint).await {
+        let (current, cancellation_accepted) = match race.cancel(settled.checkpoint).await {
             Ok(snapshot) => (snapshot, true),
             Err(AppError::Conflict(_)) => (race.snapshot().await?, false),
             Err(error) => return Err(error.into()),
         };
-        if let [
-            Interaction::Unknown {
-                sequence,
-                generation,
-                ..
-            },
-        ] = current.interactions.as_slice()
-        {
-            let (sequence, generation) = (*sequence, *generation);
-            current = match race
-                .resolve(sequence, generation, Resolution::Accept(Map::new()))
-                .await
-            {
-                Ok(snapshot) => snapshot,
-                Err(AppError::Conflict(_)) => race.snapshot().await?,
-                Err(error) => return Err(error.into()),
-            };
-        }
-        let terminal = OwnedOpenCode::settle_terminal(&race, current).await;
+        let terminal = RecoveryJourney::settle_cancellation(&race, current).await?;
         assert!(match cancellation_accepted {
             true => matches!(terminal.status, RunStatus::Cancelled),
             false => matches!(terminal.status, RunStatus::Succeeded | RunStatus::Failed(_)),
@@ -1173,6 +1206,138 @@ async fn caller_input_and_exact_real_agent_notification_resolve_publicly()
     cleanup
         .expect("question cleanup does not panic")
         .expect("question cleanup is bounded")?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn cancellation_settles_an_unknown_published_after_its_initial_snapshot()
+-> Result<(), Box<dyn Error + Send + Sync>> {
+    let mut journey = RecoveryJourney::new("late-cancellation-unknown").await;
+    let control = ForwardingControl::abort_settlement();
+    let config = journey
+        .service
+        .forwarding_app_config(&[OwnedOpenCode::QUESTION_WORKFLOW], &control)
+        .await;
+    let mut app = App::open(config).await?;
+    let mut run = None;
+    let observed = std::panic::AssertUnwindSafe(async {
+        let workspace = RecoveryJourney::create_workspace(
+            &app,
+            "late-cancellation-unknown",
+            journey.service.workspace_root(),
+        )
+        .await?;
+        run = Some(RecoveryJourney::start(&workspace, "agent-question").await);
+        let run = run
+            .as_ref()
+            .expect("the real question run is retained for cleanup");
+        let waiting = tokio::time::timeout(Duration::from_secs(120), run.wait()).await??;
+        assert!(
+            matches!(
+                waiting.interactions.as_slice(),
+                [Interaction::Notification { .. }]
+            ),
+            "the real pending question must be observed before cancellation"
+        );
+        let cancellation = run.cancel(waiting.checkpoint).await?;
+        assert!(matches!(cancellation.status, RunStatus::Cancelling));
+        assert!(
+            !cancellation
+                .interactions
+                .iter()
+                .any(|interaction| matches!(interaction, Interaction::Unknown { .. })),
+            "the cancellation receipt must precede the abort's Unknown publication"
+        );
+        tokio::time::timeout(
+            Duration::from_secs(120),
+            control.wait_until_method_blocked(),
+        )
+        .await
+        .expect("the real question's abort must reach the held forwarding boundary");
+        let unknown = tokio::time::timeout(Duration::from_secs(120), run.wait()).await??;
+        assert!(matches!(unknown.status, RunStatus::Cancelling));
+        assert!(
+            matches!(
+                unknown.interactions.as_slice(),
+                [Interaction::Unknown {
+                    retry_safe: false,
+                    ..
+                }]
+            ),
+            "the held abort must expose one unsafe-to-retry Unknown after its grace expires"
+        );
+        assert!(unknown.checkpoint > cancellation.checkpoint);
+        let cancellation_state = cancellation.state.clone();
+
+        // The caller starts from its original receipt. The later Unknown is
+        // actionable even though that receipt did not contain an interaction.
+        let terminal = RecoveryJourney::settle_cancellation(run, cancellation).await?;
+        assert!(matches!(terminal.status, RunStatus::Cancelled));
+        assert!(terminal.interactions.is_empty());
+        assert!(terminal.checkpoint > unknown.checkpoint);
+        assert_eq!(terminal.state, cancellation_state);
+        assert_eq!(
+            control.prompt_count(),
+            1,
+            "Unknown settlement never replays the prompt"
+        );
+        assert_eq!(
+            control.resolution_count(),
+            0,
+            "cancellation never submits a question answer"
+        );
+        Ok::<_, Box<dyn Error + Send + Sync>>(())
+    })
+    .catch_unwind()
+    .await;
+    control.release_method();
+    if !matches!(&observed, Ok(Ok(())))
+        && let Some(run) = &run
+    {
+        let recovery = std::panic::AssertUnwindSafe(tokio::time::timeout(
+            Duration::from_secs(30),
+            run.snapshot(),
+        ))
+        .catch_unwind()
+        .await;
+        if let Ok(Ok(Ok(snapshot))) = &recovery {
+            RecoveryJourney::fail_unexpected_unknown(run, snapshot).await;
+        }
+        let recovery = recovery.map(|result| result.map(|result| result.map(|_| ())));
+        RecoveryJourney::report_cleanup("late Unknown observation", &recovery);
+    }
+    drop(run);
+    let cleanup = std::panic::AssertUnwindSafe(tokio::time::timeout(
+        Duration::from_secs(150),
+        app.shutdown(Shutdown::CancelAndDrain {
+            timeout: Duration::from_secs(120),
+        }),
+    ))
+    .catch_unwind()
+    .await;
+    drop(app);
+    let service_cleanup =
+        std::panic::AssertUnwindSafe(tokio::time::timeout(Duration::from_secs(120), async {
+            if matches!(&cleanup, Ok(Ok(Ok(())))) {
+                journey.service.cleanup().await;
+            } else {
+                journey.service.stop_and_retain_paths().await;
+            }
+        }))
+        .catch_unwind()
+        .await;
+    RecoveryJourney::report_cleanup("late Unknown App", &cleanup);
+    RecoveryJourney::report_cleanup("late Unknown service", &service_cleanup);
+    match observed {
+        Ok(result) => result?,
+        Err(panic) => std::panic::resume_unwind(panic),
+    }
+    cleanup
+        .expect("late Unknown cleanup does not panic")
+        .expect("late Unknown cleanup is bounded")?;
+    service_cleanup
+        .expect("late Unknown service cleanup does not panic")
+        .expect("late Unknown service cleanup is bounded");
     Ok(())
 }
 
@@ -1856,6 +2021,46 @@ impl RecoveryJourney {
     async fn parallel_isolation_case(
         shared_catalog: bool,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
+        let definition = Self::parallel_isolation_workflow();
+        let document: Value = serde_json::from_str(&definition)?;
+        let canonical = json!({
+            "tool": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+            "knowledge": "10f4e61e-9f7a-4d82-8c55-49372ec756a0",
+        });
+        let truncated = "f47ac10b-58cc-4372-a567-0e02b2c3d";
+        assert_eq!(truncated.len(), 33);
+        let invalid_shape = "f47ac10b_58cc_4372_a567_0e02b2c3d479";
+        assert_eq!(invalid_shape.len(), 36);
+        let mut checked = 0;
+        for node in document["nodes"]
+            .as_array()
+            .expect("the isolation workflow has its declared nodes")
+        {
+            if node["step"]["kind"] != "agent" {
+                continue;
+            }
+            let schema = &node["step"]["structured_schema"];
+            let validator = jsonschema::draft202012::options().build(schema)?;
+            assert!(
+                validator.is_valid(&canonical),
+                "each outgoing isolation schema must accept distinct canonical UUID controls"
+            );
+            for field in ["tool", "knowledge"] {
+                for malformed in [truncated, invalid_shape] {
+                    let mut candidate = canonical.clone();
+                    candidate[field] = Value::String(malformed.to_owned());
+                    assert!(
+                        !validator.is_valid(&candidate),
+                        "each outgoing isolation marker field must reject noncanonical UUIDs"
+                    );
+                }
+            }
+            checked += 1;
+        }
+        assert_eq!(checked, 2, "both outgoing Agent schemas must be checked");
+        eprintln!(
+            "strict-live isolation schema preflight: two Agent schemas accept canonical controls and reject malformed UUIDs"
+        );
         let mut primary_service = OwnedOpenCode::new("parallel-isolation-primary");
         let mut secondary_service = OwnedOpenCode::new("parallel-isolation-secondary");
         let primary_tool = uuid::Uuid::new_v4().to_string();
@@ -1916,7 +2121,6 @@ impl RecoveryJourney {
         }
         let primary = ForwardingControl::observation();
         let secondary = ForwardingControl::observation();
-        let definition = RecoveryJourney::parallel_isolation_workflow();
         let mut app = App::open(RecoveryJourney::two_agent_config_with_state(
             if shared_catalog {
                 StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::directory(
@@ -2000,10 +2204,15 @@ impl RecoveryJourney {
             }
             // Correct routing of native contexts is tested here; the full-access
             // lower workspaces do not constitute OS sandbox isolation.
-            assert_eq!(primary_service.tool_receipt(), format!("{primary_tool}\n"));
-            assert_eq!(
-                secondary_service.tool_receipt(),
-                format!("{secondary_tool}\n")
+            let primary_receipt_before = primary_service.tool_receipt()?;
+            let secondary_receipt_before = secondary_service.tool_receipt()?;
+            assert!(
+                primary_receipt_before == format!("{primary_tool}\n"),
+                "primary native receipt must contain exactly its expected UUID and newline"
+            );
+            assert!(
+                secondary_receipt_before == format!("{secondary_tool}\n"),
+                "secondary native receipt must contain exactly its expected UUID and newline"
             );
             assert!(
                 primary.process_exit_count() >= 1,
@@ -2074,29 +2283,56 @@ impl RecoveryJourney {
             let snapshot = run.snapshot().await?;
             phase = "wait_for_terminal";
             let terminal = OwnedOpenCode::settle_terminal(&run, snapshot).await;
+            let primary_receipt = primary_service.tool_receipt();
+            let secondary_receipt = secondary_service.tool_receipt();
+            let mut receipt_evidence = Map::new();
+            for (label, before, receipt, expected) in [
+                ("primary", &primary_receipt_before, &primary_receipt, &primary_tool),
+                ("secondary", &secondary_receipt_before, &secondary_receipt, &secondary_tool),
+            ] {
+                let metadata = match receipt {
+                    Ok(receipt) => json!({
+                        "read": true,
+                        "bytes": receipt.len(),
+                        "lines": receipt.lines().count(),
+                        "expected_exact": receipt == &format!("{expected}\n"),
+                        "before_resolution_bytes": before.len(),
+                        "before_resolution_lines": before.lines().count(),
+                        "unchanged_since_resolution": receipt == before,
+                    }),
+                    Err(category) => json!({"read": false, "category": category}),
+                };
+                receipt_evidence.insert(label.to_owned(), metadata);
+            }
+            eprintln!(
+                "strict-live isolation terminal evidence: {}",
+                json!({
+                    "primary": primary.structured_marker_diagnostics(
+                        &terminal.state.values()["primary"], &primary_tool, &primary_knowledge,
+                    ),
+                    "secondary": secondary.structured_marker_diagnostics(
+                        &terminal.state.values()["secondary"], &secondary_tool, &secondary_knowledge,
+                    ),
+                    "tool_receipts": receipt_evidence,
+                    "prompt_counts": [primary.prompt_count(), secondary.prompt_count()],
+                    "resolution_counts": [primary.resolution_count(), secondary.resolution_count()],
+                    "process_exit_counts": [primary.process_exit_count(), secondary.process_exit_count()],
+                })
+            );
             phase = "verify_terminal";
             assert!(
                 matches!(terminal.status, RunStatus::Succeeded),
                 "both native branches must succeed"
             );
-            if terminal.state.values()["primary"]
-                != json!({"tool":primary_tool,"knowledge":primary_knowledge})
-                || terminal.state.values()["secondary"]
-                    != json!({"tool":secondary_tool,"knowledge":secondary_knowledge})
-            {
-                eprintln!(
-                    "strict-live isolation lower structured markers: primary={:?}; secondary={:?}",
-                    primary.last_structured_markers(),
-                    secondary.last_structured_markers()
-                );
-            }
-            assert_eq!(
-                terminal.state.values()["primary"],
-                json!({"tool":primary_tool,"knowledge":primary_knowledge})
+            assert!(
+                terminal.state.values()["primary"]
+                    == json!({"tool":primary_tool,"knowledge":primary_knowledge}),
+                "primary terminal markers must match both exact expected UUIDs"
             );
-            assert_eq!(
-                terminal.state.values()["secondary"],
-                json!({"tool":secondary_tool,"knowledge":secondary_knowledge})
+            assert!(
+                terminal.state.values()["secondary"]
+                    == json!({"tool":secondary_tool,"knowledge":secondary_knowledge}),
+                "secondary terminal markers must match both exact expected UUIDs"
             );
             assert_eq!((primary.prompt_count(), secondary.prompt_count()), (1, 1));
             assert_eq!(
@@ -2104,10 +2340,13 @@ impl RecoveryJourney {
                 (1, 1)
             );
             // The actual native receipt also proves the model did not replay bash.
-            assert_eq!(primary_service.tool_receipt(), format!("{primary_tool}\n"));
-            assert_eq!(
-                secondary_service.tool_receipt(),
-                format!("{secondary_tool}\n")
+            assert!(
+                primary_receipt? == format!("{primary_tool}\n"),
+                "primary final native receipt must preserve the exact UUID once without replay"
+            );
+            assert!(
+                secondary_receipt? == format!("{secondary_tool}\n"),
+                "secondary final native receipt must preserve the exact UUID once without replay"
             );
             Ok::<_, Box<dyn Error + Send + Sync>>(())
         }))

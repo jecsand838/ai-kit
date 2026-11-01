@@ -11,13 +11,22 @@ durably through `App` and the functional `app_kit::workflow` module.
 Start with the [runnable quickstart](docs/QUICKSTART.md) or the
 [guide index](docs/README.md).
 
-The [native state executable](examples/pure_state.rs) builds its own LanceDB store,
-runs a workflow without an Agent service, checks the committed result and awaits
-cleanup before propagating an error:
+The [history and recovery example](examples/history_and_recovery.rs) builds its
+own embedded Lance store, restores a workflow checkpoint, and verifies the
+retained result and source lineage without an LLM, service, or credentials.
+Install the native [build prerequisites](../CONTRIBUTING.md#get-started) first,
+then run from the repository root with its pinned Rust toolchain:
 
 ```bash
-cargo run --locked -p app-kit --example pure_state
+cargo run --locked -p app-kit --example history_and_recovery
 ```
+
+The result is `41`: the source finishes at `2`, a restored fork starts at `40`,
+and its remaining step adds `1`. The default mode reopens the result within one
+process. The quickstart also shows `create DIRECTORY` and `reopen DIRECTORY`
+invocations that retain the completed result across process exit. Both paths
+await App cleanup. For the smallest state-only workflow, see
+[pure_state](examples/pure_state.rs).
 
 `WorkflowRun::resolve` is the single fenced control path for caller input,
 exact Agent notifications, accepting/failing an unknown effect, and a retry

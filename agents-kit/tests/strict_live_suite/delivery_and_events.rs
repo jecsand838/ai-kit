@@ -330,7 +330,7 @@ async fn codex_process_delivery_is_ordered_durable_exclusive_and_drains() {
 
         let token = StrictFixture::unique("CODEX_PROCESS");
         let request = PromptRequest::new(format!(
-            "Use the native shell command-execution capability exactly once. Run one host-appropriate command that writes the exact token {token} to standard output, waits at least two seconds, and exits with status 7. Do not call a registered tool. After the command finishes, reply with exactly {token}_DONE and no other text."
+            "Use the native shell command-execution capability exactly once. Run one host-appropriate command that writes the exact token {token} to standard output, waits at least two seconds, and exits with status 7. After the command finishes, reply with exactly {token}_DONE and no other text."
         ))
         .expect("Codex process prompt must be valid")
         .with_model(StrictFixture::model(&agent, StrictBackend::Codex, "TEST_CODEX_MODEL_DEFAULT").await)

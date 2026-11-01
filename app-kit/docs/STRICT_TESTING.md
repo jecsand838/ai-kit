@@ -86,8 +86,8 @@ bash app-kit/scripts/check.sh
 The [App check script](../scripts/check.sh) owns the exact target inventory. It
 checks formatting and all targets, runs the deterministic/public-contract
 tests and doctests with the explicit workload-scope selection below, executes the
-seven short service-free examples, then checks
-clippy, rustdoc and the workspace alias/path restrictions. Keep additions in
+seven short service-free examples and the persistent history example contract,
+then checks clippy, rustdoc and the workspace alias/path restrictions. Keep additions in
 that script so an ordinary App check cannot silently omit new behavior. The
 zero-runtime `compile_contract` target remains compiled by all-target checking
 and Clippy. `prepare_contract` has an explicit four-case inventory and outcome
@@ -99,7 +99,7 @@ live runs retain the exact crash command.
 Fixture validation is reported separately from App behavior: retain the two
 `OwnedChild` cleanup cases, receipt-page lifetime probe and real-Lance
 conflict-controller test while their machinery remains in use. Test-local
-controls do not establish real-Agent behavior; all 18 live cases and the canonical
+controls do not establish real-Agent behavior; all 19 live cases and the canonical
 process-recovery assertions remain required.
 
 The [documentation tests](../tests/docs_examples.rs) check required guide and
@@ -112,6 +112,21 @@ Compile the examples with `cargo check --locked -p app-kit --examples`, and run 
 service-free executables to verify their assertions; `multi_agent` needs the
 configured real services described in its source. The long performance consumer
 has a separate explicit release run below.
+
+The App check builds the actual `history_and_recovery` executable. The
+[history example contract](../tests/history_and_recovery_contract.py) discovers
+its path from Cargo JSON and invokes it in separate processes over test-owned
+Lance directories. It
+checks the unchanged memory mode, persistent create/reopen, repeated exact
+reopen, cleanup after a valid but absent exact-run lookup, refusal to overwrite
+an existing destination, invalid arguments and missing, malformed or oversized
+lookup data. Missing or empty storage must fail without replacement.
+Each invocation is bounded; children are killed and reaped before test-directory
+cleanup on failure or timeout. The build and process-test stages run fresh even
+during receipt continuation because their artifact-discovery file is local to
+that invocation. This proves reopening completed state and lineage after normal
+process exit; the required process-loss cases above retain responsibility for
+unfinished-work recovery.
 
 ## Select routine, diagnostic and maximum-capacity evidence
 
@@ -413,7 +428,7 @@ bash app-kit/scripts/verify_strict_live.sh
 The verifier loads the ignored environment, runs the precheck, then runs the
 whole App check script. That invocation executes all four `prepare_contract`
 cases, including the canonical four-boundary LanceDB process-loss case exactly
-once, before the verifier executes all 18 `workflow_live` cases serially. A
+once, before the verifier executes all 19 `workflow_live` cases serially. A
 missing or unhealthy prerequisite fails. Do not convert that failure into a skip
 or replace the backend with a recording or scripted server.
 
@@ -441,6 +456,32 @@ reaping bound; the synchronous Drop fallback retains its two-second bound.
 If the fallback cannot obtain a reap receipt because of an operating-system
 error or expiry, it reports that uncertainty and retains the owned paths. That
 failing fallback is not a guaranteed join or successful cleanup.
+
+The cancellation caller re-observes the run within one 120-second terminal
+budget and applies `Resolution::Accept` with empty values to the exact observed
+`Unknown` sequence and generation. A conflict requires a fresh snapshot; an
+attempted decision is not evidence of settlement. The late-Unknown regression
+holds a real pending question's forwarded abort until the existing abort grace
+expires. It proves that the cancellation receipt has no `Unknown`, a later
+checkpoint does, and the caller can reach `Cancelled` from its original receipt
+with unchanged state, one prompt and no submitted question answer. This is real
+integration with controlled timing. It adds no prompt retry or automatic
+uncertainty resolution to App.
+
+The two-Agent isolation cases read each native tool receipt before question
+resolution and again before terminal assertions. Their diagnostics compare
+bounded normalized Agent markers with App state and the expected markers,
+reporting only shape, length, UUID validity, equality and counts. Uncaptured
+values leave exact lower/App equality unproven. Receipt reads are bounded and
+never dump native sessions or response contents. Exact marker fidelity,
+unchanged native receipts and the original counts and terminal assertions remain
+required. Both configured marker schemas require 36-character lowercase,
+hyphenated UUIDs through length and pattern constraints, without expected marker
+values. A preflight checks canonical and malformed controls against both schemas
+in the actual workflow definition later supplied to App; it does not observe
+native wire delivery. The prompt, model, requested structured retry count of zero
+and exact copy assertions are unchanged. Schema conformance alone does not prove exact
+marker copying or identify the cause of a malformed response.
 
 The native service-interruption case preserves the exact Unknown target and
 caller Fail outcome. Its original 30-second Drain must either succeed after a

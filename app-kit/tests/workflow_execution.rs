@@ -100,8 +100,17 @@ struct SettlementRollbackFault {
 }
 
 #[derive(Clone, Copy)]
-enum NotificationCorruption {
+enum NotificationReadFault {
     None,
+    // Every synthetic malformed projection belongs to its observing task.
+    Corrupt {
+        observer: Option<tokio::task::Id>,
+        corruption: NotificationCorruption,
+    },
+}
+
+#[derive(Clone, Copy)]
+enum NotificationCorruption {
     DuplicateTarget,
     RemoveApplied,
     ChangeAppliedDecision,
@@ -125,12 +134,8 @@ enum NotificationCorruption {
         path: &'static str,
     },
     TupleTimestampOverflow,
-    OrphanTarget {
-        observer: Option<tokio::task::Id>,
-    },
-    ProspectiveBytes {
-        observer: Option<tokio::task::Id>,
-    },
+    OrphanTarget,
+    ProspectiveBytes,
 }
 
 #[derive(Clone, Copy)]
@@ -646,7 +651,7 @@ struct StorageFaults {
     preparation_entered: Notify,
     agent_intents: AtomicUsize,
     agent_intents_observed: Notify,
-    notification_corruption: Mutex<NotificationCorruption>,
+    notification_read: Mutex<NotificationReadFault>,
     settlement_rollback_fault: Mutex<Option<SettlementRollbackFault>>,
     app_load_panics: AtomicUsize,
     app_load_panic_count: AtomicUsize,
@@ -1204,7 +1209,7 @@ impl StorageFaults {
             agent_intents_observed: Notify::new(),
             app_load_panics: AtomicUsize::new(0),
             app_load_panic_count: AtomicUsize::new(0),
-            notification_corruption: Mutex::new(NotificationCorruption::None),
+            notification_read: Mutex::new(NotificationReadFault::None),
             settlement_rollback_fault: Mutex::new(None),
             admission_panics: AtomicBool::new(false),
             admission_armed: AtomicBool::new(false),
@@ -2342,8 +2347,8 @@ impl StreamFailureState {
         let (faults, store) = StorageFaults::open().await?;
         let native = store.inner.clone();
         let (state, agent) = Self::open()?;
-        let orphan = matches!(corruption, NotificationCorruption::OrphanTarget { .. });
-        let prospective = matches!(corruption, NotificationCorruption::ProspectiveBytes { .. });
+        let orphan = matches!(corruption, NotificationCorruption::OrphanTarget);
+        let prospective = matches!(corruption, NotificationCorruption::ProspectiveBytes);
         let positional = matches!(
             corruption,
             NotificationCorruption::TupleObject { .. }
@@ -2374,6 +2379,7 @@ impl StreamFailureState {
             )),
         )
         .await??;
+        let mut notification_read_probe = None;
         let checked =
         std::panic::AssertUnwindSafe(tokio::time::timeout(Duration::from_secs(if prospective { 20 } else { 10 }), async {
             let workspace = app
@@ -2474,9 +2480,55 @@ impl StreamFailureState {
                     waiting.checkpoint.checked_sub(1).expect("the original Applied predecessor"),
                 ))?).await?.expect("actual waiting predecessor"))
             } else { None };
-            *faults.notification_corruption.lock().unwrap() = corruption;
+            *faults.notification_read.lock().unwrap() = NotificationReadFault::Corrupt {
+                observer: tokio::task::try_id(),
+                corruption,
+            };
+            if matches!(corruption, NotificationCorruption::DuplicateTarget) {
+                let checkpoint = native.load(StateKey::new("app-kit", format!(
+                    "history/{}/{}/{}/{}/checkpoint/{:020}",
+                    workspace.id(), workflow.id(), run.id(), waiting.occurrence, waiting.checkpoint,
+                ))?).await?.expect("original waiting checkpoint for observer isolation");
+                let scope = checkpoint.record.key.key().split_once("/checkpoint/").unwrap().0;
+                let mut originals = vec![checkpoint.clone()];
+                for (index, sequence) in checkpoint.record.value["checkpoint"]["settlements"]["pages"]
+                    .as_array().unwrap().iter().enumerate()
+                {
+                    originals.push(native.load(StateKey::new("app-kit", format!(
+                        "{scope}/ledger/{index:02}/{:020}", sequence.as_u64().unwrap(),
+                    ))?).await?.expect("original notification leaf for observer isolation"));
+                }
+                let keys = originals.iter().map(|row| row.record.key.clone()).collect::<Vec<_>>();
+                let unselected = FaultStateStore {
+                    inner: native.clone(),
+                    faults: Arc::clone(&faults),
+                };
+                notification_read_probe = Some(tokio::spawn(async move {
+                    let mut observed = Vec::new();
+                    for key in &keys {
+                        observed.push(unselected.load(key.clone()).await?
+                            .expect("separate direct reader retains the original native row"));
+                    }
+                    let mut transaction = unselected.begin_transaction().await?;
+                    for key in &keys {
+                        observed.push(transaction.load(key.clone()).await?
+                            .expect("separate transactional reader retains the original native row"));
+                    }
+                    transaction.rollback().await?;
+                    Ok::<_, StateStoreError>(observed)
+                }));
+                let joined = tokio::time::timeout(
+                    Duration::from_secs(2),
+                    notification_read_probe.as_mut().unwrap(),
+                ).await.expect("separate notification reader is bounded");
+                notification_read_probe.take();
+                let observed = joined.expect("separate notification reader does not panic")?;
+                let expected = originals.iter().chain(&originals).cloned().collect::<Vec<_>>();
+                assert_eq!(observed, expected,
+                    "observer-only corruption leaves separate direct and transactional readers unchanged");
+            }
             let outcome = run.snapshot().await;
-            *faults.notification_corruption.lock().unwrap() = NotificationCorruption::None;
+            *faults.notification_read.lock().unwrap() = NotificationReadFault::None;
             for original in original.into_iter().chain(original_predecessor) {
                 let unchanged = native.load(original.record.key.clone()).await?
                     .expect("original native row remains retained");
@@ -2547,7 +2599,13 @@ impl StreamFailureState {
         }))
         .catch_unwind()
         .await;
-        *faults.notification_corruption.lock().unwrap() = NotificationCorruption::None;
+        *faults.notification_read.lock().unwrap() = NotificationReadFault::None;
+        let read_probe_cleanup = if let Some(probe) = notification_read_probe {
+            probe.abort();
+            Some(probe.await)
+        } else {
+            None
+        };
         *notifications.resolution_fault.lock().unwrap() = NotificationResolutionFault::Pass;
         notifications.resolution_release.notify_one();
         notifications.cancelled.store(true, Ordering::SeqCst);
@@ -2564,6 +2622,17 @@ impl StreamFailureState {
         match checked {
             Ok(result) => result.expect("corruption observation is bounded")?,
             Err(panic) => std::panic::resume_unwind(panic),
+        }
+        if let Some(cleanup) = read_probe_cleanup {
+            match cleanup {
+                Ok(result) => {
+                    result?;
+                }
+                Err(error) => assert!(
+                    error.is_cancelled(),
+                    "separate notification reader cleanup failed: {error}"
+                ),
+            }
         }
         cleanup
             .expect("corruption cleanup does not panic")
@@ -5503,8 +5572,7 @@ impl StorageFaults {
         ];
         if matches!(
             corruption,
-            NotificationCorruption::TupleText { .. }
-                | NotificationCorruption::ProspectiveBytes { .. }
+            NotificationCorruption::TupleText { .. } | NotificationCorruption::ProspectiveBytes
         ) && let Some(sequence) = sequence.checked_sub(1)
         {
             selected.push(
@@ -5570,15 +5638,17 @@ impl StorageFaults {
         &self,
         key: &StateKey,
     ) -> Result<Option<(NotificationCorruption, StateKey)>, StateStoreError> {
-        let corruption = *self
-            .notification_corruption
+        let NotificationReadFault::Corrupt {
+            observer,
+            corruption,
+        } = *self
+            .notification_read
             .lock()
-            .expect("test notification corruption lock");
-        if !matches!(corruption, NotificationCorruption::None)
-            && !matches!(corruption,
-                NotificationCorruption::OrphanTarget { observer }
-                | NotificationCorruption::ProspectiveBytes { observer }
-                if tokio::task::try_id() != observer)
+            .expect("test notification read fault lock")
+        else {
+            return Ok(None);
+        };
+        if tokio::task::try_id() == observer
             && key.key().starts_with("history/")
             && let Some((scope, _)) = key.key().strip_prefix("history/").and_then(|key| {
                 key.split_once("/checkpoint/")
@@ -5609,7 +5679,7 @@ impl StorageFaults {
             current == requested
                 || matches!(
                     corruption,
-                    NotificationCorruption::ProspectiveBytes { .. }
+                    NotificationCorruption::ProspectiveBytes
                         | NotificationCorruption::TupleText { .. }
                 ) && current.and_then(|value| value.checked_sub(1)) == requested
         });
@@ -5618,8 +5688,7 @@ impl StorageFaults {
                 .get_mut("checkpoint")
                 .expect("run checkpoint");
             match corruption {
-                NotificationCorruption::None => {}
-                NotificationCorruption::ProspectiveBytes { .. } => {
+                NotificationCorruption::ProspectiveBytes => {
                     let settlements = checkpoint["settlements"]
                         .as_array_mut()
                         .expect("real original target ledger");
@@ -5711,7 +5780,7 @@ impl StorageFaults {
                     assert_ne!(notifications[0][0], notifications[1][0]);
                     notifications[1][3][2] = notifications[0][3][2].clone();
                 }
-                NotificationCorruption::OrphanTarget { .. } => {
+                NotificationCorruption::OrphanTarget => {
                     let generation = checkpoint["sequence"]
                         .as_u64()
                         .expect("actual intended checkpoint");
@@ -5995,7 +6064,7 @@ impl StateStoreBackend for FaultStateStore {
                     && matches!(
                         corruption,
                         NotificationCorruption::RemoveApplied
-                            | NotificationCorruption::OrphanTarget { .. }
+                            | NotificationCorruption::OrphanTarget
                     )
                 {
                     let count = snapshot.record.value["checkpoint"]["settlements"]["count"]
@@ -6418,7 +6487,7 @@ impl StateTransactionBackend for FaultStateTransaction {
                     && matches!(
                         corruption,
                         NotificationCorruption::RemoveApplied
-                            | NotificationCorruption::OrphanTarget { .. }
+                            | NotificationCorruption::OrphanTarget
                     )
                 {
                     let count = snapshot.record.value["checkpoint"]["settlements"]["count"]
@@ -12604,19 +12673,14 @@ async fn notification_pending_capacity_at_limit() -> Result<(), Box<dyn Error + 
 #[tokio::test]
 async fn newly_reserved_notification_requires_its_matching_current_control()
 -> Result<(), Box<dyn Error + Send + Sync>> {
-    StreamFailureState::assert_notification_corruption(NotificationCorruption::OrphanTarget {
-        observer: tokio::task::try_id(),
-    })
-    .await
+    StreamFailureState::assert_notification_corruption(NotificationCorruption::OrphanTarget).await
 }
 
 #[tokio::test]
 async fn recovery_rejects_a_legal_sized_checkpoint_without_unknown_capacity()
 -> Result<(), Box<dyn Error + Send + Sync>> {
-    StreamFailureState::assert_notification_corruption(NotificationCorruption::ProspectiveBytes {
-        observer: tokio::task::try_id(),
-    })
-    .await
+    StreamFailureState::assert_notification_corruption(NotificationCorruption::ProspectiveBytes)
+        .await
 }
 
 #[tokio::test]

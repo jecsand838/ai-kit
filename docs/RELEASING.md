@@ -7,11 +7,14 @@ preparation PR into `main`, then run **Manual release** in
 The workflow is available in the normal Actions chooser after it reaches the
 default branch.
 
-The current preparation targets **0.0.2** across all five crates. Preparing or
-merging this change does not publish packages or establish release qualification.
-After merge, complete normal qualification for the exact selected `main`
-revision before manually dispatching version **0.0.2** with
-**initial_release_override disabled** and the required qualification evidence.
+All five crates are published at **0.0.2**; the
+[v0.0.2 release](https://github.com/jecsand838/ai-kit/releases/tag/v0.0.2) records
+its source revision and qualification declaration. The procedure below applies
+to subsequent releases. Preparing or merging a release change does not publish
+packages or establish release qualification. After merge, complete normal
+qualification for the exact selected `main` revision before manually dispatching
+the prepared version with **initial_release_override disabled** and the required
+qualification evidence.
 
 ## Historical one-time initial 0.0.1 release
 
@@ -72,9 +75,9 @@ commit on the maintainer's behalf.
 For a normal release, complete the current
 [qualification contract](release-qualification.md), retain the reviewed receipts
 for the exact main revision and record a stable HTTPS evidence URL. After the
-`0.0.2` preparation PR is merged, select `main`, enter **0.0.2** without a `v`,
-leave **initial_release_override** disabled, and supply that exact 40-character
-SHA as `qualification_revision` plus its
+release preparation PR is merged, select `main`, enter the version from all five
+committed manifests without a `v`, leave **initial_release_override** disabled,
+and supply that exact 40-character SHA as `qualification_revision` plus its
 `qualification_url`.
 
 Those fields are a **maintainer declaration**. The workflow checks the selected
@@ -125,7 +128,7 @@ outcomes and uploaded archives.
 
 crates.io uploads automatically queue **docs.rs** builds from each published
 package. No generated HTML is uploaded to docs.rs by this workflow. Versioned
-URLs for the prepared release will have the form
+URLs use the form `https://docs.rs/CRATE/VERSION`, such as
 `https://docs.rs/agents-kit/0.0.2`. Confirm each docs.rs build after publication;
 a successful upload or GitHub release does not prove an
 asynchronous documentation build succeeded. This workflow does not deploy the

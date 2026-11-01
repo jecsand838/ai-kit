@@ -476,11 +476,14 @@ impl PromptScenario {
                 "models":{(model.clone()):{"name":model}}
             }}
         });
+        let configured_model = model;
         let mut process = StrictOpenCodeProcess::configured("strict-cloud", config.to_string());
         let mut owned_agent = None;
         let mut owned_workspace = None;
         let mut owned_conversation = None;
-        let observed = NativeCleanup::observe(deadline, async {
+        let mut primary_failure = None;
+        let mut output_capture = None;
+        let mut observed = NativeCleanup::observe(deadline, async {
             process.launch().await;
             let (agent, workspace, conversation) = fixture
                 .hierarchy_before(
@@ -532,9 +535,72 @@ impl PromptScenario {
                         text.push_str(&delta);
                     }
                     PromptEvent::Completed(response) => {
-                        assert!(!text.is_empty(), "real native streaming text is required");
-                        assert_eq!(response.output(), token);
-                        assert_eq!(text, response.output());
+                        if let Err(failure) =
+                            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                assert!(!text.is_empty(), "real native streaming text is required");
+                                assert_eq!(response.output(), token);
+                                assert_eq!(text, response.output());
+                            }))
+                        {
+                            // Retain the original assertion before any readback
+                            // await can expire with the outer observation.
+                            primary_failure = Some(failure);
+                            output_capture = Some(serde_json::json!({
+                                "version":1,
+                                "case":"strict_live_suite::prompt_and_io::opencode_cloud_generation_and_streaming_are_live",
+                                "expected_bytes":token.len(),
+                                "portable_bytes":response.output().len(),
+                                "incremental_bytes":text.len(),
+                                "portable_equals_expected":response.output() == token,
+                                "incremental_equals_portable":text == response.output(),
+                                "incremental_equals_expected":text == token,
+                                "native":{"capture":"incomplete","reason":"interrupted"},
+                            }));
+                            let capture_deadline = deadline
+                                .min(tokio::time::Instant::now() + Duration::from_secs(10));
+                            let diagnostic = NativeCleanup::observe(capture_deadline, async {
+                                let native =
+                                    NativeQuestionReadback::new(&process.endpoint(), capture_deadline)
+                                        .await;
+                                native
+                                    .prompt_output(
+                                        &format!(
+                                            "Do not call tools. Return only this exact token: {token}"
+                                        ),
+                                        "openai",
+                                        &configured_model,
+                                        &token,
+                                        response.output(),
+                                    )
+                                    .await
+                            })
+                            .await;
+                            let context = match diagnostic {
+                                Ok(Ok(Ok(mut context))) => {
+                                    let fields = context
+                                        .as_object_mut()
+                                        .expect("native output evidence is an object");
+                                    for key in ["session", "user", "assistant"] {
+                                        fields.remove(key);
+                                    }
+                                    context
+                                }
+                                Ok(Ok(Err(reason))) => {
+                                    serde_json::json!({"capture":"incomplete","reason":reason})
+                                }
+                                Ok(Err(_)) => {
+                                    serde_json::json!({"capture":"incomplete","reason":"deadline"})
+                                }
+                                Err(_) => {
+                                    serde_json::json!({"capture":"incomplete","reason":"readback_panic"})
+                                }
+                            };
+                            output_capture
+                                .as_mut()
+                                .expect("the original mismatch evidence remains owned")["native"] =
+                                context;
+                            break;
+                        }
                         assert!(stream.recv().await.is_none());
                         break;
                     }
@@ -542,6 +608,24 @@ impl PromptScenario {
             }
         })
         .await;
+        if let Some(context) = output_capture {
+            let mut context = context.to_string();
+            if context.len() > 4 * 1024 {
+                context = serde_json::json!({
+                    "version":1,
+                    "case":"strict_live_suite::prompt_and_io::opencode_cloud_generation_and_streaming_are_live",
+                    "capture":"incomplete","reason":"diagnostic_bound",
+                })
+                .to_string();
+            }
+            let _ = writeln!(
+                std::io::stderr().lock(),
+                "\nAGENTS_KIT_CLOUD_OUTPUT_DIAGNOSTIC={context}"
+            );
+        }
+        if let Some(failure) = primary_failure {
+            observed = Err(failure);
+        }
         let mut cleanup = NativeCleanup::new(Duration::from_secs(90));
         if let Some(conversation) = owned_conversation {
             cleanup.settle(conversation.close()).await;

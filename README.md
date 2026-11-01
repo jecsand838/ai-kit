@@ -4,8 +4,14 @@
   <img src="docs/assets/ai-kit-logo.png" alt="ai-kit logo" width="220">
 </p>
 
-Rust libraries for model providers, data and state storage, executable tools,
-agent runtimes, and durable workflows. Install the crates you need individually;
+Modular Rust libraries for model providers, tools, storage, agents, and
+recoverable workflows.
+
+Combining these pieces means deciding who owns each resource, how work shuts
+down, and what state remains after an interruption. ai-kit provides those
+integration and lifecycle boundaries while keeping configuration and composition
+in your application. Use a provider or tool crate on its own, or compose agents
+and workflows over storage you supply. Install only the crates you need;
 `ai-kit` is the workspace that develops them together.
 
 | Crate and usage guide | Use it for | Package | API docs |
@@ -16,38 +22,69 @@ agent runtimes, and durable workflows. Install the crates you need individually;
 | [agents-kit](agents-kit/README.md) | Codex, OpenCode, and provider-backed Custom agents with workspace and conversation lifecycles | [crates.io](https://crates.io/crates/agents-kit) | [rustdoc](https://docs.rs/agents-kit/latest/agents_kit/) |
 | [app-kit](app-kit/README.md) | Durable workflows, checkpoints, and recovery over caller-supplied storage and agents | [crates.io](https://crates.io/crates/app-kit) | [rustdoc](https://docs.rs/app-kit/latest/app_kit/) |
 
-## Get started
+## Try a workflow locally
 
-The crates require Rust **1.99 or newer**. Repository development uses the pinned
-[rustup toolchain](rust-toolchain.toml).
+The [history and recovery example](app-kit/examples/history_and_recovery.rs)
+runs without an LLM, external service, or credentials. It restores a checkpoint
+into a new run and verifies the saved result and its source lineage.
 
-From your own Cargo project, add the crate you need. For example, to use the
-published `0.0.1` tools package:
-
-```bash
-cargo add tools-kit@=0.0.1
-```
-
-Start with the [Local tool example](https://docs.rs/tools-kit/latest/tools_kit/),
-which registers and invokes a tool without provider credentials or a service.
-It imports the backend traits for their methods and awaits toolset shutdown.
-The example also uses Tokio and serde_json; add those dependencies when copying
-it into your application.
-
-For a complete workflow example, follow the
-[App quickstart](app-kit/docs/QUICKSTART.md). From a repository checkout, run:
+Before running it, install Git, Rust through rustup, and the native build tools:
+a C/C++ compiler, libclang, CMake, Protocol Buffers, pkg-config, and TLS
+development libraries. The [build prerequisites](CONTRIBUTING.md#get-started)
+include Ubuntu installation commands and contributor tooling. The repository
+selects Rust **1.99.0** through its [pinned toolchain](rust-toolchain.toml).
+Storage and its consumers compile native dependencies even with
+`--no-default-features`; allow time and disk space for the first build.
 
 ```bash
+git clone https://github.com/jecsand838/ai-kit.git
+cd ai-kit
 cargo run --locked -p app-kit --example history_and_recovery
 ```
 
-This local example runs a workflow, restores a result, and reopens it in a new
-App generation without an LLM or credentials. It uses an in-memory store;
-persistence across process exit requires a persistent store.
+After compilation, the example prints the following (`<run-id>` is generated):
 
-Storage and its consumers compile native dependencies, including when using
-`--no-default-features`. Follow the [build prerequisites](CONTRIBUTING.md#get-started)
-before building them.
+```text
+Source count: 2; copied count: 40; completed fork count: 41
+Reopened fork <run-id> at count 41; source lineage remains readable
+```
+
+Two increments produce `2`. Restoring the checkpoint after the first increment
+with an override of `40` and running the remaining increment produces `41`.
+The example deletes the source run, then reopens the fork in a new App generation.
+This default mode uses memory within one process.
+
+To keep the result across process exit, run these two commands from the same
+checkout:
+
+```bash
+demo_root="$(mktemp -d)"
+cargo run --locked -p app-kit --example history_and_recovery -- create "$demo_root/history"
+cargo run --locked -p app-kit --example history_and_recovery -- reopen "$demo_root/history"
+```
+
+The first process saves the completed fork in embedded Lance storage and exits
+after cleanup. The second reopens that same result at `41` without executing
+the workflow again. Follow the [App quickstart](app-kit/docs/QUICKSTART.md) for
+the output, stored identities, repeat runs, and cleanup.
+
+Reopening a completed result is distinct from deciding whether interrupted
+external work succeeded. An uncertain effect needs an explicit caller decision;
+see [persistence and recovery](app-kit/docs/PERSISTENCE_AND_RECOVERY.md#effect-uncertainty).
+
+## Add an individual crate
+
+The published crates require Rust **1.99 or newer**. From your own Cargo project,
+add the crate you need, for example:
+
+```bash
+cargo add tools-kit@=0.0.2
+```
+
+The [Local tool example](https://docs.rs/tools-kit/0.0.2/tools_kit/) registers and
+invokes a tool without provider credentials or a service. It imports the backend
+traits for their methods and awaits toolset shutdown. The example also uses
+Tokio and serde_json; add those dependencies when copying it into your application.
 
 ## Choose features and backends
 
@@ -81,10 +118,13 @@ when reproducibility matters, and review the
 Repository `main` may contain changes that are not yet published; the package
 links above identify available versions and their released API documentation.
 
-The current release preparation targets `0.0.2`; the installation example above
-retains the published `0.0.1` pin. Maintainers publish selected revisions of
-`main` through the manual [release process](docs/RELEASING.md) after normal
-qualification. Preparation does not publish packages or establish qualification.
+All five crates are published at `0.0.2`; see the
+[v0.0.2 release](https://github.com/jecsand838/ai-kit/releases/tag/v0.0.2) for its
+source revision and recorded qualification scope. The installation example
+above pins that release. The repository examples follow `main`, including
+changes made after publication. Maintainers publish selected revisions through
+the manual [release process](docs/RELEASING.md) after normal qualification;
+preparing a release does not publish packages or establish qualification.
 
 ## Contributing and testing
 

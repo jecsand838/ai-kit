@@ -42,8 +42,9 @@ structure, binary/library boundaries, or test placement.
    handle's own owning trait impl. At the root-approved Tool seam, the public
    RPITIT trait is the contract and one private erased adapter serves only the
    enum's `Extension` arm. Provider, Storage, and Agent public RPITIT traits
-   are direct static contracts and their supplied dispatchers remain closed
-   over built-ins. App's five workflow traits retain concrete runtime values;
+   are direct static contracts and their supplied resource and borrowed
+   Session-half dispatchers remain closed over built-ins. App's five workflow
+   traits retain concrete runtime values;
    `ChildExecutor` alone uses its exact associated-future contract, and only
    field/tag serialization codecs may enter its erased registry. Neither
    exception widens lower-crate contracts. Only exported dispatchers need an

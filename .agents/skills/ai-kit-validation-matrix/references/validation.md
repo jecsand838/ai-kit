@@ -30,7 +30,7 @@ bash scripts/check_ci.sh
 The focused mock entrypoint is `bash scripts/check_mock_contracts.sh`;
 `--crate NAME` accepts only one of the five workspace crate names and reports
 scoped evidence. Arbitrary filters and unknown arguments are rejected. The
-seven behavioral targets directly implement the 16 public traits with test-local
+seven behavioral targets directly implement the 18 public traits with test-local
 structs and exhaustive enums and exercise the real Custom Agent/App. They never
 construct supplied lower backends, use extension ingress, open sockets, start
 backend processes, or require credentials. Existing extension, protocol,

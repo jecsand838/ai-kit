@@ -1,5 +1,9 @@
 # Ollama Provider Notes
 
+Session guidance in this note is the approved target under implementation.
+It governs the tests-first refactor without claiming a completed implementation
+or new native qualification. Other provider behavior retains its existing scope.
+
 Local Ollama construction uses typed unauthenticated config rather than an
 empty API key. Model selection uses the exact installed tag through
 `Provider::model(ModelId)`; no `:latest` suffix or alias is added.
@@ -7,7 +11,7 @@ empty API key. Model selection uses the exact installed tag through
 ## Model Operations
 
 The selected Ollama Model owns generation, streaming, supported embeddings,
-and function calling. Unsupported model operations return
+function calling and Conversation Session opening. Unsupported model operations return
 `KitError` classified as `error::ErrorKind::Unsupported`.
 
 Ollama chat function calling is client-executed. Calls normalize to
@@ -29,6 +33,21 @@ When Ollama supplies a call `id`, generation and streaming retain it in
 optional correlation fields are defined by the
 [Ollama 0.40.6 protocol](https://github.com/ollama/ollama/blob/v0.40.6/api/types.go#L180-L205).
 Calls without an id remain supported, and their replay omits both id fields.
+
+## Conversation Sessions
+
+The concrete Ollama Session composes the selected Model's existing chat and
+generation paths. It retains the full authoritative assistant message, including
+tool calls when text is empty, before accepting continuation results. Render or
+reject configured generation options and tools through the existing owner.
+
+Use session-scoped tokens for tool obligations when native IDs are absent;
+never manufacture a native call ID or reset correlation across responses or
+sessions. Validate complete result batches before mutation, retain accepted
+results after cancellation and start one continuation for a complete required
+set. Realtime is unsupported. Close releases local ownership without setting a
+new residency duration or unloading a shared model. Existing explicit residency
+behavior remains unchanged.
 
 ## Hosted Tools
 

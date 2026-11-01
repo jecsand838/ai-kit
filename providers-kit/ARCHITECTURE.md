@@ -7,10 +7,15 @@ model as the owner of model-bound operations:
 Provider -> Model -> Session
 ```
 
-It intentionally does not contain a reusable agent loop. Transcript
-advancement, tool execution, approvals, shell behavior, generation-retry policy,
-durable recovery, and final-response policy belong to the caller that owns those
-concerns. Provider owns bounded transport retries for operations explicitly
+The Session portions of this document specify the approved target under
+implementation. They establish ownership before the tests-first migration and
+do not assert a completed implementation or live qualification.
+
+The crate intentionally does not contain a reusable agent loop. Tool execution,
+approvals, shell behavior, generation-retry policy, durable recovery, and
+final-response policy belong to the caller. A Conversation Session retains and
+advances exact protocol history in response to caller commands; callers may
+also continue using stateless messages and continuation directly. Provider owns bounded transport retries for operations explicitly
 selected as replay-safe, through its shared client and original request deadline.
 OpenAI batch status reads opt in; the lookup used by batch results, batch
 mutations, and generation remain fail-fast.
@@ -22,12 +27,15 @@ mutations, and generation remain fail-fast.
 | `ProviderBackend` | `Provider` | `ProviderInner` |
 | `ModelBackend` | `Model` | `ModelInner` |
 | `SessionBackend` | `Session` | `SessionInner` |
+| `session::SessionCommands` | Borrowed command half | Closed command-half dispatcher |
+| `session::SessionEvents` | Borrowed event half | Closed event-half dispatcher |
 
-Provider and Model dispatchers contain concrete OpenAI, Anthropic, Gemini, and
-Ollama variants. The Session dispatcher contains only OpenAI; sessionless
-concrete Models use `Infallible` and retain the default pre-I/O `Unsupported`
-path. Concrete owners, dispatchers, and opaque handles implement the same public
-trait.
+Provider, Model and Session dispatchers contain concrete OpenAI, Anthropic,
+Gemini and Ollama variants. Every supplied provider owns its Conversation
+implementation; OpenAI and Gemini additionally own independent native Realtime
+implementations. Concrete owners, dispatchers and opaque handles implement the
+same owning public trait. The borrowed halves obey the same closed dispatch and
+opacity rules. A genuinely sessionless caller Model may still use `Infallible`.
 
 `ProviderInner` returns its associated `ModelInner`, which returns its associated
 `SessionInner`. The public parent assembles each opaque child once from its
@@ -64,10 +72,11 @@ verification retain separate proof ownership.
 - batch submission;
 - session opening.
 
-`Session` owns only provider-native interactive protocol operations. It is
-unique and mutable; ordinary multi-turn generation reuses returned messages
-and their opaque continuation. `Provider` and `Model` are cloneable handles to
-shared provider runtime.
+`Session` owns conversational continuity for one exact selected Model. Explicit
+Conversation and Realtime profiles select distinct behavior without fallback.
+The unique, non-Clone owner lends concrete command/event halves; a pending
+receive does not hold the command half hostage, and only the owner can consume
+itself for close. `Provider` and `Model` are cloneable handles to shared runtime.
 
 These lifecycle guarantees belong to the supplied handles. Direct caller
 implementations own their trait-method lifecycle and are not wrapped by this
@@ -76,9 +85,12 @@ runtime.
 Provider shutdown seals all existing Model handles. Admitted work drains
 before the one backend shutdown result is published to current and late
 waiters. No Model-specific cleanup path competes with Provider shutdown.
-Session work is admitted through the same provider runtime, while consuming,
-cleanup-capable `Session::close` remains available after the admission seal so
-a unique session can always release its own transport state.
+Session resource registration is separate from active network-work admission.
+Idle Sessions hold no generation admission. The existing atomic runtime seal
+rejects new openings and generation work, wakes registered Sessions, and settles
+accepted commands that never reached network admission. Observation and targeted
+cancellation of admitted work remain available, as does consuming close. A
+previously sealed parent alone does not make close fail.
 
 One `ProviderRuntime` owns the backend, lifecycle mutex, notifications, and
 authoritative phase enum: `Open` owns the admission count, `Closing` owns that
@@ -118,15 +130,62 @@ OpenAI stateless generation uses Responses. Its selected Model rejects the
 withdrawn exact audio-model selections before transport; Responses also rejects
 inline audio input. Audio-model batch submission rejects before uploads or
 borrowed-file reads. The private Chat Completions route, stream accumulator and
-continuation payload are removed. Public generation types and the independent
-Realtime Session owner remain unchanged.
+continuation payload are removed. That earlier audio withdrawal did not change
+public generation types or the independent Realtime path; the approved Session
+refactor now replaces Session ownership while preserving its supported audio
+behavior.
 
-Interactive OpenAI sessions model manual-audio capture and submitted
-turns explicitly, bound native frames and outbound payloads, and consume
-themselves during close after attempting socket cleanup.
-Gemini's supplied Session implementation is withdrawn; its concrete Model uses
-the existing `Infallible` session child and default pre-I/O `Unsupported` path.
-Stateless Gemini audio rendering remains owned by its generation adapter.
+### Session ownership and progress
+
+Each concrete provider Session retains its exact Model and immutable validated
+configuration. Shared managed mechanics call that concrete Model's existing
+generation path and retain authoritative `Message<GenerationContinuation>`
+history unchanged. The history owner keeps accepted input/results independently
+of abortable worker locals. It commits an authoritative assistant before making
+completion or executable tools observable; provisional deltas are observations,
+not a reconstructed assistant. `GenerateResponse<()>` may project completed
+portable output for observers while the original replay authority stays private.
+
+Managed work has one tracked task per active generation and none while idle.
+That task owns request opening, the generation stream and its parser, and a
+generation admission through cleanup. Event-half demand grants bounded read
+credit; retrying a dropped receive does not grant duplicate credit or lose an
+already parsed event. Cancellation, sealing and the overall operation deadline
+remain actionable while waiting for credit or output capacity. Completion
+updates retained state before event delivery, so a later cancellation cannot
+roll it back.
+
+Native OpenAI Realtime and Gemini Live own their protocol mappings beneath their
+provider subtrees and reuse the bounded authenticated socket infrastructure.
+One tracked native driver may own the socket, partial writes/frames and native
+correlation maps so unsolicited activity and commands progress concurrently.
+The owner retains bounded command/output queues, outstanding tool obligations,
+response outcomes and output segments. No lock spans a network await. Command
+acceptance publishes a correlated receipt without awaiting remote writes, and
+in-flight state exists before any externally visible write.
+
+The existing ProviderRuntime owns bounded session registration and task/join
+tracking, without becoming a provider router or general actor framework. Close
+signals work, performs bounded cleanup and joins it; a cancelled close returns
+join authority to runtime-owned cleanup. Owner drop signals/aborts local work
+without detaching its join handle. Provider shutdown settles and joins registered
+session work before backend cleanup, without waiting for an idle conversation,
+application tool execution, or normal event draining. Only observed evidence
+justifies remote-stop acknowledgement; local release is a distinct guarantee.
+
+Normal queues and aggregate retained history/replay have byte and item bounds.
+Reserved bounded control and terminal capacity keeps cancellation and close
+actionable under backpressure. Limit failure terminates explicitly; no history
+truncation, tool eviction or unbounded priority channel is used. Native response
+completion does not imply capture completion, final transcription, playback
+completion or resolved tool work. Late events preserve known correlation;
+unavailable native attribution remains explicitly absent.
+
+Cancellation, unsubmitted capture discard and playback reconciliation are
+separate operations. Stop resolution is independent of reusable, uncertain or
+closed continuity. Uncertain continuity forbids further generation mutations;
+there is no reconnect/replay recovery mechanism. One fatal terminal observation
+identifies unfinished work, and event receive ends only when permanently drained.
 
 ## Function Calling Boundary
 
@@ -149,8 +208,9 @@ validated and rendered by the selected concrete model and never enter
 - `src/provider.rs`: Provider trait, opaque handle, lifecycle, private root
   dispatch.
 - `src/models.rs`: Model trait/handle, validated `ModelId`, and model discovery.
-- `src/session.rs`: Session trait, opaque handle, private session dispatch, and
-  portable interactive configuration and events.
+- `src/session.rs`: Session and borrowed-half traits, opaque handles, thin closed
+  dispatch, and portable validated configuration, commands, tokens and events;
+  no native protocol state machine.
 - `src/generation.rs`: public messages, content, function calls/results,
   requests, responses, continuation, and streams.
 - `src/hosted.rs`: closed portable hosted declarations and normalized output.
@@ -160,6 +220,8 @@ validated and rendered by the selected concrete model and never enter
   retry policy; configuration is the sole folder-based public API exception.
 - `src/core/**`: crate-private shared validation, request views, normalization,
   tool selection, stream framing, and socket behavior used by concrete providers.
+  `core/session` contains only demonstrated shared managed/lifecycle mechanics,
+  never another provider-switching router or generation client.
 - `src/transport/**`: private HTTP clients, authentication, execution, and framing.
 - `src/providers/{openai,anthropic,gemini,ollama}/**`: clients, wire DTOs,
   concrete model/session implementations, rendering, parsing, and native
@@ -182,7 +244,7 @@ provenance, response, error, or routing fields.
 
 There is no LoopDriver, hosted-tools dispatcher, durable factory, production
 conformance owner, capability matrix, model slot set, runtime inventory,
-synthetic conversation session, provider shell runtime, registered Toolset
+fabricated conversation continuity, provider shell runtime, registered Toolset
 runtime, public transport wrapper, implementation identity, erased backend
 adapter, extension variant, normalization constructor, or compatibility facade.
 

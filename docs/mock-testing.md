@@ -155,14 +155,18 @@ backend's wire mapping, actor behavior, persistence, or service compatibility.
 
 ## Trait and method coverage
 
-This matrix names behavior and test owners. Exact signatures remain in the
-owning public API documentation.
+This matrix names required behavior and test owners for the eighteen approved
+public traits. Exact signatures remain in the owning public API documentation.
+The Session rows describe the approved target under implementation; their
+presence is not a claim of current passing coverage.
 
 | Trait | Methods/behavior exercised | Primary evidence |
 | --- | --- | --- |
 | `ProviderBackend` | model selection, discovery pages/info, file upload/list/info/download/delete, batch status/cancel/results/list, health, shutdown | Provider `struct_hierarchy_all_operations_preserve_requests_and_exact_continuations`, enum-family and error-matrix cases |
 | `ModelBackend` | selected ID, generation, streaming, embedding, batch submission, session creation; exact opaque continuation association | same hierarchy tests, mismatched-continuation predelegation rejection, demand/drop/terminal tests |
-| `SessionBackend` | IDs, send, receive, consuming close | Provider complete operation and failure matrices |
+| `SessionBackend` | IDs, concrete borrowed command/event halves, unique consuming close | Provider complete operation and failure matrices; downstream ownership/Send proofs |
+| `SessionCommands` | validated submission, same-poll correlated acceptance, targeted controls, dropped-future ownership | Provider acceptance, tool-result atomicity, cancellation and sealing matrices |
+| `SessionEvents` | pending duplex receive, correlated outcomes and invalidation, late observations, permanent drain | Provider progress, terminal integrity, backpressure and cleanup matrices |
 | `DatabaseBackend` | capabilities, catalog, data, query, index; all retained operation variants, opaque cursors, locators, scores, typed failures | Storage `database_struct_and_every_enum_arm_forward_retained_typed_operations`, script-integrity and atomic-operation distinction cases |
 | `StateStoreBackend` | load/list/begin; namespace isolation, page-local views, stable observations | Storage hierarchy, listing, and snapshot cases |
 | `StateTransactionBackend` | load/put/delete/commit/rollback; revisions/tombstones, atomic visibility, conflict, invalidation, ambiguous finalization | Storage transaction cases, every caller enum arm |
@@ -182,6 +186,13 @@ Debug, equality, serialization, or Unpin bounds. Mismatched enum continuation
 variants fail before delegation. Non-Clone owners and associated children are
 used directly. App's child batches and completions come from real execution;
 returned child execution futures remain concrete and unerased.
+
+Session fixtures must publicly construct all required tokens and outcomes and
+exercise both struct and exhaustive-enum half implementations without erased
+ingress. A pending receive must coexist with command submission and cancellation;
+halves cannot escape their owner or provide another close authority. Add these
+tests and record failures before their production implementation, then require
+passing behavioral evidence rather than treating compilation alone as done.
 
 ## Fixture integrity and consumer coverage
 

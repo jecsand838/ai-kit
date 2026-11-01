@@ -12,9 +12,15 @@ for OpenAI, Anthropic, Gemini, and Ollama:
 Provider -> Model -> Session
 ```
 
-The public behavioral contracts are `ProviderBackend`, `ModelBackend`, and
-`SessionBackend`. The exact caller surface is owned by
+The public backend contracts are `ProviderBackend`, `ModelBackend`, and
+`SessionBackend`. The two subordinate borrowed-half contracts are
+`session::SessionCommands` and `session::SessionEvents`. The exact caller surface is owned by
 [`docs/PORTABLE_API.md`](docs/PORTABLE_API.md).
+
+The Session rules below are the approved target contract for the session
+refactor. Documentation pre-work establishes this authority before tests and
+production migration; it is not a claim that implementation or qualification
+has already completed.
 
 providers-kit does not own an agent loop, executable tool runtime, shell
 runtime, approval system, durable factory, public conformance suite, or
@@ -24,6 +30,10 @@ higher-level orchestration registry.
 
 - `Provider`, `Model`, and `Session` are opaque public handles over private
   exhaustive dispatchers containing only concrete built-in variants.
+- Supplied borrowed command and event halves are also opaque over closed
+  concrete dispatch. They implement their respective public half traits;
+  neither half has normalization ingress, independent close authority, or a
+  lifetime extending beyond its Session owner.
 - Concrete built-ins, each private dispatcher, and each public handle
   implement the corresponding public RPITIT trait directly.
 - `ProviderBackend::Model` is constrained by `ModelBackend`. Each Model owns
@@ -45,9 +55,17 @@ higher-level orchestration registry.
 - `Model` owns one validated exact `ModelId` and all work that requires a
   selected model: generation, streaming, embeddings, batch submission, and
   session opening.
-- `Session` owns only provider-native interactive behavior and is unique and
-  mutable. Ordinary multi-turn generation uses messages plus continuation.
+- `Session` owns conversational continuity for one exact selected Model. Every
+  supplied provider implements the Conversation profile using its existing
+  generation and continuation path. OpenAI Realtime and Gemini Live are
+  separately selected native Realtime implementations. Unsupported combinations
+  fail honestly without profile, protocol, transport, or model fallback.
 - `Provider` and `Model` are cloneable shared handles. `Session` is non-Clone.
+- Session configuration requires explicit profile selection and is fixed for
+  the owner's lifetime. The unique owner lends command/event halves through
+  `split`; commands use one `submit` path, events use `recv`, and only consuming
+  owner `close` tears down the Session. Remove replaced owner methods rather
+  than retaining forwarding compatibility APIs.
 - Provider shutdown seals existing Model handles, drains admitted work, runs
   backend shutdown once, and replays the same data-owned terminal result.
   Cancelling a shutdown waiter must not cancel cleanup. Model has no separate
@@ -83,6 +101,48 @@ higher-level orchestration registry.
   admission on completion, error, or drop.
 - Do not expose raw provider metadata, reasoning payloads, wire DTOs, response
   ids, or continuation envelopes as general public maps.
+
+## Session State And Lifecycle
+
+- Local bounded admission returns its command receipt in the same poll as
+  acceptance. Before acceptance, dropping submission has no accepted operation
+  or remote effect; afterwards the owner settles the command independently of
+  its waiter. Register in-flight state before the first external write.
+- Keep command acceptance, response outcomes, outstanding tool work, input
+  capture, playback, and conversation continuity distinct. Public validated
+  constructors must let external implementations construct required tokens and
+  outcomes. Native response/item identities remain private.
+- Retain authoritative assistant `Message<C>` values unchanged. Accepted caller
+  input/results survive cancellation; provisional deltas do not become invented
+  replay history. Commit completed state before publishing completion or calls.
+- Validate result batches before mutation. Release executable calls only when
+  complete, validated and safely correlatable; managed calls require completed
+  replay state, while native Live calls may require results before completion.
+  Retract known-cancelled undelivered calls and invalidate delivered calls.
+- A pending receive cannot block submission, results or cancellation. Dropping
+  receive preserves parser state and accepted work. `None` means permanently
+  drained, never idle. A fatal termination has one authoritative observation
+  with reason, continuity and unfinished work; malformed terminals never succeed.
+- Cancellation, capture discard and playback reconciliation are separate
+  operations. Report already settled, acknowledged, local-only or unconfirmed
+  stops independently from reusable, uncertain or closed continuity. Uncertain
+  continuity blocks new generation mutations; no automatic reconnect/replay.
+- Bound aggregate history/replay, pending commands/events, tool arguments and
+  obligations as well as frames. Reserve bounded control/terminal capacity so
+  cancellation and close do not require an output consumer. Do not truncate,
+  summarize, silently evict obligations or invent usage counts.
+- Reuse ProviderRuntime admission and sealing. Session resource registration
+  is distinct from generation admission; idle Sessions hold no generation
+  admission. Sealing wakes owners, settles unstarted accepted work, and leaves
+  observation, cancellation and consuming cleanup available for admitted work.
+- Managed Sessions use a tracked task only while a generation is active, with
+  demand-controlled reads. Native Realtime may own one tracked transport driver.
+  Retain join authority through dropped owners/close futures; close and provider
+  shutdown perform bounded teardown without waiting for tool execution or normal
+  event draining. A sealed parent alone is not a close failure.
+- Applications retain tool execution, approvals and agent policy. Session
+  ownership adds no autonomous loop, persistence, history rewind, caching policy,
+  implicit model unload, reconfiguration or resumption feature.
 
 ## Hosted Tools
 

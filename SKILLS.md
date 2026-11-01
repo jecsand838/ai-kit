@@ -15,7 +15,9 @@ Toolset -> ToolHandler
 Agent -> Workspace -> Conversation
 ```
 
-The eleven lower-crate backend traits and App's five `workflow` traits
+The eleven lower-crate backend traits, Provider's two borrowed Session-half
+traits (`session::SessionCommands` and `session::SessionEvents`), and App's five
+`workflow` traits
 (`ActionBackend`, `ConditionBackend`, `StateTyping`, `LifecycleHooks`, and
 `ChildExecutor`) are the only public behavioral contracts. Async methods use
 RPITIT except for App's exact `ChildExecutor` associated-future contract.
@@ -26,8 +28,14 @@ ToolHandler enters through its Toolset associated type, and public
 direct static implementations and associated children;
 skills must not prescribe a public factory/conformance
 framework, LoopDriver, hosted-tools dispatcher, public KnowledgeBase backend,
-storage tool adapter, portable realtime, direct child ingress, or
+storage tool adapter, portable database realtime, direct child ingress, or
 compatibility path.
+
+The approved Session target is explicit Conversation profiles for all four
+providers and independent OpenAI Realtime/Gemini Live profiles. Update active
+guidance before implementing that refactor, preserve opaque static associated
+halves and sole consuming close authority, then record failing tests before
+production edits. The target contract is not evidence of completed support.
 
 ## Workflow Skills
 
@@ -124,7 +132,7 @@ only narrow ergonomic macro exception.
   docs/script alignment.
 
 Primary tests use ordinary crate-local struct and exhaustive enum mocks of all
-16 public behavioral traits and exercise the real Custom Agent/App. Follow
+18 public behavioral traits and exercise the real Custom Agent/App. Follow
 [the mock test contract](docs/mock-testing.md); this lane does not prove supplied
 backend compatibility or native durability. Skills must not recreate a public
 conformance API, production test fixture, callback framework, or shared

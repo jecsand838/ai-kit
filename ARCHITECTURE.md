@@ -33,7 +33,7 @@ cross-crate lifecycle framework.
 
 ## Public Trait and Private Dispatch Boundary
 
-The lower products have eleven public behavioral traits:
+The lower products have eleven public backend traits:
 
 | Crate | Trait | Opaque handle | Parent |
 | --- | --- | --- | --- |
@@ -48,6 +48,11 @@ The lower products have eleven public behavioral traits:
 | agents | `AgentBackend` | `Agent` | direct static implementation or built-in handle |
 | agents | `WorkspaceBackend` | `Workspace` | `AgentBackend::Workspace` |
 | agents | `ConversationBackend` | `Conversation` | `WorkspaceBackend::Conversation` |
+
+Provider's `session` module additionally owns `SessionCommands` and
+`SessionEvents`. `SessionBackend` associates their concrete borrowed half
+types. Supplied halves are opaque, non-Clone handles over private exhaustive
+built-in dispatchers; neither half can outlive or close its unique owner.
 
 App's `workflow` module additionally owns five narrow core seams:
 `ActionBackend`, `ConditionBackend`, `StateTyping`, `LifecycleHooks`, and
@@ -77,8 +82,9 @@ optional caller-owned enums.
 Every supplied lower-crate handle is an opaque struct over one private exhaustive enum,
 and every built-in remains a concrete enum variant. The two Tool dispatchers
 have one private `Extension` arm; only that arm uses the existing object-safe
-erased adapter. The nine Provider, Storage, and Agent dispatchers are closed
-over built-ins and have no `Extension` arm or erased adapter. Their public
+erased adapter. The nine Provider, Storage, and Agent resource dispatchers and
+the two Session-half dispatchers are closed over built-ins and have no
+`Extension` arm or erased adapter. Their public
 traits are direct static contracts for caller implementations.
 
 Built-ins never cross erasure merely for symmetry. One-field generic extension
@@ -137,6 +143,40 @@ fields and receiver-owned behavior.
 `Provider` and `Model` are cloneable shared handles. `Session` is unique and
 mutable. A Model retains its Provider runtime; provider shutdown seals model
 handles and drains admitted work. Model has no separate lifecycle.
+
+The approved Session target contract is under implementation; this architecture
+states requirements, not a completed-support or qualification claim. Sessions
+select an explicit Conversation or Realtime profile for the exact Model.
+OpenAI, Anthropic, Gemini and Ollama each own a Conversation implementation
+composing their existing generation path. OpenAI Realtime and Gemini Live have
+separate native protocol mappings. Unsupported profile/model/configuration
+combinations fail explicitly without fallback or model substitution.
+
+Session owns retained conversational continuity, not tool execution or agent
+policy. Its command half submits typed operations and returns a correlated
+local acceptance receipt. Its event half receives output, validated executable
+tool requests and invalidations, response outcomes, late auxiliary observations
+and permanent termination. A pending receive does not hold a lock across
+submission. Command, response, capture, tool and continuity lifecycles remain
+distinct; idle receive does not terminate the event stream.
+
+Managed sessions preserve exact authoritative `Message<C>` values and accepted
+inputs/results. A completed tool-result set may start one continuation
+generation; it never executes tools or runs an agent loop. Generation tasks are
+tracked only while active, with demand-controlled reads. Native realtime may
+own a bounded tracked lifetime driver for unsolicited protocol activity.
+All queues, retained replay/history and outstanding obligations are bounded.
+Cancellation and close bypass normal-output backpressure through bounded
+control capacity. Partial observations never replace authoritative replay.
+
+Existing provider sealing remains the admission authority. Session registration
+does not retain a generation permit while idle. Sealing settles accepted work
+that has not begun, permits observation/cancellation of admitted work, and
+joins owned cleanup without waiting for application tool execution. Owner or
+close-future drop retains cleanup/join authority; it cannot silently detach
+work. Local teardown, remote cancellation acknowledgement and continuity have
+separate guarantees. The Provider portable contract owns exact signatures,
+outcome semantics and progress requirements.
 
 Model selection is explicit and exact. There are no configured modality slots,
 fallback aliases, provider-wide capability matrix, or request-local model
@@ -325,7 +365,7 @@ Production crates contain no public conformance framework. Behavioral reuse in
 tests stays inside ordinary crate integration-test helpers.
 
 The primary deterministic lane uses test-local structs and exhaustive caller
-enums implementing all sixteen public behavioral traits directly. Seven
+enums implementing all eighteen public behavioral traits directly. Seven
 integration targets exercise those contracts and the real Custom Agent and App
 with concrete lower implementations. Associated children and continuation types
 remain exact; permitted local App values and child futures remain concrete.
@@ -350,8 +390,8 @@ The proof layers are:
 
 Tests do not freeze private helper names, exact internal file topology,
 match-arm spelling, or architecture prose. Small source guards may distinguish
-the two open Tool dispatchers from the nine closed Provider/Storage/Agent
-dispatchers and require exact absence of deleted public symbols.
+the two open Tool dispatchers from the closed Provider/Storage/Agent resource
+and Session-half dispatchers and require exact absence of deleted public symbols.
 
 ## Shared Tooling and Documentation
 

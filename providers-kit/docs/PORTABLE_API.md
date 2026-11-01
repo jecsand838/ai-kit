@@ -6,9 +6,15 @@
 Provider -> Model -> Session
 ```
 
-The supplied handles and caller implementations use the same three traits.
+The supplied handles and caller implementations use the same three backend
+traits and two subordinate borrowed Session-half traits.
 Caller types remain concrete and return their own associated children; the Kit
 has no erased ingress, extension arm, or normalization constructor.
+
+The Session contract below is the approved target under implementation. It
+supersedes native-only and owner-level send/receive guidance before the
+tests-first production migration; it does not claim that the target already
+passes deterministic or live qualification.
 
 ## Contracts
 
@@ -33,42 +39,157 @@ trait ModelBackend {
 It requires `model_id`, `generate`, and `generate_stream`. Optional `embed`,
 `submit_batch`, and `open_session` operations default to `Unsupported`.
 Generation and batch values use the associated `Continuation`; opening returns
-the associated `Session`. A sessionless implementation uses
+the associated `Session`. A genuinely sessionless caller implementation may use
 `std::convert::Infallible` as its `Session`.
 
-`SessionBackend` is the mutable interactive protocol contract:
+`SessionBackend` is the unique conversational-continuity owner. The exact
+borrowed-half contract is:
 
 ```rust
 trait SessionBackend: Send + 'static {
+    type Commands<'a>: SessionCommands + 'a
+    where
+        Self: 'a;
+    type Events<'a>: SessionEvents + 'a
+    where
+        Self: 'a;
+
     fn id(&self) -> &str;
     fn model_id(&self) -> &ModelId;
-    fn send(&mut self, input: SessionInput) -> impl Future<Output = Result<(), KitError>> + Send + '_;
-    fn recv(&mut self) -> impl Future<Output = Result<SessionEvent, KitError>> + Send + '_;
+    fn split(&mut self) -> (Self::Commands<'_>, Self::Events<'_>);
     fn close(self) -> impl Future<Output = Result<(), KitError>> + Send;
+}
+
+trait SessionCommands: Send {
+    fn submit(
+        &mut self,
+        command: SessionCommand,
+    ) -> impl Future<Output = Result<CommandId, KitError>> + Send + '_;
+}
+
+trait SessionEvents: Send {
+    fn recv(&mut self) -> impl Future<Output = Option<SessionEvent>> + Send + '_;
 }
 ```
 
-Only OpenAI Realtime has a supplied Session variant. Anthropic, Gemini and
-Ollama models use `Infallible` and return `Unsupported` from `open_session`
-before network I/O. Gemini interactive audio support is temporarily withdrawn;
-stateless Gemini audio input remains unchanged. Synthetic transcript sessions are absent;
-ordinary multi-turn generation reuses returned messages.
+The half traits live in `session`; they are narrow behavioral contracts, not
+erased extension entrypoints. Supplied owners and halves are opaque, non-Clone
+values over private exhaustive concrete dispatch. A half cannot outlive its
+owner or close independently. External implementations supply their own
+associated halves and can construct all required tokens, inputs and outcomes
+through public validated construction.
 
-`SessionConfig` is an owned, opaque, defaultable configuration value. Callers
-configure it through validated modifiers and inspect it through borrowed
-getters. A caller Model may retain the complete value when opening its Session;
-there is no aggregate `into_parts`, parts wrapper, type alias, or public-field
-decomposition route.
+### Profiles and configuration
 
-The portable Session vocabulary does not imply identical native support.
-`SessionInput::TurnEnd` ends caller-managed audio input or, where supported,
-explicitly ends the currently submitted automatic-audio segment. It does not
-complete or cancel the provider response. The supplied OpenAI backend accepts
-`TurnStart` only with manual turn detection and `TurnEnd` only for an open manual
-audio turn; automatic turn detection uses native VAD. Raw `Audio` remains one
-chunk, with no implicit end marker.
-OpenAI Realtime implements explicit `SessionInput::CancelTurn`. The portable
-cancellation vocabulary remains available to caller-owned Session implementations.
+`SessionConfig::new(SessionProfile::Conversation)` selects managed conversation
+through the existing generation/continuation path for OpenAI, Anthropic, Gemini
+and Ollama. `SessionConfig::new(SessionProfile::Realtime)` selects native OpenAI
+Realtime or Gemini Live. Unsupported provider/model/profile combinations fail
+explicitly. Selection never follows a model-name substring or changes the exact
+selected model, endpoint, transport or profile after rejection.
+
+`SessionConfig` is owned, opaque and validated, with no default profile. Reuse
+`GenerationConfig`, `ProviderToolSpec` and existing generation/content values
+where their semantics apply. `with_generation(GenerationConfig)` and
+`with_tools(Vec<ProviderToolSpec>)` are the canonical configuration modifiers;
+borrowed `generation()` and `tools()` expose those existing values, including
+`generation().tool_choice()`. There is no separate Session function/tool-choice
+schema. Validated instruction, audio and turn-detection modifiers remain.
+Every accepted setting is rendered or explicitly
+rejected by the owning provider. Configuration is fixed for the Session lifetime;
+there is no reconfiguration, export/import, resume or rewind API. A caller Model
+may retain the complete value; no aggregate parts wrapper, type alias or
+public-field decomposition is added.
+
+### Commands, acceptance and correlation
+
+The command half has one canonical `submit` path for validated user input,
+correlated function-result batches, targeted cancellation and supported realtime
+controls. It rejects arbitrary assistant-history injection. Input activity
+start/end, audio-stream completion, input-buffer discard and playback
+reconciliation remain distinct from response cancellation. Raw audio is one
+chunk, not an implicit commit or end marker. Unsupported controls fail rather
+than invoking a broader native operation under a narrower promise.
+
+Successful submission transfers the command into bounded local ownership and
+returns its `CommandId` in the same poll. This receipt is not provider acceptance.
+Before acceptance, dropping submission leaves no accepted operation or remote
+side effect. After acceptance, the owner settles it independently of the waiter,
+without automatic resend. In-flight state precedes the first external write;
+partially applied writes require reconciliation or uncertain continuity.
+
+Command, response, tool-request and output-segment tokens are distinct opaque
+session-scoped values. Their public constructors validate the owner-local
+session identity and nonzero sequence; supplied owners check exhaustion,
+ownership, stale references and duplicates. Native response/item identities stay
+private. Genuine optional function-call native IDs remain optional; local tokens
+do not fabricate them.
+
+One managed generation may be active at a time. Unrelated new generation is
+rejected, but valid tool results, cancellation and control commands remain
+possible. Validate each result batch completely before mutation. Retain accepted
+results once, collect the required set and initiate exactly one continuation
+generation when complete. This submits caller-supplied results; it never
+executes tools, chooses an agent action or runs an autonomous loop.
+
+### Events and continuity
+
+`recv` yields correlated output, validated executable tool requests and their
+invalidation, response outcomes, supported audio/transcription/accounting
+observations and permanent termination. Post-acceptance command failures remain
+observable even if no response was created. `None` means the event stream is
+permanently drained, never merely idle. Fatal session failure uses one
+authoritative terminal event carrying reason, continuity and unfinished work;
+there is no conflicting second receive-error channel.
+
+A response has at most one authoritative final outcome. Success requires
+affirmative native terminal evidence. Partial completion, cancellation or
+interruption, failure and unresolved work remain distinct; missing/unknown
+status, malformed terminal data or premature EOF never become success. A
+response ending does not finish input capture, playback, late transcription or
+unrelated tool work. Preserve original auxiliary correlation; explicitly absent
+native attribution is preferable to assigning the currently active response.
+Usage identifies its actual scope, retains unknown counts, and replaces
+compatible interim snapshots with authoritative totals without summing them.
+
+Cancellation reports already-settled, acknowledged-stop, locally-stopped or
+unconfirmed/failed-stop resolution independently from continuity: reusable,
+uncertain or closed. Reusable continuity does not prove remote work stopped or
+that no other work remains. Uncertain continuity blocks further generation
+mutations while observation and cleanup remain available. Cancellation does not
+rewind accepted history, discard capture input or reconcile unplayed audio.
+Native acknowledgements must match the target; unrelated errors, EOF and timeout
+are not acknowledgements. A completed response wins a later cancellation race.
+
+### Exact managed history and progress
+
+Retain returned authoritative assistant `Message<C>` values unchanged, including
+opaque continuation, ordered mixed content and tool-only messages. Accepted
+caller inputs/results survive cancellation. Commit completed assistant state
+before exposing completion or executable tool calls. Incomplete deltas remain
+observations unless the generation path supplies valid authoritative replay.
+Managed completion may expose a `GenerateResponse<()>` observation preserving
+portable metadata while retaining the original message privately; the projection
+is not the replay source and does not make opaque continuation serializable.
+Native realtime does not fabricate a `GenerateResponse`.
+
+Managed tools become executable only after authoritative replay state is ready;
+native Live tools may require a result before response completion. Maintain a
+bounded outstanding-call registry. Validate declaration, arguments, name,
+genuine native ID, result content and token state. Retract known-cancelled queued
+calls, invalidate delivered calls and reject cancelled results. Invalidation
+does not undo a tool side effect the application already performed.
+
+The event half drives bounded managed read demand. A pending receive must coexist
+with commands, and dropping it loses neither parser state nor accepted work.
+Control submission wakes the pending receiver/driver. Managed Sessions track
+work only while a generation is active; native Sessions may track one protocol
+driver. Every task has retained cancellation/join ownership. Cancellation,
+sealing, deadlines and consuming close work without normal output draining.
+Aggregate history/replay, command/event, argument and tool-registry bounds apply
+in addition to native frame limits; reserved bounded terminal/control capacity
+prevents backpressure from disabling cleanup. No silent truncation or eviction
+is permitted.
 
 ## Generation and continuation
 
@@ -111,13 +232,14 @@ ids, including `models/gemini-3.1-pro-preview` and
 WebP; inline documents are limited to PDF and plain text. Audio, `ImageUrl`,
 and `File` function-result content are rejected with `Unsupported` before I/O.
 Unknown or newly discovered model ids do not inherit Gemini 3 behavior through
-prefix or version heuristics. This stateless support does not imply Gemini
-interactive-session support.
+prefix or version heuristics. Conversation Sessions reuse this selected-model
+validation; native Realtime support is independently validated.
 
 Stateless OpenAI audio is temporarily unsupported by the supplied implementation,
 including unary/streamed generation and batch submission on its withdrawn exact
 audio-model selections. The public audio content DTO and Model methods remain;
-OpenAI Realtime Session audio is unchanged. See the [OpenAI boundary](providers/OPENAI.md).
+OpenAI Realtime Session audio remains required through the replacement ownership
+contract. See the [OpenAI boundary](providers/OPENAI.md).
 
 Every unlisted combination returns `Unsupported` or `InvalidInput` before
 network I/O. Ordinary JSON message content remains invalid; JSON is reserved
@@ -187,9 +309,14 @@ implementation identity. Transport uses one reused HTTP client, validated
 The supplied `Provider` seals admission during shutdown, drains admitted work,
 runs built-in shutdown once, joins the tracked owner, and replays the exact
 terminal result. Cancelling an individual waiter does not detach cleanup.
-Returned streams retain admission until completion, error, or drop. Interactive
-Session close remains available after Provider sealing and consumes the unique
-session after attempting native socket cleanup.
+Returned streams retain admission until completion, error, or drop. Session
+resource tracking is separate from generation admission: idle Sessions hold no
+generation admission. Sealing rejects new work and wakes registered Sessions;
+accepted-but-unstarted commands settle explicitly. Admitted work remains
+observable and cancellable. Consuming close remains available after sealing and
+performs bounded local cleanup and joins; a previously sealed parent alone is
+not a close failure. Close does not wait for ordinary output consumption or
+application tool execution, and local cleanup does not claim remote-stop proof.
 
 Supplied OpenAI inline batch submissions transfer the existing admission to a
 tracked private owner. Dropping the submission observer does not cancel an
@@ -226,7 +353,7 @@ crate root. Supporting types live in `config`, `generation`, `embedding`,
 
 `KitError` is an opaque, cloneable, nonserializable runtime error owner.
 Supplied providers and caller implementations return the same contract through
-the three public backend traits. `ErrorKind` is the sole portable classification
+the backend traits, command submission and structured event outcomes. `ErrorKind` is the sole portable classification
 vocabulary. `RemoteFailure` is an opaque serializable remote outcome, with
 `kind()`, `classification_basis()`, and explicit `native_details()` inspection.
 The supporting error types remain in the `error` module.

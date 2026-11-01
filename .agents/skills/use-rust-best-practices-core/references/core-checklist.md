@@ -228,8 +228,9 @@ Load the specialized skill when these patterns appear.
 
 - traits vs generics vs enums
 - enum-dispatcher behavior families and their owning trait contracts (public
-  only at the eleven lower-crate backend seams and five App workflow seams
-  enumerated by root `AGENTS.md`; preserve App's exact `ChildExecutor`
+  only at the eleven lower-crate backend seams, two borrowed Session-half seams
+  and five App workflow seams enumerated by root `AGENTS.md`; preserve App's
+  exact `ChildExecutor`
   associated-future and serialization-only codec-registry exceptions)
 - refactoring duplicated logic
 - lifetimes

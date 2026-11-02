@@ -168,6 +168,12 @@ compatible interim snapshots with authoritative totals without summing them.
 Transcription observations with `finalized = false` are deltas. A finalized
 transcription is the authoritative full value for its original source/segment;
 it replaces those interim deltas rather than being appended to them.
+Native marker-only endings publish the accumulated full transcript rather than
+an empty replacement. For `TranscriptionSource::Input { command: None }`, any
+observation after a finalized transcript begins a new unattributed transcript,
+including a final-only observation. Its command remains unknown; no response,
+capture command or utterance identity is inferred, and repeated text is not
+deduplicated.
 
 Cancellation reports already-settled, acknowledged-stop, locally-stopped or
 unconfirmed/failed-stop resolution independently from continuity: reusable,

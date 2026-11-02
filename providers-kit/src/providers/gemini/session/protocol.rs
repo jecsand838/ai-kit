@@ -29,6 +29,90 @@ pub(super) struct GeminiProtocol {
     capture: GeminiCapture,
     command_started: bool,
     finished_turns: VecDeque<ResponseId>,
+    input_transcript: GeminiTranscript,
+    output_transcript: GeminiTranscript,
+}
+
+enum GeminiTranscript {
+    Open(String),
+    Finished,
+}
+
+impl GeminiTranscript {
+    fn observation(payload: &Value) -> Result<Option<(&str, bool)>, KitError> {
+        let object = payload.as_object().ok_or_else(|| {
+            GeminiProtocol::protocol_error("Gemini Live transcription must be an object", payload)
+        })?;
+        let text = match object.get("text") {
+            None | Some(Value::Null) => "",
+            Some(Value::String(text)) => text,
+            Some(_) => {
+                return Err(GeminiProtocol::protocol_error(
+                    "Gemini Live transcription text must be a string when supplied",
+                    payload,
+                ));
+            }
+        };
+        let finished = match object.get("finished") {
+            None | Some(Value::Null) => false,
+            Some(Value::Bool(finished)) => *finished,
+            Some(_) => {
+                return Err(GeminiProtocol::protocol_error(
+                    "Gemini Live transcription finished marker must be a boolean",
+                    payload,
+                ));
+            }
+        };
+        Ok((!text.is_empty() || finished).then_some((text, finished)))
+    }
+
+    fn publish(
+        &mut self,
+        control: &SessionControl,
+        source: TranscriptionSource,
+        text: &str,
+        finished: bool,
+    ) -> Result<(), KitError> {
+        if matches!(self, Self::Finished) {
+            if matches!(source, TranscriptionSource::Input { command: None }) {
+                // Native input has no utterance identifier. Every observation
+                // after its final boundary begins a distinct unattributed input.
+                *self = Self::Open(String::new());
+            } else {
+                return Err(KitError::invalid_response(
+                    ResponseViolation::ProtocolViolation {
+                        rule: "gemini_output_transcription_after_final",
+                    },
+                ));
+            }
+        }
+        let Self::Open(buffer) = self else {
+            return Err(KitError::invalid_state(
+                "Gemini transcript ownership is closed",
+            ));
+        };
+        control.reserve_transcription(text.len())?;
+        buffer.push_str(text);
+        if finished {
+            let Self::Open(text) = std::mem::replace(self, Self::Finished) else {
+                return Err(KitError::invalid_state("Gemini transcript lost its buffer"));
+            };
+            control.publish_transcription_snapshot(source, text)
+        } else {
+            control.publish(SessionEvent::Transcription {
+                source,
+                text: text.into(),
+                finalized: false,
+            })
+        }
+    }
+
+    fn clear(&mut self, control: &SessionControl) -> Result<(), KitError> {
+        match std::mem::replace(self, Self::Open(String::new())) {
+            Self::Open(text) => control.release_transcription(text.len()),
+            Self::Finished => Ok(()),
+        }
+    }
 }
 
 enum GeminiCapture {
@@ -99,6 +183,8 @@ impl GeminiProtocol {
             capture: GeminiCapture::Idle,
             command_started: false,
             finished_turns: VecDeque::new(),
+            input_transcript: GeminiTranscript::Open(String::new()),
+            output_transcript: GeminiTranscript::Open(String::new()),
         })
     }
 
@@ -216,10 +302,21 @@ impl GeminiProtocol {
                 error
             }
         });
-        let cleanup = match self.socket.operation_deadline() {
+        let mut cleanup = match self.socket.operation_deadline() {
             Ok(deadline) => self.socket.close(deadline).await,
             Err(error) => Err(error),
         };
+        for released in [
+            self.input_transcript.clear(&control),
+            self.output_transcript.clear(&control),
+        ] {
+            if let Err(error) = released {
+                cleanup = Err(match cleanup {
+                    Ok(()) => error,
+                    Err(primary) => primary.with_supplementary(error),
+                });
+            }
+        }
         let reason = match (&primary, &cleanup) {
             (Err(primary), Err(cleanup)) => primary.clone().with_supplementary(cleanup.clone()),
             (Err(primary), Ok(())) => primary.clone(),
@@ -466,6 +563,7 @@ impl GeminiProtocol {
                 }
             }
         };
+        self.output_transcript.clear(control)?;
         let response = control.next_response()?;
         let segment = control.next_segment()?;
         control.publish(SessionEvent::ResponseStarted {
@@ -485,6 +583,11 @@ impl GeminiProtocol {
         let object = payload.as_object().ok_or_else(|| {
             Self::protocol_error("Gemini Live message must be an object", &payload)
         })?;
+        // An empty server message carries no progress and does not refresh the
+        // generation/capture deadlines retained by the driver.
+        if object.is_empty() {
+            return Ok(());
+        }
         let native_members = [
             "setupComplete",
             "serverContent",
@@ -497,11 +600,37 @@ impl GeminiProtocol {
             .iter()
             .filter(|key| object.contains_key(**key))
             .count();
-        if members > 1 || (members == 0 && !object.contains_key("usageMetadata")) {
+        if members > 1
+            || (members == 0
+                && !object.contains_key("usageMetadata")
+                && !object.contains_key("voiceActivity"))
+        {
             return Err(Self::protocol_error(
                 "Gemini Live message has an invalid server union",
                 &payload,
             ));
+        }
+        if let Some(activity) = object.get("voiceActivity") {
+            let kind = activity.get("type");
+            let offset = activity.get("audioOffset");
+            if !activity.is_object()
+                || kind.is_some_and(|kind| {
+                    !kind.is_null()
+                        && !matches!(
+                            kind.as_str(),
+                            Some("TYPE_UNSPECIFIED" | "ACTIVITY_START" | "ACTIVITY_END")
+                        )
+                })
+                || offset.is_some_and(|offset| !offset.is_null() && !offset.is_string())
+            {
+                return Err(Self::protocol_error(
+                    "Gemini Live input voice-activity telemetry is malformed",
+                    &payload,
+                ));
+            }
+            // Input VAD telemetry carries no command/response identity. It is
+            // neither an acknowledgement of activity commands nor a native
+            // interaction turn boundary, so it changes no portable state.
         }
         if let Some(usage) = object.get("usageMetadata") {
             self.usage(control, usage)?;
@@ -515,9 +644,26 @@ impl GeminiProtocol {
         if let Some(content) = object.get("serverContent") {
             self.content(control, content)?;
         }
-        if object.contains_key("setupComplete") || object.contains_key("sessionResumptionUpdate") {
+        if object.contains_key("setupComplete") {
             return Err(Self::protocol_error(
-                "Gemini Live sent an unsolicited setup or resumption update",
+                "Gemini Live sent an unsolicited setup acknowledgement",
+                &payload,
+            ));
+        }
+        // Gemini can emit this known auxiliary message without resumption
+        // configuration. Validate its shape without retaining a handle,
+        // changing continuity, or enabling automatic reconnection.
+        if let Some(update) = object.get("sessionResumptionUpdate")
+            && (!update.is_object()
+                || update
+                    .get("newHandle")
+                    .is_some_and(|value| !value.is_string())
+                || update
+                    .get("resumable")
+                    .is_some_and(|value| !value.is_boolean()))
+        {
+            return Err(Self::protocol_error(
+                "Gemini Live resumption metadata has invalid field types",
                 &payload,
             ));
         }
@@ -631,23 +777,33 @@ impl GeminiProtocol {
                 content,
             ));
         }
-        if let Some(transcription) = content.get("inputTranscription") {
-            let text = transcription
-                .get("text")
-                .and_then(Value::as_str)
-                .ok_or_else(|| {
-                    Self::protocol_error(
-                        "Gemini Live input transcription requires text",
-                        transcription,
-                    )
-                })?;
+        for field in [
+            "generationComplete",
+            "turnComplete",
+            "interrupted",
+            "waitingForInput",
+        ] {
+            if content
+                .get(field)
+                .is_some_and(|value| !value.is_null() && !value.is_boolean())
+            {
+                return Err(Self::protocol_error(
+                    "Gemini Live server-content boundary flags must be booleans",
+                    content,
+                ));
+            }
+        }
+        if let Some(transcription) = content.get("inputTranscription")
+            && let Some((text, finished)) = GeminiTranscript::observation(transcription)?
+        {
             // Gemini explicitly provides no ordering/correlation between this
             // stream and model turns. Never attach it to the current response.
-            control.publish(SessionEvent::Transcription {
-                source: TranscriptionSource::Input { command: None },
-                text: text.into(),
-                finalized: false,
-            })?;
+            self.input_transcript.publish(
+                control,
+                TranscriptionSource::Input { command: None },
+                text,
+                finished,
+            )?;
         }
         if let Some(turn) = content.get("modelTurn") {
             let response = self.start(control, None)?;
@@ -700,21 +856,14 @@ impl GeminiProtocol {
                 }
             }
         }
-        if let Some(transcription) = content.get("outputTranscription") {
+        if let Some(transcription) = content.get("outputTranscription")
+            && let Some((text, finished)) = GeminiTranscript::observation(transcription)?
+        {
             if !matches!(self.generation, GeminiGeneration::Active { .. })
                 && !matches!(self.capture, GeminiCapture::Idle)
             {
                 self.start(control, None)?;
             }
-            let text = transcription
-                .get("text")
-                .and_then(Value::as_str)
-                .ok_or_else(|| {
-                    Self::protocol_error(
-                        "Gemini Live output transcription requires text",
-                        transcription,
-                    )
-                })?;
             let (response, segment) = match &self.generation {
                 GeminiGeneration::Active {
                     response, segment, ..
@@ -729,11 +878,12 @@ impl GeminiProtocol {
                     ));
                 }
             };
-            control.publish(SessionEvent::Transcription {
-                source: TranscriptionSource::Output { response, segment },
-                text: text.into(),
-                finalized: false,
-            })?;
+            self.output_transcript.publish(
+                control,
+                TranscriptionSource::Output { response, segment },
+                text,
+                finished,
+            )?;
         }
         if content.get("interrupted").and_then(Value::as_bool) == Some(true) {
             let response = self

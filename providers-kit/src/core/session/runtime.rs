@@ -48,6 +48,7 @@ struct SessionState {
     continuity: SessionContinuity,
     retained: usize,
     completion_reserved: usize,
+    transcription_retained: usize,
     records: usize,
     unfinished: BTreeSet<CommandId>,
     known_commands: BTreeSet<CommandId>,
@@ -102,6 +103,7 @@ impl SessionControl {
                 continuity: SessionContinuity::Reusable,
                 retained: retained.bytes(),
                 completion_reserved: 0,
+                transcription_retained: 0,
                 records: 0,
                 unfinished: BTreeSet::new(),
                 known_commands: BTreeSet::new(),
@@ -557,6 +559,80 @@ impl SessionControl {
             return Err(Self::limit("session.history", BYTE_LIMIT));
         }
         state.retained = retained;
+        Ok(())
+    }
+
+    pub(crate) fn reserve_transcription(&self, bytes: usize) -> Result<(), KitError> {
+        let mut state = self.state();
+        if state.terminated {
+            return Err(KitError::closed("session terminal already published"));
+        }
+        let retained = state
+            .retained
+            .checked_add(bytes)
+            .filter(|retained| *retained <= BYTE_LIMIT)
+            .ok_or_else(|| Self::limit("session.transcription", BYTE_LIMIT))?;
+        let transcription_retained = state
+            .transcription_retained
+            .checked_add(bytes)
+            .ok_or_else(|| Self::limit("session.transcription", BYTE_LIMIT))?;
+        state.retained = retained;
+        state.transcription_retained = transcription_retained;
+        Ok(())
+    }
+
+    pub(crate) fn release_transcription(&self, bytes: usize) -> Result<(), KitError> {
+        Self::release_transcription_locked(&mut self.state(), bytes)
+    }
+
+    fn release_transcription_locked(
+        state: &mut SessionState,
+        bytes: usize,
+    ) -> Result<(), KitError> {
+        let transcription_retained = state
+            .transcription_retained
+            .checked_sub(bytes)
+            .ok_or_else(|| KitError::invalid_state("transcription reservation is missing"))?;
+        let retained = state
+            .retained
+            .checked_sub(bytes)
+            .ok_or_else(|| KitError::invalid_state("transcription exceeds retained accounting"))?;
+        state.transcription_retained = transcription_retained;
+        state.retained = retained;
+        Ok(())
+    }
+
+    pub(crate) fn publish_transcription_snapshot(
+        &self,
+        source: crate::session::TranscriptionSource,
+        text: String,
+    ) -> Result<(), KitError> {
+        let mut state = self.state();
+        // The String moves out of the driver's already charged buffer. Transfer
+        // its credit under the same lock as admission to the observation queue;
+        // any publication failure drops the String and leaves no orphan charge.
+        Self::release_transcription_locked(&mut state, text.len())?;
+        if state.terminated {
+            return Err(KitError::closed("session terminal already published"));
+        }
+        let event = SessionEvent::Transcription {
+            source,
+            text,
+            finalized: true,
+        };
+        let bytes = Self::event_bytes(&event)?;
+        let retained = state
+            .retained
+            .checked_add(bytes)
+            .filter(|retained| *retained <= BYTE_LIMIT)
+            .ok_or_else(|| Self::limit("session.observations", BYTE_LIMIT))?;
+        if state.events.len() >= EVENT_LIMIT {
+            return Err(Self::limit("session.observations", BYTE_LIMIT));
+        }
+        state.retained = retained;
+        state.events.push_back((event, bytes));
+        drop(state);
+        self.changed.notify_waiters();
         Ok(())
     }
 

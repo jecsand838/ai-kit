@@ -6,7 +6,7 @@ cancellation follow-up started at `1de968b3c98015f7fc48255d6ac40ef4593ca44d`.
 Regressions remain enabled; fixture and validation-setup errors are distinguished
 from production defects. Manifests, lockfiles, features, and vendor sources are unchanged.
 
-## Provider session refactor evidence — 2026-11-01, in progress
+## Provider session refactor evidence — 2026-11-01
 
 The separately authorized session replacement starts at `2853a542`; its target
 guidance was committed first as `eca58db`. The following defects were reproduced
@@ -33,9 +33,9 @@ cancelling an already completed response, and omitting retained configuration
 from the aggregate budget (`managed-behavior-rerun.log`). The earlier managed
 run failed on an unsupported fixture model and is retained as fixture error,
 not as cancellation evidence. `gemini-env-red.log` records the verifier missing
-the new required interactive model role. Fixes, independent review, and final
-source validation remain in progress; these records do not establish release
-qualification.
+the new required interactive model role. Each repair requires passing
+regressions, independent review, and final-source validation; these failure
+records do not establish release qualification.
 
 Independent review added enabled regressions for the following replacement
 defects. Each log below records a behavioral failure before its associated fix;
@@ -65,6 +65,10 @@ the later full source gates remain authoritative for completion.
 | Live evidence accepted uncorrelated completion or old-response output | `session-evidence-red.log`, `session-evidence-correlation-red.log` |
 | Cancellation evidence accepted a different command receipt or target | `cancellation-evidence-correlation-red.log` |
 | Final transcription snapshots were omitted instead of replacing deltas | `transcription-snapshot-red.log` |
+| Gemini's native resumption metadata terminated an otherwise valid same-socket interaction | `gemini-resumption-metadata-red.log` |
+| Valid Gemini empty/VAD envelopes and transcription markers were rejected; malformed optional fields were silently ignored | `gemini-optional-envelopes-red.log` |
+| Evidence rejected a new unattributed input transcript after the preceding transcript finalized | `input-transcription-evidence-red.log` |
+| Final-only unattributed input snapshots overwrote previously completed transcripts | `input-final-only-transcript-red.log` |
 
 The native-boundary API compile failure is separately retained in
 `native-boundary-contract-red.log`. The initial Gemini close failures exposed a
@@ -82,6 +86,45 @@ the stale test inventory omitting the three new Provider targets already include
 by the validation runner. Its additional
 Tool assertion failure came from the same fixture's accumulated trace after the
 Provider mismatch, not a separate Tool defect.
+
+At candidate `597e5dd`, the focused eight-case live run passed all four
+Conversation baselines and failed all four Gemini Live cases. Private native
+diagnostics identified a `sessionResumptionUpdate` notification after setup,
+which the adapter incorrectly treated as reconfiguration. The deterministic
+`live_resumption_metadata_does_not_reconfigure_or_interrupt_generation`
+regression reproduced termination of the original response before its fix;
+the malformed-metadata and repeated-setup control remained passing. The
+fixture uses a synthetic handle with the independently observed native shape.
+Accepting this auxiliary metadata does not authorize retaining or replaying a
+resume handle, sending another setup, or reconnecting. The original live failure
+remains in `target/session-refactor-evidence/new-live-sessions.log`.
+
+The subsequent four-case retry still failed; its private diagnostics supplied
+the observed empty server envelope and uncorrelated input voice-activity shape.
+The next deterministic batch recorded five failures against 19 passing controls,
+including preserved original deadlines under auxiliary traffic and optional
+transcription completion markers. The two evidence-helper failures separately
+demonstrated conflation of consecutive input transcripts with unavailable command
+identity; the attributed post-final-delta rejection control remained passing.
+Those failures and the live retry remain retained in their own logs, including
+`target/session-refactor-evidence/gemini-live-resumption-fix.log`.
+The separate large-transcript fixture was added before reservation-transfer
+implementation. Its red in `gemini-transcript-budget-red.log` reaches the
+missing-marker protocol error, with a retained secondary close timeout; that
+failure does not independently demonstrate double charging. The enabled case
+requires two consecutive, consumed 17 MiB transcripts to finalize within the
+existing session budget, exercising transfer and release on the repaired path.
+
+The next focused native run passed manual audio, text/audio/transcription, and
+the tool round trip. Its remaining cancellation/recovery failure was a scenario
+constraint: the old request had been invalidated and its result rejected, while
+a distinct new request belonged to the response started by `EndInput`. The
+scenario rejected that valid new obligation. Its correction permits at most
+one distinct, validated recovery call, fulfilled by the test caller, and keeps
+the original invalidation, stale-result rejection, interruption, correlation,
+fresh audio/transcription, completion, and turn-boundary assertions. This is
+not classified as an adapter defect. The failed run remains in
+`target/session-refactor-evidence/gemini-live-optional-fix.log`.
 
 ## Repair status — 2026-10-25
 

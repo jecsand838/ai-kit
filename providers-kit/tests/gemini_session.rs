@@ -80,15 +80,19 @@ impl GeminiLiveServer {
     }
 
     fn model(&self) -> (Provider, Model) {
+        self.model_with_timeout(Duration::from_secs(3))
+    }
+
+    fn model_with_timeout(&self, timeout: Duration) -> (Provider, Model) {
         let provider = Provider::from_config(ProviderConfig::new(
             ProviderKind::Gemini(
                 GeminiConfig::new(ApiKey::new("fixture-key").expect("key"))
                     .with_base_url(self.base_url.clone()),
             ),
             TransportConfig::new(
-                Duration::from_secs(3),
+                timeout,
                 Duration::from_secs(2),
-                Duration::from_secs(3),
+                timeout,
                 RetryPolicy::default(),
             )
             .expect("bounded transport"),
@@ -281,6 +285,70 @@ impl GeminiLiveServer {
         })
         .await
         .expect("malformed native call bounded");
+    }
+
+    async fn auxiliary_frames(frames: Vec<Value>) {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            let server = Self::start(move |mut socket| async move {
+                Self::setup(&mut socket).await;
+                for frame in frames {
+                    Self::send(&mut socket, frame).await;
+                }
+                Self::send(&mut socket, json!({"usageMetadata":{"promptTokenCount":7}})).await;
+                Self::input(&mut socket, "after auxiliary metadata").await;
+                Self::send(
+                    &mut socket,
+                    json!({"serverContent":{"generationComplete":true}}),
+                )
+                .await;
+                Self::expect_close(&mut socket).await;
+            })
+            .await;
+            let (provider, model) = server.model();
+            let mut session = model.open_session(Self::config()).await.unwrap();
+            {
+                let (mut commands, mut events) = session.split();
+                loop {
+                    match events
+                        .recv()
+                        .await
+                        .expect("auxiliary metadata is not terminal")
+                    {
+                        SessionEvent::Usage { usage, .. } if usage.input_tokens == Some(7) => break,
+                        SessionEvent::Usage { .. } => {}
+                        unexpected => {
+                            panic!("auxiliary metadata invented response/activity: {unexpected:?}")
+                        }
+                    }
+                }
+                let mut pending = Box::pin(events.recv());
+                poll_fn(|cx| {
+                    assert!(pending.as_mut().poll(cx).is_pending());
+                    Poll::Ready(())
+                })
+                .await;
+                let receipt = commands
+                    .submit(SessionCommand::Input(
+                        Message::user_text("after auxiliary metadata").unwrap(),
+                    ))
+                    .await
+                    .unwrap();
+                let Some(SessionEvent::ResponseStarted {
+                    command: Some(command),
+                    response,
+                }) = pending.await
+                else {
+                    panic!("only accepted input starts a response")
+                };
+                assert_eq!(command, receipt);
+                assert_eq!(Self::completion(&mut events).await, response);
+            }
+            session.close().await.unwrap();
+            provider.shutdown().await.unwrap();
+            server.finish().await;
+        })
+        .await
+        .expect("auxiliary metadata bounded");
     }
 }
 
@@ -1157,6 +1225,136 @@ async fn live_manual_activity_interrupts_a_tool_response_and_starts_its_own_gene
 }
 
 #[tokio::test]
+async fn live_cancelled_tool_can_be_reissued_as_a_distinct_recovery_obligation() {
+    // Provenance: the 2026-11-01 real Gemini cancellation/recovery case issued
+    // a new native function ID after cancelling the original request. This
+    // passing control preserves that authentic ordering; it is not a bug fix.
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let server = GeminiLiveServer::start(|mut socket| async move {
+            GeminiLiveServer::setup(&mut socket).await;
+            GeminiLiveServer::input(&mut socket, "request a tool").await;
+            GeminiLiveServer::send(&mut socket, json!({"toolCall":{"functionCalls":[{
+                "id":"cancelled-call","name":"lookup","args":{"key":"a"}
+            }]}})).await;
+            assert_eq!(GeminiLiveServer::receive(&mut socket).await, json!({"realtimeInput":{"activityStart":{}}}));
+            assert_eq!(GeminiLiveServer::receive(&mut socket).await["realtimeInput"]["audio"]["data"], "AQIDBA==");
+            assert_eq!(GeminiLiveServer::receive(&mut socket).await, json!({"realtimeInput":{"activityEnd":{}}}));
+            GeminiLiveServer::send(&mut socket, json!({"toolCallCancellation":{"ids":["cancelled-call"]}})).await;
+            GeminiLiveServer::send(&mut socket, json!({"serverContent":{"interrupted":true}})).await;
+            GeminiLiveServer::send(&mut socket, json!({"serverContent":{"turnComplete":true}})).await;
+            GeminiLiveServer::send(&mut socket, json!({"serverContent":{"inputTranscription":{"text":"Please say audio input received."}}})).await;
+            GeminiLiveServer::send(&mut socket, json!({"toolCall":{"functionCalls":[{
+                "id":"recovery-call","name":"lookup","args":{"key":"a"}
+            }]}})).await;
+            assert_eq!(GeminiLiveServer::receive(&mut socket).await, json!({"toolResponse":{"functionResponses":[{
+                "id":"recovery-call","name":"lookup","response":{"answer":"audio input received"}
+            }]}}), "only the fresh obligation may reach the native socket");
+            GeminiLiveServer::send(&mut socket, json!({"serverContent":{
+                "modelTurn":{"parts":[{"inlineData":{"mimeType":"audio/pcm;rate=24000","data":"AQIDBA=="}}]},
+                "outputTranscription":{"text":"audio input received"}
+            }})).await;
+            GeminiLiveServer::send(&mut socket, json!({"serverContent":{"generationComplete":true}})).await;
+            GeminiLiveServer::send(&mut socket, json!({"serverContent":{"turnComplete":true}})).await;
+            GeminiLiveServer::expect_close(&mut socket).await;
+        }).await;
+        let (provider, model) = server.model();
+        let mut session = model.open_session(GeminiLiveServer::config().with_turn_detection(SessionTurnDetection::Manual)).await.unwrap();
+        {
+            let (mut commands, mut events) = session.split();
+            commands.submit(SessionCommand::Input(Message::user_text("request a tool").unwrap())).await.unwrap();
+            let (original, request, call) = loop {
+                match events.recv().await.unwrap() {
+                    SessionEvent::ToolRequested { response, request, call } => break (response, request, call),
+                    SessionEvent::ResponseStarted { .. } | SessionEvent::ControlApplied { .. } => {},
+                    unexpected => panic!("original request missing: {unexpected:?}"),
+                }
+            };
+            commands.submit(SessionCommand::StartInput).await.unwrap();
+            commands.submit(SessionCommand::Audio { media_type:"audio/pcm;rate=16000".into(), data:vec![1,2,3,4] }).await.unwrap();
+            let activity = commands.submit(SessionCommand::EndInput).await.unwrap();
+            let mut recovery = None;
+            let mut invalidated = false;
+            let mut interrupted = false;
+            let mut old_finished = false;
+            let mut old_turn_ended = false;
+            let mut input_observed = false;
+            let mut submitted = false;
+            let mut audio = false;
+            let mut transcription = false;
+            let mut completed = false;
+            loop {
+                match events.recv().await.unwrap() {
+                    SessionEvent::ToolsInvalidated { requests } => {
+                        assert!(!invalidated);
+                        assert_eq!(requests, vec![request.clone()]);
+                        invalidated = true;
+                    }
+                    SessionEvent::Interruption { response:Some(response) } => {
+                        assert_eq!(response, original);
+                        interrupted = true;
+                    }
+                    SessionEvent::ResponseFinished { response, outcome:ResponseOutcome::Interrupted, continuity:SessionContinuity::Reusable, output:None } => {
+                        assert_eq!(response, original);
+                        old_finished = true;
+                    }
+                    SessionEvent::ResponseStarted { command:Some(command), response } => {
+                        assert_eq!(command, activity);
+                        assert_ne!(response, original);
+                        assert!(recovery.replace(response).is_none());
+                    }
+                    SessionEvent::ToolRequested { response, request:fresh, call:fresh_call } => {
+                        assert!(invalidated && interrupted && old_finished && old_turn_ended);
+                        assert_eq!(recovery.as_ref(), Some(&response));
+                        assert_ne!(fresh, request);
+                        assert_ne!(fresh_call.id(), call.id());
+                        assert_eq!(fresh_call.name(), "lookup");
+                        assert_eq!(fresh_call.arguments(), &json!({"key":"a"}));
+                        assert!(!submitted);
+                        let stale = FunctionResult::new(call.id().map(str::to_owned), call.name(), vec![ContentPart::Json { value:json!({"answer":"stale"}) }], false).unwrap();
+                        let error = commands.submit(SessionCommand::ToolResults(vec![SessionToolResult::new(request.clone(), stale)])).await.expect_err("original obligation remains stale while its replacement is pending");
+                        assert_eq!(error.kind(), ErrorKind::InvalidState);
+                        let result = FunctionResult::new(fresh_call.id().map(str::to_owned), fresh_call.name(), vec![ContentPart::Json { value:json!({"answer":"audio input received"}) }], false).unwrap();
+                        commands.submit(SessionCommand::ToolResults(vec![SessionToolResult::new(fresh, result)])).await.unwrap();
+                        submitted = true;
+                    }
+                    SessionEvent::Output { response, content:ContentPart::Audio { data, .. }, .. } => {
+                        assert!(submitted);
+                        assert_eq!(recovery.as_ref(), Some(&response));
+                        assert_eq!(data, [1,2,3,4]);
+                        audio = true;
+                    }
+                    SessionEvent::Transcription { source:TranscriptionSource::Input { command:None }, text, .. } => {
+                        assert_eq!(text, "Please say audio input received.");
+                        input_observed = true;
+                    }
+                    SessionEvent::Transcription { source:TranscriptionSource::Output { response, .. }, text, .. } => {
+                        assert!(submitted);
+                        assert_eq!(recovery.as_ref(), Some(&response));
+                        assert_eq!(text, "audio input received");
+                        transcription = true;
+                    }
+                    SessionEvent::ResponseFinished { response, outcome:ResponseOutcome::Completed, continuity:SessionContinuity::Reusable, output:None } => {
+                        assert_eq!(recovery.as_ref(), Some(&response));
+                        completed = true;
+                    }
+                    SessionEvent::TurnEnded { response:Some(response) } if response == original => old_turn_ended = true,
+                    SessionEvent::TurnEnded { response:Some(response) } => {
+                        assert_eq!(recovery.as_ref(), Some(&response));
+                        assert!(completed && submitted && audio && transcription && input_observed);
+                        break;
+                    }
+                    SessionEvent::ControlApplied { .. } => {},
+                    unexpected => panic!("recovery lost original correlation: {unexpected:?}"),
+                }
+            }
+        }
+        session.close().await.unwrap();
+        provider.shutdown().await.unwrap();
+        server.finish().await;
+    }).await.expect("cancelled and fresh obligations remain bounded");
+}
+
+#[tokio::test]
 async fn live_function_setup_selects_blocking_caller_owned_continuation() {
     // Gemini 3.8's NON_BLOCKING default and supported BLOCKING declaration:
     // https://ai.google.dev/gemini-api/docs/live-api/capabilities (2026-11-01).
@@ -1177,6 +1375,394 @@ async fn live_function_setup_selects_blocking_caller_owned_continuation() {
         provider.shutdown().await.unwrap();
         server.finish().await;
     }).await.expect("one blocking setup bounded");
+}
+
+#[tokio::test]
+async fn live_resumption_metadata_does_not_reconfigure_or_interrupt_generation() {
+    // Provenance: all four real Live cases at 597e5dd received this known
+    // server-message member without sessionResumption in setup. Preserve the
+    // envelope shape; the opaque live handle is replaced with a fixture value.
+    // Raw failures remain in target/session-refactor-evidence/new-live-sessions/.
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let server = GeminiLiveServer::start(|mut socket| async move {
+            GeminiLiveServer::setup(&mut socket).await;
+            GeminiLiveServer::send(&mut socket, json!({"sessionResumptionUpdate":{"newHandle":"fixture-opaque-handle","resumable":true}})).await;
+            GeminiLiveServer::input(&mut socket, "continue on the original connection").await;
+            GeminiLiveServer::send(&mut socket, json!({"serverContent":{"modelTurn":{"parts":[{"text":"original connection answer"}]}}})).await;
+            GeminiLiveServer::send(&mut socket, json!({"sessionResumptionUpdate":{"resumable":false}})).await;
+            GeminiLiveServer::send(&mut socket, json!({"serverContent":{"generationComplete":true}})).await;
+            // The next client message must be close, never setup or resumption.
+            GeminiLiveServer::expect_close(&mut socket).await;
+        }).await;
+        let (provider, model) = server.model();
+        let mut session = model.open_session(GeminiLiveServer::config()).await.unwrap();
+        {
+            let (mut commands, mut events) = session.split();
+            let receipt = commands.submit(SessionCommand::Input(Message::user_text("continue on the original connection").unwrap())).await.unwrap();
+            let mut response = None;
+            let mut answer = false;
+            loop {
+                match events.recv().await.expect("response survives auxiliary metadata") {
+                    SessionEvent::ResponseStarted { command:Some(command),response:started } => {assert_eq!(command,receipt);assert!(response.replace(started).is_none());},
+                    SessionEvent::Output { response:observed,content:ContentPart::Text { text },.. } => {assert_eq!(response.as_ref(),Some(&observed));assert_eq!(text,"original connection answer");answer=true;},
+                    SessionEvent::ResponseFinished { response:finished,outcome:ResponseOutcome::Completed,continuity:SessionContinuity::Reusable,output:None } => {assert_eq!(response.as_ref(),Some(&finished));break;},
+                    SessionEvent::ControlApplied { .. } => {},
+                    unexpected => panic!("known resumption metadata changed the active generation: {unexpected:?}"),
+                }
+            }
+            assert!(answer);
+            let mut idle = Box::pin(events.recv());
+            poll_fn(|cx| {assert!(idle.as_mut().poll(cx).is_pending());Poll::Ready(())}).await;
+        }
+        session.close().await.unwrap();
+        provider.shutdown().await.unwrap();
+        server.finish().await;
+    }).await.expect("auxiliary resumption metadata bounded");
+}
+
+#[tokio::test]
+async fn live_malformed_resumption_metadata_and_repeated_setup_remain_protocol_errors() {
+    for payload in [
+        json!({"sessionResumptionUpdate":null}),
+        json!({"sessionResumptionUpdate":{"resumable":"true"}}),
+        json!({"sessionResumptionUpdate":{"newHandle":7,"resumable":true}}),
+        json!({"sessionResumptionUpdate":{},"serverContent":{"generationComplete":true}}),
+        json!({"setupComplete":{}}),
+    ] {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            let server = GeminiLiveServer::start(move |mut socket| async move {
+                GeminiLiveServer::setup(&mut socket).await;
+                GeminiLiveServer::input(&mut socket, "validate auxiliary metadata").await;
+                GeminiLiveServer::send(&mut socket, payload).await;
+                GeminiLiveServer::expect_close(&mut socket).await;
+            })
+            .await;
+            let (provider, model) = server.model();
+            let mut session = model
+                .open_session(GeminiLiveServer::config())
+                .await
+                .unwrap();
+            {
+                let (mut commands, mut events) = session.split();
+                commands
+                    .submit(SessionCommand::Input(
+                        Message::user_text("validate auxiliary metadata").unwrap(),
+                    ))
+                    .await
+                    .unwrap();
+                loop {
+                    match events
+                        .recv()
+                        .await
+                        .expect("malformed server metadata must terminate")
+                    {
+                        SessionEvent::Terminated {
+                            reason,
+                            unfinished_responses,
+                            ..
+                        } => {
+                            assert!(matches!(reason.kind(), ErrorKind::InvalidResponse(_)));
+                            assert_eq!(unfinished_responses.len(), 1);
+                            break;
+                        }
+                        SessionEvent::ResponseStarted { .. }
+                        | SessionEvent::ControlApplied { .. } => {}
+                        unexpected => panic!(
+                            "malformed auxiliary envelope fabricated progress: {unexpected:?}"
+                        ),
+                    }
+                }
+                assert!(events.recv().await.is_none());
+            }
+            session.close().await.unwrap();
+            provider.shutdown().await.unwrap();
+            server.finish().await;
+        })
+        .await
+        .expect("invalid auxiliary metadata bounded");
+    }
+}
+
+#[tokio::test]
+async fn live_empty_server_envelopes_are_nonterminal_keepalives() {
+    // Observed after setup in three real cases in gemini-live-resumption-fix/.
+    GeminiLiveServer::auxiliary_frames(vec![json!({}), json!({})]).await;
+}
+
+#[tokio::test]
+async fn live_input_voice_activity_is_uncorrelated_auxiliary_telemetry() {
+    // voiceActivity is alongside usageMetadata, outside messageType in the
+    // official Live server envelope. The first frame was observed in the real
+    // manual-audio case in gemini-live-resumption-fix/ on 2026-11-01.
+    GeminiLiveServer::auxiliary_frames(vec![
+        json!({"voiceActivity":{"audioOffset":"0s","type":"ACTIVITY_START"}}),
+        json!({"voiceActivity":{"audioOffset":"1.250s","type":"ACTIVITY_END"},"usageMetadata":{"promptTokenCount":2}}),
+        json!({"voiceActivity":{}}),
+    ]).await;
+}
+
+#[tokio::test]
+async fn live_auxiliary_messages_do_not_extend_the_original_response_deadline() {
+    tokio::time::timeout(Duration::from_secs(6),async {
+        let sent=std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let observed=std::sync::Arc::clone(&sent);
+        let server=GeminiLiveServer::start(move |mut socket|async move {
+            GeminiLiveServer::setup(&mut socket).await;
+            GeminiLiveServer::input(&mut socket,"keep the original deadline").await;
+            let mut heartbeat=tokio::time::interval(Duration::from_millis(100));
+            loop {
+                tokio::select! {
+                    _=heartbeat.tick()=>{
+                        let index=sent.fetch_add(1,std::sync::atomic::Ordering::SeqCst);
+                        let frame=if index.is_multiple_of(2) {json!({})} else {json!({"voiceActivity":{"type":"ACTIVITY_START","audioOffset":"0s"}})};
+                        GeminiLiveServer::send(&mut socket,frame).await;
+                    },
+                    message=socket.next()=>{
+                        assert!(matches!(message,Some(Ok(WebSocketMessage::Close(_)))));
+                        socket.flush().await.expect("deadline close acknowledgement");break;
+                    },
+                }
+            }
+        }).await;
+        let (provider,model)=server.model();
+        let mut session=model.open_session(GeminiLiveServer::config()).await.unwrap();
+        {
+            let (mut commands,mut events)=session.split();
+            commands.submit(SessionCommand::Input(Message::user_text("keep the original deadline").unwrap())).await.unwrap();
+            loop {
+                match events.recv().await.expect("original deadline remains authoritative") {
+                    SessionEvent::Terminated { reason,unfinished_responses,.. }=>{assert_eq!(reason.kind(),ErrorKind::Timeout);assert_eq!(unfinished_responses.len(),1);break;},
+                    SessionEvent::ResponseStarted{..}|SessionEvent::ControlApplied{..}=>{},
+                    unexpected=>panic!("auxiliary traffic changed generation outcome: {unexpected:?}"),
+                }
+            }
+            assert!(events.recv().await.is_none());
+        }
+        assert!(observed.load(std::sync::atomic::Ordering::SeqCst)>=2,"native heartbeat continued while the response waited");
+        session.close().await.unwrap();provider.shutdown().await.unwrap();server.finish().await;
+    }).await.expect("heartbeats cannot indefinitely postpone the three-second response deadline");
+}
+
+#[tokio::test]
+async fn live_optional_transcription_markers_finalize_accumulated_input_and_output() {
+    // Google SDK Transcription documents optional text/finished:
+    // https://googleapis.github.io/js-genai/release_docs/interfaces/types.Transcription.html
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let server = GeminiLiveServer::start(|mut socket| async move {
+            GeminiLiveServer::setup(&mut socket).await;
+            GeminiLiveServer::input(&mut socket, "transcription markers").await;
+            for content in [
+                json!({"inputTranscription":{"languageCode":"en"}}),
+                json!({"inputTranscription":{"text":"first "}}),
+                json!({"inputTranscription":{"text":"input"}}),
+                json!({"inputTranscription":{"finished":true}}),
+                json!({"inputTranscription":{"text":null,"finished":null}}),
+                json!({"inputTranscription":{"text":"second input"}}),
+                json!({"inputTranscription":{"finished":true}}),
+                json!({"inputTranscription":{"finished":true}}),
+                json!({"outputTranscription":{"languageCode":"en"}}),
+                json!({"outputTranscription":{"text":"hello "}}),
+                json!({"outputTranscription":{"text":"world","finished":true}}),
+                json!({"generationComplete":true}),
+            ] {
+                GeminiLiveServer::send(&mut socket, json!({"serverContent":content})).await;
+            }
+            GeminiLiveServer::expect_close(&mut socket).await;
+        })
+        .await;
+        let (provider, model) = server.model();
+        let mut session = model
+            .open_session(GeminiLiveServer::config())
+            .await
+            .unwrap();
+        {
+            let (mut commands, mut events) = session.split();
+            commands
+                .submit(SessionCommand::Input(
+                    Message::user_text("transcription markers").unwrap(),
+                ))
+                .await
+                .unwrap();
+            let mut input = Vec::new();
+            let mut output = Vec::new();
+            let mut response = None;
+            let mut segment = None;
+            loop {
+                match events
+                    .recv()
+                    .await
+                    .expect("transcription markers remain supported")
+                {
+                    SessionEvent::ResponseStarted {
+                        response: started, ..
+                    } => response = Some(started),
+                    SessionEvent::Transcription {
+                        source: TranscriptionSource::Input { command: None },
+                        text,
+                        finalized,
+                    } => input.push((text, finalized)),
+                    SessionEvent::Transcription {
+                        source:
+                            TranscriptionSource::Output {
+                                response: observed,
+                                segment: observed_segment,
+                            },
+                        text,
+                        finalized,
+                    } => {
+                        assert_eq!(response.as_ref(), Some(&observed));
+                        if let Some(segment) = &segment {
+                            assert_eq!(segment, &observed_segment);
+                        } else {
+                            segment = Some(observed_segment);
+                        }
+                        output.push((text, finalized));
+                    }
+                    SessionEvent::ResponseFinished {
+                        outcome: ResponseOutcome::Completed,
+                        ..
+                    } => break,
+                    SessionEvent::ControlApplied { .. } => {}
+                    unexpected => {
+                        panic!("optional transcription fields changed meaning: {unexpected:?}")
+                    }
+                }
+            }
+            assert_eq!(
+                input,
+                vec![
+                    ("first ".into(), false),
+                    ("input".into(), false),
+                    ("first input".into(), true),
+                    ("second input".into(), false),
+                    ("second input".into(), true),
+                    ("".into(), true)
+                ]
+            );
+            assert_eq!(
+                output,
+                vec![("hello ".into(), false), ("hello world".into(), true)]
+            );
+        }
+        session.close().await.unwrap();
+        provider.shutdown().await.unwrap();
+        server.finish().await;
+    })
+    .await
+    .expect("optional transcript finalization bounded");
+}
+
+#[tokio::test]
+async fn live_transcript_finalization_transfers_retained_bytes_without_duplicate_budget() {
+    tokio::time::timeout(Duration::from_secs(20),async {
+        let (consumed,mut acknowledgements)=tokio::sync::mpsc::channel(1);
+        let server=GeminiLiveServer::start(move |mut socket|async move {
+            GeminiLiveServer::setup(&mut socket).await;
+            GeminiLiveServer::input(&mut socket,"large independent transcripts").await;
+            for _ in 0..2 {
+                for index in 0..=17 {
+                    let transcript=if index<17 {json!({"text":"x".repeat(1024*1024)})} else {json!({"finished":true})};
+                    GeminiLiveServer::send(&mut socket,json!({"serverContent":{"inputTranscription":transcript}})).await;
+                    tokio::select! {
+                        message=socket.next()=>{
+                            assert!(matches!(message,Some(Ok(WebSocketMessage::Close(_)))));
+                            socket.flush().await.expect("failed finalization still closes cleanly");return;
+                        },
+                        acknowledgement=acknowledgements.recv()=>{
+                            if acknowledgement.is_none(){GeminiLiveServer::expect_close(&mut socket).await;return;}
+                        },
+                    }
+                }
+            }
+            GeminiLiveServer::send(&mut socket,json!({"serverContent":{"generationComplete":true}})).await;
+            GeminiLiveServer::expect_close(&mut socket).await;
+        }).await;
+        let (provider,model)=server.model_with_timeout(Duration::from_secs(15));
+        let mut session=model.open_session(GeminiLiveServer::config()).await.unwrap();
+        {
+            let (mut commands,mut events)=session.split();
+            commands.submit(SessionCommand::Input(Message::user_text("large independent transcripts").unwrap())).await.unwrap();
+            let mut deltas=0;let mut snapshots=0;
+            loop {match events.recv().await.expect("retained transcript remains within32MiB") {
+                SessionEvent::Transcription { source:TranscriptionSource::Input {command:None},text,finalized:false }=>{assert_eq!(text.len(),1024*1024);deltas+=1;consumed.send(()).await.unwrap();},
+                SessionEvent::Transcription { source:TranscriptionSource::Input {command:None},text,finalized:true }=>{assert_eq!(text.len(),17*1024*1024);assert_eq!(deltas,17);deltas=0;snapshots+=1;consumed.send(()).await.unwrap();},
+                SessionEvent::ResponseFinished {outcome:ResponseOutcome::Completed,..}=>break,
+                SessionEvent::ResponseStarted{..}|SessionEvent::ControlApplied{..}=>{},
+                unexpected=>panic!("transcript terminated before required finalization: {unexpected:?}"),
+            }}
+            assert_eq!(snapshots,2);assert_eq!(deltas,0);
+        }
+        session.close().await.unwrap();provider.shutdown().await.unwrap();server.finish().await;
+    }).await.expect("bounded transcript ownership transfer");
+}
+
+#[tokio::test]
+async fn live_malformed_auxiliary_and_terminal_fields_are_not_silently_ignored() {
+    for payload in [
+        json!({"voiceActivity":null}),
+        json!({"voiceActivity":{"type":true}}),
+        json!({"voiceActivity":{"type":"NOT_ACTIVITY"}}),
+        json!({"voiceActivity":{"audioOffset":3}}),
+        json!({"serverContent":{"inputTranscription":{"text":3}}}),
+        json!({"serverContent":{"inputTranscription":{"finished":"yes"}}}),
+        json!({"serverContent":{"outputTranscription":{"finished":"yes"}}}),
+        json!({"serverContent":{"generationComplete":"yes"}}),
+        json!({"serverContent":{"turnComplete":"yes"}}),
+        json!({"serverContent":{"interrupted":"yes"}}),
+        json!({"serverContent":{"waitingForInput":"yes"}}),
+    ] {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            let server = GeminiLiveServer::start(move |mut socket| async move {
+                GeminiLiveServer::setup(&mut socket).await;
+                GeminiLiveServer::input(&mut socket, "malformed native fields").await;
+                GeminiLiveServer::send(&mut socket, payload).await;
+                GeminiLiveServer::send(
+                    &mut socket,
+                    json!({"serverContent":{"generationComplete":true}}),
+                )
+                .await;
+                GeminiLiveServer::expect_close(&mut socket).await;
+            })
+            .await;
+            let (provider, model) = server.model();
+            let mut session = model
+                .open_session(GeminiLiveServer::config())
+                .await
+                .unwrap();
+            {
+                let (mut commands, mut events) = session.split();
+                commands
+                    .submit(SessionCommand::Input(
+                        Message::user_text("malformed native fields").unwrap(),
+                    ))
+                    .await
+                    .unwrap();
+                loop {
+                    match events
+                        .recv()
+                        .await
+                        .expect("malformed fields must fail before later success")
+                    {
+                        SessionEvent::Terminated { reason, .. } => {
+                            assert!(matches!(reason.kind(), ErrorKind::InvalidResponse(_)));
+                            break;
+                        }
+                        SessionEvent::ResponseStarted { .. }
+                        | SessionEvent::ControlApplied { .. } => {}
+                        unexpected => {
+                            panic!("malformed native field escaped validation: {unexpected:?}")
+                        }
+                    }
+                }
+                assert!(events.recv().await.is_none());
+            }
+            session.close().await.unwrap();
+            provider.shutdown().await.unwrap();
+            server.finish().await;
+        })
+        .await
+        .expect("malformed native fields bounded");
+    }
 }
 
 #[tokio::test]

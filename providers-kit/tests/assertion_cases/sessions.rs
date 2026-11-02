@@ -7,7 +7,7 @@ use providers_kit::session::{
 
 use crate::live_failures::CaseFailure;
 
-use crate::live_assertions::SessionTurnEvidence;
+use crate::live_assertions::{InputTranscriptionEvidence, SessionTurnEvidence};
 
 struct SessionFixture;
 
@@ -1027,6 +1027,139 @@ fn session_evidence_final_only_transcript_proves_correlated_output() {
     evidence
         .verify()
         .expect("affirmative final-only transcript is usable evidence");
+}
+
+#[test]
+fn session_evidence_unattributed_input_finals_preserve_successive_transcripts() {
+    let mut evidence = SessionTurnEvidence::new(SessionFixture::PHRASE, true);
+    let mut input = InputTranscriptionEvidence::new();
+    // A native marker-only final is normalized to the accumulated full snapshot.
+    // A later unattributed delta starts another transcript, not the first one's
+    // replacement. Every raw observation remains in the evidence.
+    let observations = [
+        ("First ", false),
+        ("input. ", false),
+        ("First input. ", true),
+        ("second draft", false),
+        ("Second input.", true),
+    ];
+    for (text, finalized) in observations {
+        input.observe(None, text, finalized).unwrap();
+        evidence
+            .observe(&SessionEvent::Transcription {
+                source: TranscriptionSource::Input { command: None },
+                text: text.into(),
+                finalized,
+            })
+            .expect("successive unattributed transcripts remain observable");
+    }
+    let observation = evidence.observation();
+    assert_eq!(
+        observation["input_transcript"],
+        "First input. Second input."
+    );
+    assert_eq!(input.text(), "First input. Second input.");
+    let retained = observation["events"].as_array().unwrap();
+    assert_eq!(retained.len(), observations.len());
+    for (retained, (text, finalized)) in retained.iter().zip(observations) {
+        assert_eq!(retained["received"]["event"], "transcription");
+        assert_eq!(retained["received"]["text"], text);
+        assert_eq!(retained["received"]["finalized"], finalized);
+        assert_eq!(
+            retained["received"]["source"],
+            format!("{:?}", TranscriptionSource::Input { command: None })
+        );
+    }
+    assert!(
+        evidence.verify().is_err(),
+        "input cannot prove output progress"
+    );
+    evidence.observe(&SessionFixture::audio()).unwrap();
+    evidence
+        .observe(&SessionFixture::transcript(SessionFixture::PHRASE.into()))
+        .unwrap();
+    evidence.observe(&SessionFixture::completed()).unwrap();
+    evidence.verify().unwrap();
+    assert_eq!(evidence.observation()["model_exact_copy"], true);
+}
+
+#[test]
+fn session_evidence_unattributed_final_only_transcripts_never_replace_completed_input() {
+    let mut evidence = SessionTurnEvidence::new(SessionFixture::PHRASE, true);
+    let mut input = InputTranscriptionEvidence::new();
+    let observations = ["First input. ", "Second input.", "Second input.", ""];
+    for text in observations {
+        input.observe(None, text, true).unwrap();
+        evidence
+            .observe(&SessionEvent::Transcription {
+                source: TranscriptionSource::Input { command: None },
+                text: text.into(),
+                finalized: true,
+            })
+            .unwrap();
+    }
+    let expected = "First input. Second input.Second input.";
+    assert_eq!(input.text(), expected);
+    let observation = evidence.observation();
+    assert_eq!(observation["input_transcript"], expected);
+    let retained = observation["events"].as_array().unwrap();
+    assert_eq!(retained.len(), observations.len());
+    for (retained, text) in retained.iter().zip(observations) {
+        assert_eq!(retained["received"]["text"], text);
+        assert_eq!(retained["received"]["finalized"], true);
+    }
+}
+
+#[test]
+fn session_evidence_unattributed_transcript_history_keeps_aggregate_bounds() {
+    let mut evidence = SessionTurnEvidence::new(SessionFixture::PHRASE, true);
+    evidence
+        .observe(&SessionEvent::Transcription {
+            source: TranscriptionSource::Input { command: None },
+            text: "a".repeat(17 * 1024),
+            finalized: true,
+        })
+        .unwrap();
+    let error = evidence
+        .observe(&SessionFixture::input_transcript("b".repeat(17 * 1024)))
+        .expect_err("both retained utterances consume the shared transcript limit");
+    assert!(error.contains("transcription exceeded 32 KiB"), "{error}");
+    let observation = evidence.observation();
+    assert_eq!(observation["input_transcript"], "a".repeat(17 * 1024));
+    assert_eq!(observation["events"].as_array().unwrap().len(), 2);
+    assert!(observation["capture_failure"].is_string());
+}
+
+#[test]
+fn session_evidence_attributed_transcripts_still_reject_post_final_deltas() {
+    for source in [
+        TranscriptionSource::Input {
+            command: Some(SessionFixture::command()),
+        },
+        TranscriptionSource::Output {
+            response: SessionFixture::response(2),
+            segment: SessionFixture::segment(),
+        },
+    ] {
+        let mut evidence = SessionTurnEvidence::new(SessionFixture::PHRASE, true);
+        evidence
+            .observe(&SessionEvent::Transcription {
+                source: source.clone(),
+                text: "Final snapshot".into(),
+                finalized: true,
+            })
+            .unwrap();
+        assert!(
+            evidence
+                .observe(&SessionEvent::Transcription {
+                    source,
+                    text: "late delta".into(),
+                    finalized: false,
+                })
+                .is_err(),
+            "an identified transcript cannot become a new unidentified utterance"
+        );
+    }
 }
 
 #[test]

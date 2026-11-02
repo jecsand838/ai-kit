@@ -659,6 +659,9 @@ pub enum TranscriptionSource {
     /// Native input attribution can be absent; it is never guessed from activity.
     Input {
         /// Original accepted command, or `None` when native attribution is unavailable.
+        /// After a finalized `None` input transcript, the next observation begins
+        /// another unattributed transcript, including a final-only observation.
+        /// It does not identify an accepted command or deduplicate prior text.
         command: Option<CommandId>,
     },
     /// Output is attributed to its original response and audio segment.
@@ -708,7 +711,8 @@ pub enum SessionEvent {
     Transcription {
         /// Actual input/output attribution without guessing an active response.
         source: TranscriptionSource,
-        /// Transcription text for this observation.
+        /// A text delta, or the authoritative full transcript when `finalized` is true.
+        /// A native marker-only ending preserves the accumulated text in this snapshot.
         text: String,
         /// Whether this observation is an authoritative final value rather than an interim value.
         finalized: bool,

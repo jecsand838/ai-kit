@@ -20,6 +20,7 @@ use providers_kit::session::{
 use serde_json::{Value, json};
 
 use super::{LiveProvider, Service};
+use crate::live_assertions::InputTranscriptionEvidence;
 use crate::live_failures::CaseFailure;
 
 struct SessionProof {
@@ -29,8 +30,7 @@ struct SessionProof {
     record_bytes: usize,
     audio: Vec<u8>,
     output_transcription: String,
-    input_transcription: String,
-    input_segments: BTreeMap<Option<CommandId>, String>,
+    input_transcription: InputTranscriptionEvidence,
     output_segments: BTreeMap<OutputSegmentId, String>,
     started: BTreeSet<ResponseId>,
     finished: BTreeSet<ResponseId>,
@@ -45,8 +45,7 @@ impl SessionProof {
             record_bytes: 0,
             audio: Vec::new(),
             output_transcription: String::new(),
-            input_transcription: String::new(),
-            input_segments: BTreeMap::new(),
+            input_transcription: InputTranscriptionEvidence::new(),
             output_segments: BTreeMap::new(),
             started: BTreeSet::new(),
             finished: BTreeSet::new(),
@@ -116,14 +115,11 @@ impl SessionProof {
                 finalized,
             } => match source {
                 TranscriptionSource::Input { command } => {
-                    let observed = self.input_segments.entry(command.clone()).or_default();
-                    if *finalized {
-                        *observed = text.clone();
-                    } else {
-                        observed.push_str(text);
-                    }
-                    self.input_transcription =
-                        self.input_segments.values().map(String::as_str).collect();
+                    self.record(json!({"event":format!("{event:?}")}))?;
+                    self.input_transcription
+                        .observe(command.as_ref(), text, *finalized)
+                        .map_err(CaseFailure::from)?;
+                    return Ok(event);
                 }
                 TranscriptionSource::Output { response, segment } => {
                     if !self.started.contains(response) {
@@ -236,6 +232,8 @@ impl SessionProof {
         let mut turn_ended = false;
         let mut recovery_audio = false;
         let mut recovery_transcription = String::new();
+        let mut recovery_tool_submitted = false;
+        let mut recovery_transcription_before_tool = None;
         loop {
             match self.next(events).await? {
                 SessionEvent::ToolsInvalidated { requests } => {
@@ -283,6 +281,76 @@ impl SessionProof {
                             "manual Gemini activity created duplicate recovery responses".into(),
                         );
                     }
+                }
+                SessionEvent::ToolRequested {
+                    response,
+                    request: fresh,
+                    call: fresh_call,
+                } if recovery.as_ref() == Some(&response) => {
+                    if recovery_tool_submitted
+                        || !invalidated
+                        || !interrupted
+                        || completed
+                        || turn_ended
+                        || fresh == request
+                        || fresh_call.id() == call.id()
+                        || fresh_call.name() != "strict_session_lookup"
+                        || fresh_call.arguments() != &json!({"code":"session-probe"})
+                    {
+                        return Err("invalid or repeated Gemini recovery tool obligation".into());
+                    }
+                    // Cancellation does not prohibit the model from issuing a new
+                    // obligation. Fulfill this one as the caller, while proving that
+                    // the original request stays invalid even with a fresh call pending.
+                    let stale = FunctionResult::new(
+                        call.id().map(str::to_owned),
+                        call.name(),
+                        vec![ContentPart::Json {
+                            value: json!({"answer":"stale result must not execute"}),
+                        }],
+                        false,
+                    )
+                    .map_err(LiveProvider::error)?;
+                    let stale_error = commands
+                        .submit(SessionCommand::ToolResults(vec![SessionToolResult::new(
+                            request.clone(),
+                            stale,
+                        )]))
+                        .await
+                        .err()
+                        .ok_or_else(|| {
+                            CaseFailure::from(
+                                "cancelled Gemini request became valid when a fresh call arrived",
+                            )
+                        })?;
+                    if !matches!(
+                        stale_error.kind(),
+                        ErrorKind::InvalidInput | ErrorKind::InvalidState
+                    ) {
+                        return Err(LiveProvider::error(stale_error));
+                    }
+                    self.record(json!({"stale_tool_rejected_during_recovery":{
+                        "request":request.sequence().get(),
+                        "fresh_request":fresh.sequence().get(),
+                        "failure":CaseFailure::from(stale_error).evidence(),
+                    }}))?;
+                    let result = FunctionResult::new(
+                        fresh_call.id().map(str::to_owned),
+                        fresh_call.name(),
+                        vec![ContentPart::Json {
+                            value: json!({"answer":"audio input received"}),
+                        }],
+                        false,
+                    )
+                    .map_err(LiveProvider::error)?;
+                    self.submit(
+                        commands,
+                        SessionCommand::ToolResults(vec![SessionToolResult::new(fresh, result)]),
+                    )
+                    .await?;
+                    recovery_tool_submitted = true;
+                    recovery_audio = false;
+                    recovery_transcription_before_tool = Some(recovery_transcription.clone());
                 }
                 SessionEvent::Output {
                     response,
@@ -345,10 +413,13 @@ impl SessionProof {
                 && completed
                 && turn_ended
                 && recovery_audio
-                && !self.input_transcription.trim().is_empty()
+                && !self.input_transcription.text().trim().is_empty()
                 && recovery_transcription
                     .to_lowercase()
                     .contains("audio input received")
+                && recovery_transcription_before_tool
+                    .as_ref()
+                    .is_none_or(|before| before.trim() != recovery_transcription.trim())
             {
                 return Ok(());
             }
@@ -451,7 +522,7 @@ impl SessionProof {
         let observation = json!({
             "boundary":"public_session", "native_frames_captured":false, "selected_model":self.model, "session_id":self.session,
             "copy_grade_exception":false, "events":self.records, "audio_bytes":self.audio.len(), "audio_file":(!self.audio.is_empty()).then(||audio_path.file_name().and_then(|name|name.to_str())),
-            "input_transcription":self.input_transcription,"output_transcription":self.output_transcription,
+            "input_transcription":self.input_transcription.text(),"output_transcription":self.output_transcription,
             "journey":{"passed":journey.is_ok(),"failure":journey.as_ref().err().map(CaseFailure::evidence)},
             "close":{"passed":cleanup.is_ok(),"failure":cleanup.as_ref().err().map(CaseFailure::evidence)}
         });
@@ -582,7 +653,7 @@ impl LiveProvider {
                 let satisfied = match scenario {
                     GeminiScenario::Text => !proof.audio.is_empty() && text.contains("amber"),
                     GeminiScenario::Tool => tool_submitted && proof.audio.len() > after_tool_audio && proof.output_segments.iter().any(|(segment,text)| after_tool_transcript.get(segment) != Some(text) && text.to_lowercase().contains("violet")),
-                    GeminiScenario::ManualAudio => !proof.audio.is_empty() && !proof.input_transcription.trim().is_empty() && text.contains("audio input received"),
+                    GeminiScenario::ManualAudio => !proof.audio.is_empty() && !proof.input_transcription.text().trim().is_empty() && text.contains("audio input received"),
                     GeminiScenario::ToolCancellation => unreachable!(),
                 };
                 if completed && turn_ended && satisfied { break; }

@@ -49,6 +49,14 @@ all late events or outstanding tools have drained. Input activity start/end and
 empty completed input or claim narrow response cancellation/playback semantics
 that the protocol cannot support; reject those requests honestly.
 
+Native `voiceActivity` reports uncorrelated input VAD telemetry. Its speech
+start/end signals are distinct from caller activity commands and from native
+`serverContent.interrupted`/`turnComplete` interaction boundaries. The adapter
+validates this telemetry without inventing a command acknowledgement, response
+correlation or interaction event. Empty server envelopes carry no progress and
+never extend an active response deadline. See the [server-message schema and
+voice activity fields](https://ai.google.dev/api/live#BidiGenerateContentServerMessage).
+
 Supplied Live function declarations explicitly select native `behavior: BLOCKING`.
 Gemini 3.8 Live defaults to `NON_BLOCKING` but also supports blocking execution;
 the supplied mapping chooses blocking continuation so the caller can resolve a
@@ -66,6 +74,15 @@ separate. Continuity uncertainty after a partial mutation blocks new generation
 commands, but observation and consuming cleanup remain available. Native Live
 uses the same shared admission/sealing authority without holding a generation
 permit throughout an idle session.
+
+The [Google SDK transcription schema](https://googleapis.github.io/js-genai/release_docs/interfaces/types.Transcription.html)
+permits omitted text and an optional `finished` marker. Text fragments are
+accumulated within their input transcript or output response/segment; a finished
+marker publishes the full accumulated snapshot, including when that marker has
+no text. The next input observation after a finished unattributed transcript,
+including a final-only observation, starts a new transcript with `command: None`.
+Buffer ownership transfers into the final
+observation under the shared retention budget without copying the full text.
 
 This approved replacement supersedes the earlier active Gemini-session
 withdrawal. The previous manual/automatic audio, transcription, function,

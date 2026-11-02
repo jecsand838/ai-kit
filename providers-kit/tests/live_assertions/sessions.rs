@@ -10,6 +10,86 @@ use serde_json::{Value, json};
 
 use crate::live_failures::CaseFailure;
 
+/// Retains input utterances using each final as an unattributed boundary.
+/// Every later unattributed observation starts another utterance, even a final-only
+/// or duplicate snapshot: missing native identity never permits deduplication.
+pub struct InputTranscriptionEvidence {
+    segments: Vec<(Option<CommandId>, String, bool)>,
+    text: String,
+    capture_failure: Option<String>,
+}
+
+impl InputTranscriptionEvidence {
+    pub fn new() -> Self {
+        Self {
+            segments: Vec::new(),
+            text: String::new(),
+            capture_failure: None,
+        }
+    }
+
+    pub fn observe(
+        &mut self,
+        command: Option<&CommandId>,
+        text: &str,
+        finalized: bool,
+    ) -> Result<(), String> {
+        if let Some(error) = &self.capture_failure {
+            return Err(error.clone());
+        }
+        let mut index = self
+            .segments
+            .iter()
+            .rposition(|(retained, _, _)| retained.as_ref() == command);
+        if index.is_some_and(|index| self.segments[index].2) {
+            if command.is_none() {
+                index = None;
+            } else if !finalized {
+                return Err("session transcription delta followed its finalized snapshot".into());
+            }
+        }
+        let previous = index.map_or(0, |index| self.segments[index].1.len());
+        let next = if finalized {
+            Some(text.len())
+        } else {
+            previous.checked_add(text.len())
+        };
+        let total = next.and_then(|next| {
+            self.text
+                .len()
+                .checked_sub(previous)
+                .and_then(|retained| retained.checked_add(next))
+        });
+        if total.is_none_or(|total| total > 32 * 1024) {
+            let error = "session transcription exceeded 32 KiB".to_owned();
+            self.capture_failure = Some(error.clone());
+            return Err(error);
+        }
+        if let Some(index) = index {
+            let (_, retained, finished) = &mut self.segments[index];
+            if finalized {
+                text.clone_into(retained);
+            } else {
+                retained.push_str(text);
+            }
+            *finished = finalized;
+        } else {
+            self.segments
+                .push((command.cloned(), text.to_owned(), finalized));
+        }
+        self.text = self
+            .segments
+            .iter()
+            .map(|(_, text, _)| text.as_str())
+            .collect();
+        Ok(())
+    }
+
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+}
+
 /// Evidence belongs to exactly one turn; text and input transcripts are not audio output.
 pub struct SessionTurnEvidence {
     expectation: SessionExpectation,
@@ -25,7 +105,7 @@ pub struct SessionTurnEvidence {
     transcripts: Vec<(TranscriptionSource, String, bool, bool)>,
     audio_bytes: usize,
     output_transcript: String,
-    input_transcript: String,
+    input_transcript: InputTranscriptionEvidence,
     completed: bool,
     started: Instant,
     events: Vec<Value>,
@@ -70,7 +150,7 @@ impl SessionTurnEvidence {
             transcripts: Vec::new(),
             audio_bytes: 0,
             output_transcript: String::new(),
-            input_transcript: String::new(),
+            input_transcript: InputTranscriptionEvidence::new(),
             completed: false,
             started: Instant::now(),
             events: Vec::new(),
@@ -425,6 +505,15 @@ impl SessionTurnEvidence {
         text: &str,
         finalized: bool,
     ) -> Result<(), String> {
+        if let TranscriptionSource::Input { command } = source {
+            let result = self
+                .input_transcript
+                .observe(command.as_ref(), text, finalized);
+            if let Some(error) = &self.input_transcript.capture_failure {
+                self.capture_failure.get_or_insert_with(|| error.clone());
+            }
+            return result;
+        }
         let index = self
             .transcripts
             .iter()
@@ -438,10 +527,7 @@ impl SessionTurnEvidence {
         } else {
             previous.checked_add(text.len())
         };
-        let retained = match source {
-            TranscriptionSource::Input { .. } => self.input_transcript.len(),
-            TranscriptionSource::Output { .. } => self.output_transcript.len(),
-        };
+        let retained = self.output_transcript.len();
         let total = next.and_then(|next| {
             retained
                 .checked_sub(previous)
@@ -474,13 +560,6 @@ impl SessionTurnEvidence {
             .iter()
             .filter_map(|(source, text, _, _)| {
                 matches!(source, TranscriptionSource::Output { .. }).then_some(text.as_str())
-            })
-            .collect();
-        self.input_transcript = self
-            .transcripts
-            .iter()
-            .filter_map(|(source, text, _, _)| {
-                matches!(source, TranscriptionSource::Input { .. }).then_some(text.as_str())
             })
             .collect();
         self.result_transcription=self.transcripts.iter().any(|(source,_,_,progress)|*progress && matches!(source,TranscriptionSource::Output{response,..} if self.continuation_response.as_ref()==Some(response)));
@@ -592,7 +671,8 @@ impl SessionTurnEvidence {
     pub fn ready(&self) -> bool {
         match &self.expectation {
             SessionExpectation::Complete { .. } => {
-                self.completed && (!self.audio_input || !self.input_transcript.trim().is_empty())
+                self.completed
+                    && (!self.audio_input || !self.input_transcript.text().trim().is_empty())
             }
             SessionExpectation::AudioCancellation { cancelled, .. } => *cancelled,
         }
@@ -742,7 +822,7 @@ impl SessionTurnEvidence {
         json!({"audio_input":self.audio_input, "expected":expected, "expectation":expectation,
             "model_exact_copy":copy_grade,"function_result_checkpoint":checkpoint,
             "function_calls":usize::from(self.function_call.is_some()), "output_audio_bytes":self.audio_bytes,
-            "output_transcript":self.output_transcript, "input_transcript":self.input_transcript,
+            "output_transcript":self.output_transcript, "input_transcript":self.input_transcript.text(),
             "completed":self.completed, "events":self.events, "event_bytes":self.event_bytes,
             "capture_failure":self.capture_failure, "outcome":self.outcome})
     }

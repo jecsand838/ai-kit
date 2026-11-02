@@ -351,15 +351,14 @@ impl CapturedConnection {
             _ = stopped.changed() => Ok(()),
             result = operation => result,
         };
-        if result.is_err() {
-            if let Some(connection) = observation
+        if result.is_err()
+            && let Some(connection) = observation
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .connections
                 .get_mut(&id)
-            {
-                connection.failure = Some("socket_forward_failed");
-            }
+        {
+            connection.failure = Some("socket_forward_failed");
         }
         // A peer reset can be an ordinary later SSE shutdown. The observation
         // records the error; only complete frames whose byte endpoints were
@@ -560,6 +559,22 @@ enum HttpBodyFraming {
     Close,
 }
 
+struct HttpBodyParse<'a> {
+    bytes: &'a [u8],
+    start: usize,
+    eof: bool,
+    limit: usize,
+    framing_bytes: usize,
+    retain: bool,
+    budget: usize,
+}
+
+struct HttpBody {
+    bytes: Vec<u8>,
+    end: usize,
+    complete: bool,
+}
+
 impl NativeRoute {
     fn parse(method: &str, target: &str) -> Self {
         let path = target.split('?').next().unwrap_or(target);
@@ -715,8 +730,20 @@ impl<'a> HttpFrame<'a> {
         } else {
             MAX_RESPONSE_BYTES
         };
-        let Some((body, end, complete)) =
-            framing.decode(bytes, body_start, eof, limit, header_size, retain, budget)?
+        let Some(HttpBody {
+            bytes: body,
+            end,
+            complete,
+        }) = (HttpBodyParse {
+            bytes,
+            start: body_start,
+            eof,
+            limit,
+            framing_bytes: header_size,
+            retain,
+            budget,
+        })
+        .decode(&framing)?
         else {
             return Ok(None);
         };
@@ -734,20 +761,24 @@ impl<'a> HttpFrame<'a> {
     }
 }
 
-impl HttpBodyFraming {
-    fn decode(
-        &self,
-        bytes: &[u8],
-        start: usize,
-        eof: bool,
-        limit: usize,
-        mut framing_bytes: usize,
-        retain: bool,
-        budget: usize,
-    ) -> Result<Option<(Vec<u8>, usize, bool)>, &'static str> {
-        match self {
-            Self::Empty => Ok(Some((Vec::new(), start, true))),
-            Self::Length(length) => {
+impl HttpBodyParse<'_> {
+    fn decode(self, framing: &HttpBodyFraming) -> Result<Option<HttpBody>, &'static str> {
+        let Self {
+            bytes,
+            start,
+            eof,
+            limit,
+            mut framing_bytes,
+            retain,
+            budget,
+        } = self;
+        match framing {
+            HttpBodyFraming::Empty => Ok(Some(HttpBody {
+                bytes: Vec::new(),
+                end: start,
+                complete: true,
+            })),
+            HttpBodyFraming::Length(length) => {
                 if *length > limit {
                     return Err("http_body_bound");
                 }
@@ -756,47 +787,47 @@ impl HttpBodyFraming {
                     if retain && bytes.len() - start > budget {
                         return Err("capture_materialization_bound");
                     }
-                    return Ok(Some((
-                        if retain {
+                    return Ok(Some(HttpBody {
+                        bytes: if retain {
                             bytes[start..].to_vec()
                         } else {
                             Vec::new()
                         },
-                        bytes.len(),
-                        false,
-                    )));
+                        end: bytes.len(),
+                        complete: false,
+                    }));
                 }
                 if retain && *length > budget {
                     return Err("capture_materialization_bound");
                 }
-                Ok(Some((
-                    if retain {
+                Ok(Some(HttpBody {
+                    bytes: if retain {
                         bytes[start..end].to_vec()
                     } else {
                         Vec::new()
                     },
                     end,
-                    true,
-                )))
+                    complete: true,
+                }))
             }
-            Self::Close => {
+            HttpBodyFraming::Close => {
                 if bytes.len() - start > limit {
                     return Err("http_body_bound");
                 }
                 if retain && bytes.len() - start > budget {
                     return Err("capture_materialization_bound");
                 }
-                Ok(Some((
-                    if retain {
+                Ok(Some(HttpBody {
+                    bytes: if retain {
                         bytes[start..].to_vec()
                     } else {
                         Vec::new()
                     },
-                    bytes.len(),
-                    eof,
-                )))
+                    end: bytes.len(),
+                    complete: eof,
+                }))
             }
-            Self::Chunked => {
+            HttpBodyFraming::Chunked => {
                 let mut cursor = start;
                 let mut length = 0usize;
                 let mut body = Vec::new();
@@ -808,7 +839,11 @@ impl HttpBodyFraming {
                         return if bytes.len() - cursor > MAX_CHUNK_LINE {
                             Err("http_chunk_line_bound")
                         } else {
-                            Ok(Some((body, bytes.len(), false)))
+                            Ok(Some(HttpBody {
+                                bytes: body,
+                                end: bytes.len(),
+                                complete: false,
+                            }))
                         };
                     };
                     if line_end > MAX_CHUNK_LINE {
@@ -836,7 +871,11 @@ impl HttpBodyFraming {
                                 return if bytes.len() - cursor + trailers > MAX_HEADERS {
                                     Err("http_trailer_bound")
                                 } else {
-                                    Ok(Some((body, bytes.len(), false)))
+                                    Ok(Some(HttpBody {
+                                        bytes: body,
+                                        end: bytes.len(),
+                                        complete: false,
+                                    }))
                                 };
                             };
                             trailers += end + 2;
@@ -849,7 +888,11 @@ impl HttpBodyFraming {
                             }
                             cursor += end + 2;
                             if end == 0 {
-                                return Ok(Some((body, cursor, true)));
+                                return Ok(Some(HttpBody {
+                                    bytes: body,
+                                    end: cursor,
+                                    complete: true,
+                                }));
                             }
                         }
                     }
@@ -869,7 +912,11 @@ impl HttpBodyFraming {
                             let available_end = bytes.len().min(cursor + size);
                             body.extend_from_slice(&bytes[cursor..available_end]);
                         }
-                        return Ok(Some((body, bytes.len(), false)));
+                        return Ok(Some(HttpBody {
+                            bytes: body,
+                            end: bytes.len(),
+                            complete: false,
+                        }));
                     }
                     if &bytes[end - 2..end] != b"\r\n" {
                         return Err("http_chunk_terminator");
@@ -894,10 +941,10 @@ impl CapturedHttp {
         let mut descriptors = 0;
         let mut budget = CAPTURE_BYTES.saturating_sub(observation.retained);
         for connection in observation.connections.values() {
-            if let Err(reason) = capture.connection(connection, &mut descriptors, &mut budget) {
-                if !capture.reasons.contains(&reason) {
-                    capture.reasons.push(reason);
-                }
+            if let Err(reason) = capture.connection(connection, &mut descriptors, &mut budget)
+                && !capture.reasons.contains(&reason)
+            {
+                capture.reasons.push(reason);
             }
         }
         capture

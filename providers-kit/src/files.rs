@@ -20,17 +20,12 @@
 //! use providers_kit::files::FileUploadRequest;
 //! # #[tokio::main(flavor = "current_thread")]
 //! # async fn main() -> Result<(), providers_kit::KitError> {
+//! let request = FileUploadRequest::new("note.txt", "text/plain", b"owned note".to_vec())?;
 //! let provider = Provider::from_config(ProviderConfig::new(
 //!     ProviderKind::OpenAi(OpenAiConfig::new(ApiKey::new("replace-with-your-key")?)),
 //!     TransportConfig::default(),
 //! ))?;
-//! let uploaded = provider
-//!     .upload_file(FileUploadRequest::new(
-//!         "note.txt",
-//!         "text/plain",
-//!         b"owned note".to_vec(),
-//!     )?)
-//!     .await;
+//! let uploaded = provider.upload_file(request).await;
 //! let work = async {
 //!     let file = uploaded.as_ref().map_err(Clone::clone)?;
 //!     let info = provider.file_info(file.id.clone()).await?;

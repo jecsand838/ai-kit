@@ -9,6 +9,9 @@ pub(crate) const TOOL_NAME_NAMESPACE_SEPARATOR: &str = "__";
 
 /// Portable executable tool identifier.
 ///
+/// Caller-authored names contain 1 through 128 ASCII letters, digits, `_`, or
+/// `-`. Model providers may impose stricter name constraints.
+///
 /// # Examples
 ///
 /// ```
@@ -177,8 +180,8 @@ impl ToolName {
     ///
     /// # Errors
     ///
-    /// Returns an error when the rendered name is empty, too long, or contains
-    /// characters outside the Kit's portable tool-name subset.
+    /// Returns [`ToolError::InvalidConfiguration`] unless the name contains
+    /// 1 through 128 ASCII letters, digits, `_`, or `-`.
     ///
     /// See [`crate::declaration::ToolName`] for a complete example.
     ///
@@ -210,7 +213,7 @@ impl ToolName {
         })
     }
 
-    /// Returns the provider-safe rendered name.
+    /// Returns the caller-visible rendered name.
     ///
     /// See [`crate::declaration::ToolName`] for a complete example.
     ///

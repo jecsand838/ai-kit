@@ -690,10 +690,8 @@ impl WorkspaceDefaults {
     ///
     /// ```
     /// use agents_kit::workspace::WorkspaceDefaults;
-    /// let value = WorkspaceDefaults::new(None, None, None)?;
     /// let value = WorkspaceDefaults::empty();
     /// assert_eq!(value.knowledge_policy(), None);
-    /// # Ok::<(), agents_kit::KitError>(())
     /// ```
     pub fn empty() -> Self {
         Self {

@@ -233,7 +233,7 @@ pub enum NotificationResolution {
     Allow,
     /// Denies the requested action.
     Deny {
-        /// Nonempty caller explanation.
+        /// Nonempty caller explanation without leading or trailing whitespace.
         reason: String,
     },
     /// Submits structured interaction content.
@@ -243,7 +243,7 @@ pub enum NotificationResolution {
     },
     /// Dismisses a dismissible interaction.
     Dismiss {
-        /// Nonempty caller explanation.
+        /// Nonempty caller explanation without leading or trailing whitespace.
         reason: String,
     },
 }

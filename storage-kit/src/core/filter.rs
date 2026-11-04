@@ -119,7 +119,10 @@ impl FilterExpr {
         }
     }
 
-    /// Appends `rhs` to an `AND` expression, flattening nested conjunctions.
+    /// Appends `rhs` to an existing left-hand `AND`, or creates a conjunction.
+    ///
+    /// The right-hand expression is retained as one child, including when it
+    /// contains its own nested conjunction.
     ///
     /// # Examples
     ///

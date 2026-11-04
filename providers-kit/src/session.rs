@@ -5,35 +5,104 @@
 //! acknowledges local acceptance; provider outcomes arrive through the event half.
 //! Only the unique owner can close. Tools and agent policy remain caller-owned.
 //!
+//! [`SessionProfile::Conversation`] retains exact generation history for OpenAI,
+//! Anthropic, Gemini and Ollama. [`SessionProfile::Realtime`] selects native OpenAI
+//! Realtime or Gemini Live on a compatible exact model. Unsupported combinations
+//! fail explicitly, without changing the selected model or profile.
+//!
+//! # Submit, observe and close
+//!
+//! This example requires a running Ollama service with the exact model installed.
+//! It observes the response caused by its accepted input, then closes the Session
+//! and shuts down the Provider even if submission or observation fails. Its deadline
+//! bounds local observation; neither timeout nor local cleanup proves remote stop.
+//! Response outcomes are distinct from command acceptance and must be inspected.
+//!
 //! ```no_run
-//! use providers_kit::{KitError, ModelBackend, SessionBackend};
+//! use std::time::Duration;
+//! use providers_kit::{KitError, ModelBackend, ModelId, Provider, ProviderBackend,
+//!     ProviderConfig, SessionBackend};
+//! use providers_kit::config::{OllamaConfig, ProviderKind, TransportConfig};
 //! use providers_kit::error::{ErrorKind, ErrorPhase, Operation};
 //! use providers_kit::generation::Message;
 //! use providers_kit::session::{SessionConfig, SessionProfile, SessionCommand,
 //!     SessionCommands, SessionEvents, SessionEvent, ResponseOutcome};
-//! // Compile-only example: the caller supplies its already selected model.
-//! async fn exchange(model: &impl ModelBackend) -> Result<ResponseOutcome, KitError> {
+//! # #[tokio::main(flavor = "current_thread")]
+//! # async fn main() -> Result<(), KitError> {
+//! let provider = Provider::from_config(ProviderConfig::new(
+//!     ProviderKind::Ollama(OllamaConfig::local()), TransportConfig::default(),
+//! ))?;
+//! let work = async {
+//!     let model = provider.model(ModelId::new("exact-local-model-id")?)?;
 //!     let mut session = model.open_session(SessionConfig::new(SessionProfile::Conversation)).await?;
-//!     let result = async {
+//!     let received = tokio::time::timeout(Duration::from_secs(60), async {
 //!         let (mut commands, mut events) = session.split();
-//!         let _accepted = commands.submit(SessionCommand::Input(Message::user_text("Hello")?)).await?;
+//!         let accepted = commands.submit(SessionCommand::Input(Message::user_text("Hello")?)).await?;
+//!         let mut expected_response = None;
 //!         while let Some(event) = events.recv().await {
 //!             match event {
-//!                 SessionEvent::ResponseFinished { outcome, .. } => return Ok(outcome),
-//!                 SessionEvent::CommandFailed { error, .. } => return Err(error),
+//!                 SessionEvent::ResponseStarted { command: Some(command), response }
+//!                     if command == accepted => expected_response = Some(response),
+//!                 SessionEvent::ResponseFinished { response, outcome, .. }
+//!                     if expected_response.as_ref() == Some(&response) => return Ok(outcome),
+//!                 SessionEvent::CommandFailed { command, error, .. }
+//!                     if command == accepted => return Err(error),
 //!                 SessionEvent::Terminated { reason, .. } => return Err(reason),
 //!                 _ => {}
 //!             }
 //!         }
 //!         Err(KitError::new(ErrorKind::Closed, Operation::SessionReceive, ErrorPhase::SessionReceive))
-//!     }.await;
+//!     }).await;
+//!     let result = received.unwrap_or_else(|_| Err(KitError::new(
+//!         ErrorKind::Timeout, Operation::SessionReceive, ErrorPhase::SessionReceive,
+//!     ))).and_then(|outcome| match outcome {
+//!         ResponseOutcome::Failed(error) | ResponseOutcome::Unresolved(error) => Err(error),
+//!         other => Ok(other),
+//!     });
 //!     match (result, session.close().await) {
 //!         (Ok(outcome), Ok(())) => Ok(outcome),
 //!         (Err(primary), Ok(())) | (Ok(_), Err(primary)) => Err(primary),
 //!         (Err(primary), Err(cleanup)) => Err(primary.with_supplementary(cleanup)),
 //!     }
-//! }
+//! }.await;
+//! let outcome = match (work, provider.shutdown().await) {
+//!     (Ok(outcome), Ok(())) => Ok(outcome),
+//!     (Err(primary), Ok(())) | (Ok(_), Err(primary)) => Err(primary),
+//!     (Err(primary), Err(cleanup)) => Err(primary.with_supplementary(cleanup)),
+//! }?;
+//! println!("Response outcome: {outcome:?}");
+//! # Ok(())
+//! # }
 //! ```
+//!
+//! # Continue caller-executed tools
+//!
+//! Execute only calls delivered by [`SessionEvent::ToolRequested`]. Preserve each
+//! [`ToolRequestId`] and the call's genuine optional native id and name when
+//! constructing [`SessionToolResult`]. [`SessionCommand::ToolResults`] validates
+//! the whole submitted batch before accepting any results. Managed Conversation
+//! retains accepted results once and starts one continuation generation after the
+//! required set is complete; it never executes a tool or runs an autonomous loop.
+//! Native Live calls may need results before the response completes. Delivered
+//! calls can be invalidated by [`SessionEvent::ToolsInvalidated`]; invalidation
+//! cannot undo side effects the application already performed.
+//!
+//! # Observe independently of control
+//!
+//! A pending [`SessionEvents::recv`] can coexist with command submission. Dropping
+//! that receive loses neither retained events nor accepted work. `None` means
+//! permanent drain; an idle session remains pending. [`SessionEvent::Terminated`]
+//! is the single fatal observation and retains unfinished commands, responses and
+//! tool obligations. A response ending does not end capture, playback or late
+//! transcription; retain each event's original attribution, including `None`.
+//!
+//! Cancellation, capture discard and playback reconciliation are separate
+//! commands. [`CancellationResolution`] reports stop evidence independently from
+//! [`SessionContinuity`]. Uncertain continuity blocks further generation mutations;
+//! observation and cleanup remain available. Provider sealing rejects new work,
+//! settles accepted work that has not started, and leaves observation, cancellation
+//! and consuming close available. Close does not require ordinary output draining
+//! or application tool execution. Keep the runtime driven until cleanup settles.
 
 use std::collections::BTreeSet;
 use std::convert::Infallible;
@@ -61,8 +130,11 @@ use crate::providers::openai::OpenAiSession;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SessionProfile {
     /// Library-retained conversation through the exact selected generation model.
+    /// All four supplied providers support this profile; model/settings support
+    /// remains authoritative at the operation boundary.
     Conversation,
     /// Provider-native realtime interaction on a compatible exact model.
+    /// Supplied OpenAI and Gemini implementations support this profile.
     Realtime,
 }
 
@@ -76,6 +148,12 @@ pub enum SessionTurnDetection {
 }
 
 /// Fixed, validated session configuration. Select the profile explicitly.
+///
+/// Configuration applies for the entire Session lifetime. Set tool declarations
+/// before a generation policy that requires them. Constructors validate local
+/// invariants. [`ModelBackend::open_session`](crate::ModelBackend::open_session)
+/// checks profile support and performs any native setup handshake. Managed
+/// generation can reject model-specific settings later through Session events.
 ///
 /// ```
 /// use providers_kit::session::{SessionConfig, SessionProfile};
@@ -178,6 +256,7 @@ impl SessionConfig {
     }
 
     /// Sets the existing response format; unsupported profiles reject it on open.
+    /// See [`Self`] for configuration and [`ResponseFormat`] for request values.
     #[must_use]
     pub fn with_response_format(mut self, format: ResponseFormat) -> Self {
         self.response_format = Some(format);
@@ -191,6 +270,7 @@ impl SessionConfig {
     }
 
     /// Sets the existing reasoning configuration; native support is checked on open.
+    /// See [`Self`] for configuration and [`ReasoningConfig`] for request values.
     #[must_use]
     pub fn with_reasoning(mut self, reasoning: ReasoningConfig) -> Self {
         self.reasoning = Some(reasoning);
@@ -261,7 +341,8 @@ impl SessionConfig {
         self.turn_detection = Some(detection);
         self
     }
-    /// Returns the native activity-detection policy. See [`Self`].
+    /// Returns the native activity-detection policy, defaulting to
+    /// [`SessionTurnDetection::Automatic`] when omitted. See [`Self`].
     #[must_use]
     pub const fn turn_detection(&self) -> SessionTurnDetection {
         match self.turn_detection {
@@ -434,6 +515,10 @@ impl ScopedSequence {
 
 /// Session-local command acceptance identity; never a native event identifier.
 ///
+/// Token construction is available to caller implementations. It validates a
+/// local scope and nonzero sequence, not live ownership; submission checks tokens
+/// against the Session that issued them. Native ids must not be inferred from them.
+///
 /// ```
 /// use std::num::NonZeroU64;
 /// use providers_kit::session::CommandId;
@@ -446,7 +531,8 @@ pub struct CommandId(ScopedSequence);
 impl CommandId {
     /// Constructs a scoped nonzero identity. See [`Self`].
     /// # Errors
-    /// Rejects an empty, padded, control-bearing or overlong local session identity.
+    /// Rejects a local session identity outside 1 through 256 UTF-8 bytes, or one
+    /// that is padded or contains control characters.
     pub fn new(session: impl Into<String>, sequence: NonZeroU64) -> Result<Self, KitError> {
         Ok(Self(ScopedSequence::new(session.into(), sequence)?))
     }
@@ -463,6 +549,7 @@ impl CommandId {
 }
 
 /// Session-local response identity, separate from the command that caused it.
+/// See [`CommandId`] for scoped token construction.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ResponseId(ScopedSequence);
 impl ResponseId {
@@ -485,6 +572,7 @@ impl ResponseId {
 }
 
 /// Session-local executable tool obligation; absent native IDs remain absent.
+/// See [`SessionToolResult`] for result construction and [`CommandId`] for scopes.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ToolRequestId(ScopedSequence);
 impl ToolRequestId {
@@ -507,6 +595,8 @@ impl ToolRequestId {
 }
 
 /// Session-local output segment used for playback/context reconciliation.
+/// See [`CommandId`] for scoped token construction and
+/// [`SessionCommand::ReconcilePlayback`] for its use.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct OutputSegmentId(ScopedSequence);
 impl OutputSegmentId {
@@ -529,6 +619,11 @@ impl OutputSegmentId {
 }
 
 /// A validated function result associated with one session-local obligation.
+///
+/// Use the token delivered with [`SessionEvent::ToolRequested`] and preserve the
+/// call's native id/name in the result. Construction does not establish that the
+/// obligation is still outstanding; [`SessionCommands::submit`] checks the entire
+/// result batch against live ownership and correlation before accepting it.
 ///
 /// ```
 /// use std::num::NonZeroU64;
@@ -582,8 +677,11 @@ pub enum SessionCommand {
     /// Validated user input. Assistant/history injection is rejected.
     Input(Message<()>),
     /// An atomically validated batch of caller-executed tool results.
+    /// Accepted managed results are retained once; a complete required set may
+    /// start one continuation generation. Submission never executes the tools.
     ToolResults(Vec<SessionToolResult>),
     /// Stop exactly the identified work where the native protocol permits it.
+    /// This does not discard input, rewind accepted history or reconcile playback.
     Cancel(CancelTarget),
     /// Begin caller-managed native input activity.
     StartInput,
@@ -689,6 +787,8 @@ pub enum UsageScope {
 /// Managed `output` is an observational projection with its continuation omitted;
 /// authoritative replay remains private and unchanged. The projection must not be
 /// used to reconstruct history. Native realtime never fabricates that projection.
+/// Response completion, command failure and permanent Session termination are
+/// distinct. See the [module workflow](self) for correlation and cleanup.
 #[derive(Clone, Debug)]
 pub enum SessionEvent {
     /// A model generation began, possibly from autonomous native activity.
@@ -718,6 +818,8 @@ pub enum SessionEvent {
         finalized: bool,
     },
     /// A complete validated executable call whose result can be correlated.
+    /// Managed calls follow committed assistant replay; native Live calls can
+    /// require results before response completion.
     ToolRequested {
         /// The session-local response identity; late observations keep the original identity.
         response: ResponseId,
@@ -727,6 +829,7 @@ pub enum SessionEvent {
         call: FunctionCall,
     },
     /// Previously delivered calls are no longer valid for submission.
+    /// This cannot undo application tool effects that have already occurred.
     ToolsInvalidated {
         /// Delivered obligations that can no longer accept results.
         requests: Vec<ToolRequestId>,
@@ -804,8 +907,17 @@ pub enum SessionEvent {
 }
 
 /// Static command-half contract. Acceptance and receipt occur in one poll.
+///
+/// The half borrows its unique [`SessionBackend`] owner and has no independent
+/// close authority. See the [module workflow](self).
 pub trait SessionCommands: Send {
     /// Admits a command locally and returns its correlation token.
+    ///
+    /// The receipt proves bounded local ownership, not provider acceptance or
+    /// successful completion. Dropping submission before acceptance leaves no
+    /// accepted work; after acceptance, the owner settles it independently of
+    /// the waiter. A pending receive cannot block this path. See the
+    /// [module workflow](self) for observation and consuming cleanup.
     ///
     /// # Errors
     /// Pre-acceptance validation, capacity, lifecycle and unsupported errors have
@@ -817,13 +929,20 @@ pub trait SessionCommands: Send {
 }
 
 /// Static event-half contract. Pending receive never excludes command progress.
+/// See the [module workflow](self) for borrowing this half alongside commands.
 pub trait SessionEvents: Send {
     /// Receives an observation; `None` means permanently drained, never idle.
     /// Dropping a pending receive loses no accepted work or retained event.
+    /// Fatal failure arrives once as [`SessionEvent::Terminated`], not through
+    /// a separate receive error. See the [module workflow](self).
     fn recv(&mut self) -> impl Future<Output = Option<SessionEvent>> + Send + '_;
 }
 
 /// Unique owning session with concrete borrowed halves and one close authority.
+///
+/// Caller implementations retain their own associated halves directly. The
+/// supplied [`Session`] and halves are non-Clone; neither half can outlive or
+/// independently close its owner. See the [module workflow](self).
 pub trait SessionBackend: Send + 'static {
     /// Concrete command half borrowing this owner.
     type Commands<'a>: SessionCommands + 'a
@@ -834,12 +953,20 @@ pub trait SessionBackend: Send + 'static {
     where
         Self: 'a;
     /// Local opaque session identity; native identifiers remain private.
+    /// See [`CommandId`] for the scope of locally issued tokens.
     fn id(&self) -> &str;
     /// The exact model selected before opening.
+    /// See the [module workflow](self); opening never selects a fallback model.
     fn model_id(&self) -> &ModelId;
-    /// Borrows independent command and event halves. See the module example.
+    /// Borrows independent command and event halves. See the [module workflow](self).
+    /// Release both borrows before consuming the owner with [`Self::close`].
     fn split(&mut self) -> (Self::Commands<'_>, Self::Events<'_>);
     /// Consumes the owner, settles local work and performs bounded cleanup.
+    ///
+    /// Cleanup does not wait for ordinary event draining or application tool
+    /// execution. Supplied owners retain join authority when the owner or close
+    /// future is dropped; keep the runtime driven for cleanup to finish. Idle
+    /// Sessions hold no normal generation admission. See the [module workflow](self).
     ///
     /// # Errors
     /// Returns actual teardown failures; an already sealed parent alone is not

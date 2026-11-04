@@ -22,8 +22,10 @@ impl CustomLoopLimits {
     ///
     /// # Errors
     /// Returns [`crate::error::ErrorKind::InvalidConfig`] for zero model turns or
-    /// parallel actions, or more than 65,536 aggregate actions. Zero aggregate
-    /// actions disables tools without disabling model turns.
+    /// parallel actions, or more than 65,536 aggregate actions. A zero aggregate
+    /// limit permits model turns but rejects any returned function-call batch
+    /// before execution. [`ToolSelection::None`] removes tools from the effective
+    /// catalog.
     ///
     /// See [`CustomLoopLimits`] for construction and inspection.
     pub fn new(
@@ -63,7 +65,11 @@ impl CustomLoopLimits {
         self.max_model_turns.get()
     }
 
-    /// Returns the aggregate tool-action limit for one prompt; zero disables actions.
+    /// Returns the aggregate tool-action limit for one prompt.
+    ///
+    /// A returned call batch that would exceed the remaining aggregate prompt
+    /// budget fails the prompt with
+    /// [`crate::error::ErrorKind::InvalidState`] before executing that batch.
     ///
     /// ```
     /// use agents_kit::config::CustomLoopLimits;

@@ -18,7 +18,8 @@ pub use surreal::{SurrealConfig, SurrealModeConfig};
 /// construction has one configuration owner rather than a wrapper around a
 /// second backend-selection enum.
 ///
-/// LanceDB is always available. SurrealDB requires `surrealdb`.
+/// LanceDB is always available. Opening SurrealDB requires `surrealdb`, while
+/// its configuration types and this enum's variants are always available.
 /// Configuration values do not open backend resources.
 /// These constructors create data only; [`crate::Database::connect`] opens it.
 ///

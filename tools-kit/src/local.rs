@@ -184,51 +184,9 @@ impl RegisteredTool {
 
 /// Context available to local tools that declare caller interaction support.
 ///
-/// # Examples
-///
-/// ```
-///
-/// # #[tokio::main(flavor = "current_thread")]
-/// # async fn main() -> Result<(), tools_kit::ToolError> {
-/// use tools_kit::{
-///     ToolHandlerBackend, Toolset, ToolsetBackend,
-///     declaration::{ToolInfo, ToolName},
-///     execution::{ToolHandlerInput, ToolHandlerOutput, ToolInvocation, ToolResult},
-///     interaction::{ToolInteractionCapabilities, ToolInteractionResponse},
-///     local::ToolRegistration,
-///     schema::JsonSchema,
-/// };
-/// let name = ToolName::new("ask")?;
-/// let mut info = ToolInfo::new(
-///     name.clone(),
-///     JsonSchema::strict(serde_json::json!({"type":"object"})),
-/// );
-/// info.interactions = ToolInteractionCapabilities { text: true, ..Default::default() };
-/// let registration = ToolRegistration::interactive(info, |_input, context| async move {
-///     let city = context.request_text("Which city?", false).await?;
-///     Ok(ToolResult::text(city))
-/// });
-/// let tools = Toolset::local(vec![registration])?;
-/// let observed = async {
-///     let mut handler = tools.tool_handler(name).await?;
-///     let pending = handler.step(ToolHandlerInput::Invoke(ToolInvocation { call_id: None, arguments: serde_json::json!({}) })).await?;
-///     let ToolHandlerOutput::Interaction(request) = pending else { panic!("interaction expected") };
-///     let reply = ToolInteractionResponse::submit(request.id, serde_json::json!("Chicago"));
-///     let done = handler.step(ToolHandlerInput::Interaction(reply)).await?;
-///     assert!(matches!(done, ToolHandlerOutput::Completed(_)));
-///     Ok::<(), tools_kit::ToolError>(())
-/// }.await;
-/// let cleanup = tools.shutdown().await;
-/// if let Err(error) = &cleanup {
-///     eprintln!("Cleanup failed: {error}");
-/// }
-/// observed?;
-/// cleanup?;
-///
-/// # Ok(())
-/// # }
-/// ```
-///
+/// See [`ToolRegistration::interactive`] for a complete text interaction and
+/// [`Self::request_form`] for validated form submission. Each workflow resumes
+/// the same unique handler and settles Toolset cleanup.
 #[derive(Clone)]
 pub struct ToolInvocationContext {
     tool_name: ToolName,
@@ -302,20 +260,24 @@ impl ToolRegistration {
     /// let observed = async {
     ///     let mut handler = tools.tool_handler(name).await?;
     ///     let pending = handler.step(ToolHandlerInput::Invoke(ToolInvocation { call_id: None, arguments: serde_json::json!({}) })).await?;
-    ///     let ToolHandlerOutput::Interaction(request) = pending else { panic!("interaction expected") };
+    ///     let ToolHandlerOutput::Interaction(request) = pending else {
+    ///         return Err(tools_kit::ToolError::Protocol { message: "interaction expected".into() });
+    ///     };
     ///     let reply = ToolInteractionResponse::submit(request.id, serde_json::json!("Chicago"));
     ///     let done = handler.step(ToolHandlerInput::Interaction(reply)).await?;
-    ///     let ToolHandlerOutput::Completed(result) = done else { panic!("completion expected") };
-    ///     assert!(!result.is_error);
-    ///     assert!(matches!(result.content.as_slice(), [tools_kit::execution::ToolContent::Text { text, .. }] if text == "Chicago"));
-    ///     Ok::<(), tools_kit::ToolError>(())
+    ///     let ToolHandlerOutput::Completed(result) = done else {
+    ///         return Err(tools_kit::ToolError::Protocol { message: "completion expected".into() });
+    ///     };
+    ///     Ok::<_, tools_kit::ToolError>(result)
     /// }.await;
     /// let cleanup = tools.shutdown().await;
     /// if let Err(error) = &cleanup {
     ///     eprintln!("Cleanup failed: {error}");
     /// }
-    /// observed?;
+    /// let result = observed?;
     /// cleanup?;
+    /// assert!(!result.is_error);
+    /// assert!(matches!(result.content.as_slice(), [tools_kit::execution::ToolContent::Text { text, .. }] if text == "Chicago"));
     ///
     /// # Ok(())
     /// # }
@@ -657,20 +619,24 @@ impl ToolInvocationContext {
     /// let observed = async {
     ///     let mut handler = tools.tool_handler(name).await?;
     ///     let pending = handler.step(ToolHandlerInput::Invoke(ToolInvocation { call_id: None, arguments: serde_json::json!({}) })).await?;
-    ///     let ToolHandlerOutput::Interaction(request) = pending else { panic!("interaction expected") };
+    ///     let ToolHandlerOutput::Interaction(request) = pending else {
+    ///         return Err(tools_kit::ToolError::Protocol { message: "interaction expected".into() });
+    ///     };
     ///     let reply = ToolInteractionResponse::submit(request.id, serde_json::json!({"city":"Chicago"}));
     ///     let done = handler.step(ToolHandlerInput::Interaction(reply)).await?;
-    ///     let ToolHandlerOutput::Completed(result) = done else { panic!("completion expected") };
-    ///     assert!(!result.is_error);
-    ///     assert_eq!(result.structured_content, Some(serde_json::json!({"city":"Chicago"})));
-    ///     Ok::<(), tools_kit::ToolError>(())
+    ///     let ToolHandlerOutput::Completed(result) = done else {
+    ///         return Err(tools_kit::ToolError::Protocol { message: "completion expected".into() });
+    ///     };
+    ///     Ok::<_, tools_kit::ToolError>(result)
     /// }.await;
     /// let cleanup = tools.shutdown().await;
     /// if let Err(error) = &cleanup {
     ///     eprintln!("Cleanup failed: {error}");
     /// }
-    /// observed?;
+    /// let result = observed?;
     /// cleanup?;
+    /// assert!(!result.is_error);
+    /// assert_eq!(result.structured_content, Some(serde_json::json!({"city":"Chicago"})));
     ///
     /// # Ok(())
     /// # }

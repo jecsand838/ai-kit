@@ -21,20 +21,8 @@ use crate::{
 /// associated handlers. [`Toolset::from_backend`] is optional normalization when a
 /// supplied Toolset is needed. Shared shutdown obligations apply to both forms.
 ///
-/// # Examples
-///
-/// ```
-///
-/// # #[tokio::main(flavor = "current_thread")]
-/// # async fn main() -> Result<(), tools_kit::ToolError> {
-/// use tools_kit::{Toolset, ToolsetBackend};
-/// let tools = Toolset::local(Vec::new())?;
-/// assert!(tools.list_tools().await?.is_empty());
-/// tools.shutdown().await?;
-///
-/// # Ok(())
-/// # }
-/// ```
+/// The [crate-level example](crate) registers, invokes, and shuts down a Local
+/// Toolset. The example below implements the contract directly.
 ///
 /// # Implement an executable caller Toolset
 ///
@@ -133,8 +121,10 @@ use crate::{
 /// );
 /// assert!(direct.step(ToolHandlerInput::Invoke(input.clone())).await.is_err());
 /// let tools = Toolset::from_backend(concrete); // Sole public erased ingress.
-/// let mut normalized = tools.tool_handler(name).await?;
-/// let observed = normalized.step(ToolHandlerInput::Invoke(input)).await;
+/// let observed = async {
+///     let mut normalized = tools.tool_handler(name).await?;
+///     normalized.step(ToolHandlerInput::Invoke(input)).await
+/// }.await;
 /// let cleanup = tools.shutdown().await;
 /// if let Err(error) = &cleanup {
 ///     eprintln!("Cleanup failed: {error}");
@@ -247,37 +237,13 @@ impl Toolset {
     }
 
     /// Connects one MCP client Toolset and discovers its inventory.
-    /// This example requires a running MCP service at the configured endpoint.
+    ///
+    /// See the [`crate::mcp`] example for invocation and cleanup of a configured
+    /// service. It requires a running MCP service at the configured endpoint.
     ///
     /// # Errors
     ///
     /// Returns [`ToolError`] for invalid connection settings, process startup, transport or initialization failure, malformed inventory, or an elapsed request deadline.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    ///
-    /// # #[tokio::main(flavor = "current_thread")]
-    /// # async fn main() -> Result<(), tools_kit::ToolError> {
-    /// use tools_kit::mcp::{McpClientConfig, McpConnectionConfig};
-    /// let connection = McpConnectionConfig::StreamableHttp {
-    ///     endpoint: "http://127.0.0.1:8000/mcp".parse().unwrap(),
-    ///     headers: Default::default(),
-    /// };
-    /// let config = McpClientConfig::new(connection);
-    /// use tools_kit::{Toolset, ToolsetBackend};
-    /// let tools = Toolset::mcp(config).await?;
-    /// let inventory = tools.list_tools().await;
-    /// let cleanup = tools.shutdown().await;
-    /// if let Err(error) = &cleanup {
-    ///     eprintln!("Cleanup failed: {error}");
-    /// }
-    /// let _ = inventory?;
-    /// cleanup?;
-    ///
-    /// # Ok(())
-    /// # }
-    /// ```
     ///
     pub async fn mcp(config: McpClientConfig) -> Result<Self, ToolError> {
         Ok(Self::from_mcp(McpToolset::connect(config).await?))

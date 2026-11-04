@@ -452,7 +452,11 @@ pub trait ConversationBackend: Send + Sync + 'static {
     ///
     /// # Errors
     ///
-    /// Returns `InvalidInput`/`Unsupported` before acceptance for invalid or unsupported requests, `Busy` when admission is occupied, or typed cancellation, deadline, conflict, storage, and backend failures. After ambiguous acceptance, do not blindly retry: cancellation/reconciliation retains the generation fence until settlement.
+    /// Returns `InvalidInput`/`Unsupported` for invalid or unsupported requests,
+    /// `Busy` when admission is occupied, or typed cancellation, deadline, conflict,
+    /// storage, and backend failures. Validation that depends on the selected model
+    /// can fail after admission. Cancellation and reconciliation retain the
+    /// generation fence until settlement after ambiguous acceptance.
     ///
     /// See the runnable caller implementation on [`ConversationBackend`]. Supplied backends retain their own runtime and storage prerequisites.
     fn prompt(
@@ -469,7 +473,11 @@ pub trait ConversationBackend: Send + Sync + 'static {
     ///
     /// # Errors
     ///
-    /// Returns `Unsupported` when the backend has no genuine incremental route, or the same admission failures as `prompt`. After admission, the stream carries terminal failures; premature source EOF is a protocol failure.
+    /// Returns `Unsupported` when the backend has no genuine incremental route,
+    /// or the same admission failures as `prompt`. After admission, the stream
+    /// carries execution or observation failures. Premature source EOF is a
+    /// protocol failure. Output overflow ends observation while work continues.
+    /// See [`PromptStream`] for settlement after observation loss.
     ///
     /// The runnable [`ConversationBackend`] example consumes real caller-stream events. [`PromptStream`] also demonstrates terminal validation; the [native interaction recipe](crate::conversation) requires a configured service.
     fn prompt_stream(
@@ -485,7 +493,12 @@ pub trait ConversationBackend: Send + Sync + 'static {
 
     /// Aborts the active prompt, or succeeds when no prompt is active.
     ///
-    /// Cancellation targets only the active generation and joins its settlement. Natural completion may win; abort does not replace the prompt waiter or return its answer.
+    /// Cancellation targets only the captured active generation and joins its
+    /// settlement. Natural completion may win. The original prompt waiter owns
+    /// its answer. Custom joins durable terminalization and cancellation dispatch
+    /// while an unread unary reply may still await acknowledgment. Reading
+    /// that reply acknowledges its separate waiter. Dropping it records waiter
+    /// loss. Consuming close and shutdown retain their full cleanup obligations.
     ///
     /// # Errors
     ///

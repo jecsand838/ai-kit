@@ -238,7 +238,7 @@ pub enum ActionEvent {
         name: String,
         /// Optional parent span identity within the attempt.
         parent: Option<String>,
-        /// Preceding spans on which this span depends.
+        /// Ordered caller-authored dependency names. Repeated names are permitted.
         dependencies: Vec<String>,
     },
     /// Attaches an attribute to an addressed span or the action's root span.
@@ -249,7 +249,7 @@ pub enum ActionEvent {
         key: String,
         /// Attribute value.
         value: Value,
-        /// Caller tags attached to this attribute.
+        /// Caller tags attached to this attribute. Every value must be a string.
         tags: Map<String, Value>,
     },
     /// Finishes an explicitly addressed span.

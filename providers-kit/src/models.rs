@@ -350,8 +350,9 @@ pub struct ModelPage {
 /// # }
 /// ```
 ///
-/// For the full Provider/Model/Session lifecycle and an opaque continuation,
-/// see [`crate::ProviderBackend`].
+/// For a concrete Provider/Model lifecycle and opaque caller continuation, see
+/// [`crate::ProviderBackend`]. For an invoked Session workflow with borrowed halves
+/// and consuming cleanup, see [`crate::session`].
 ///
 pub trait ModelBackend: Send + Sync + 'static {
     /// Opaque model-authored state retained between generation turns.
@@ -427,6 +428,13 @@ pub trait ModelBackend: Send + Sync + 'static {
     ///
     /// Retain the exact returned job id to observe or cancel the remote job. Shared
     /// provider shutdown closes local resources; it does not cancel remote jobs.
+    ///
+    /// Supplied OpenAI inline submission retains a tracked owner after its waiter
+    /// is dropped. An internally uploaded input is deleted only before creation
+    /// starts or after definitive rejection; accepted or uncertain creation retains
+    /// it. Borrowed input files are never deleted by submission. Unclaimed accepted
+    /// or uncertain outcomes are reported by shared shutdown with retained resource
+    /// diagnostics; dropping the waiter is not proof that no remote job was created.
     ///
     /// # Errors
     ///
@@ -528,7 +536,7 @@ pub trait ModelBackend: Send + Sync + 'static {
     ///
     /// Returns [`KitError`] for closed admission, unsupported selected-model behavior, invalid request combinations, transport/deadline failures, service rejection, or malformed response. The operation is authoritative; no capability matrix or fallback model supplies success.
     ///
-    /// See [`crate::session`] for the complete executable workflow and its prerequisites.
+    /// See [`crate::session`] for the complete service example and its prerequisites.
     ///
     fn open_session(
         &self,

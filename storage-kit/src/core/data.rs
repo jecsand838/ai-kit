@@ -642,7 +642,7 @@ impl HasLocator for CountRequest {
     }
 }
 
-/// Page of records returned by lookup or scan flows.
+/// Page of records returned by a collection scan.
 ///
 /// # Examples
 ///

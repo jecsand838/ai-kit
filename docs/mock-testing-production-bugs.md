@@ -6,6 +6,133 @@ cancellation follow-up started at `1de968b3c98015f7fc48255d6ac40ef4593ca44d`.
 Regressions remain enabled; fixture and validation-setup errors are distinguished
 from production defects. Manifests, lockfiles, features, and vendor sources are unchanged.
 
+## Provider session refactor evidence — 2026-11-01
+
+The separately authorized session replacement starts at `2853a542`; its target
+guidance was committed first as `eca58db`. The following defects were reproduced
+through production wire paths before replacing the implementation. These are
+wire regressions, distinct from the direct-trait mock lane. All remain enabled.
+
+At PR #45 revision `1c537ae`, the following enabled session regressions failed before the fixes. Raw receipts are under `target/pr45-session-review-fixes/`.
+
+- `red-managed.log` — unrenderable Ollama and mixed OpenAI tool results received receipts, and 1,024 dropped idle owners exhausted registration.
+- The initial reaper panicked outside Tokio and retained failed cleanup slots. `red-reap-off-runtime.log` and `red-reap-cleanup.log` preserve those separate failures.
+- `red-openai.log` — a later capture stole an earlier acknowledgement, a final result admitted a competing input, sealing lost an admitted continuation, and queued receipts lacked individual unstarted failures.
+- `red-gemini.log` — a detached output transcript survived its generation boundary, and shutdown left queued commands unfinished.
+
+| Defect | Required regression | Recorded red behavior |
+| --- | --- | --- |
+| Missing/unknown Realtime terminal status became success | `session_lifecycle::session_refactor_rejects_missing_or_invalid_terminal_status` | `Completed` without affirmative status |
+| Realtime terminal usage was discarded | `session_lifecycle::session_refactor_preserves_authoritative_terminal_usage` | Completion arrived without final usage |
+| Known-cancelled queued function calls remained executable | `session_lifecycle::openai_audio_transcription_functions_and_cancellation_are_normalized` | Cancelled call delivered instead of invalidation |
+| CR-only SSE framing lost completion | `wire_behavior::sse_carriage_return_lines_and_fragmented_crlf_preserve_completion` | `InvalidResponse(UnexpectedEnd)` |
+
+Raw local red logs are retained under `target/session-refactor-evidence/` as
+`openai-terminal-red.log`, `openai-cancelled-tools-red.log`, and `framing-red.log`.
+Missing replacement surface and ownership compilation failures are separately
+recorded in `public-contract-red.log`, `ownership-contract-red.log`,
+`new-session-profiles-red.log`, and `managed-contract-red.log`; those failures
+alone are not behavioral proof.
+
+Tests against the first replacement implementation also reproduced accepting an
+unknown playback segment (`openai-behavior.log`), invalidating valid tools when
+cancelling an already completed response, and omitting retained configuration
+from the aggregate budget (`managed-behavior-rerun.log`). The earlier managed
+run failed on an unsupported fixture model and is retained as fixture error,
+not as cancellation evidence. `gemini-env-red.log` records the verifier missing
+the new required interactive model role. Each repair requires passing
+regressions, independent review, and final-source validation; these failure
+records do not establish release qualification.
+
+Independent review added enabled regressions for the following replacement
+defects. Each log below records a behavioral failure before its associated fix;
+the later full source gates remain authoritative for completion.
+
+| Area | Behavioral red logs under `target/session-refactor-evidence/` |
+| --- | --- |
+| Lost/reassigned native command correlation and repeated control receipts | `openai-correlation-red-rerun.log` |
+| Completion winning cancellation incorrectly invalidated executable tools | `cancellation-race-red.log` |
+| Admitted automatic audio lost during provider sealing | `openai-audio-admission-red.log`, `gemini-audio-ordering-red.log` |
+| Native tool declaration, frame bounds, duplicate terminals and late output | `gemini-reviewed-red-rerun.log` |
+| Accepted command secretly retained after failed submission | `managed-capacity-red.log` |
+| Control byte reserve, metadata accounting and fabricated cancellation identities | `managed-reviewed-bounds-red.log` |
+| Admitted managed completion discarded and undeclared calls published | `managed-sealing-tool-red.log` |
+| Terminal provider error misclassified as partial completion | `managed-terminal-error-red.log` |
+| Premature managed transport EOF misclassified as a settled failure | `managed-unresolved-red.log` |
+| Concurrent cancellation receipt orphaned and partial-tool continuity unsafe | `managed-cancel-handoff-red.log` |
+| Executable tools published before reserving all retained completion copies | `completion-copy-budget-red.log` |
+| Native control acknowledgement had no deadline | `openai-control-timeout-red.log` |
+| Accepted-but-unstarted native work lacked an explicit failure | `gemini-unstarted-red.log` |
+| Native malformed identity/argument errors leaked caller-input classification | `gemini-boundaries-behavior-red.log`, `openai-unstarted-errors-red.log` |
+| Native interruption/turn boundaries disappeared or changed attribution | `gemini-boundaries-behavior-red.log` |
+| New manual audio after tool interruption lost its generation ownership | `gemini-tool-interruption-red.log` |
+| Supplied command error omitted the public operation context | `session-submit-context-red.log` |
+| Session registration exhaustion omitted the open-session operation context | `session-registration-context-red.log` |
+| Gemini setup omitted blocking function execution required by the portable continuation contract | `gemini-blocking-tools-red.log` |
+| Live evidence accepted uncorrelated completion or old-response output | `session-evidence-red.log`, `session-evidence-correlation-red.log` |
+| Cancellation evidence accepted a different command receipt or target | `cancellation-evidence-correlation-red.log` |
+| Final transcription snapshots were omitted instead of replacing deltas | `transcription-snapshot-red.log` |
+| Gemini's native resumption metadata terminated an otherwise valid same-socket interaction | `gemini-resumption-metadata-red.log` |
+| Valid Gemini empty/VAD envelopes and transcription markers were rejected; malformed optional fields were silently ignored | `gemini-optional-envelopes-red.log` |
+| Evidence rejected a new unattributed input transcript after the preceding transcript finalized | `input-transcription-evidence-red.log` |
+| Final-only unattributed input snapshots overwrote previously completed transcripts | `input-final-only-transcript-red.log` |
+
+The native-boundary API compile failure is separately retained in
+`native-boundary-contract-red.log`. The initial Gemini close failures exposed a
+shared socket defect: production close now drains the peer acknowledgement
+within its original deadline, while retaining the strict fixture. The subsequent
+OpenAI and shutdown fixture failures separately required flushing their queued
+WebSocket close acknowledgements. Unexpected transport closure remains an error.
+No suppressed cleanup failure,
+skipped regression or narrowed native acceptance replaces these records.
+
+The first cancellation-evidence invocation in `cancellation-evidence-red.log`
+selected zero tests and is not red evidence; the corrected correlation log above
+contains the actual failure. `release-target-inventory-red.log` separately records
+the stale test inventory omitting the three new Provider targets already included
+by the validation runner. Its additional
+Tool assertion failure came from the same fixture's accumulated trace after the
+Provider mismatch, not a separate Tool defect.
+
+At candidate `597e5dd`, the focused eight-case live run passed all four
+Conversation baselines and failed all four Gemini Live cases. Private native
+diagnostics identified a `sessionResumptionUpdate` notification after setup,
+which the adapter incorrectly treated as reconfiguration. The deterministic
+`live_resumption_metadata_does_not_reconfigure_or_interrupt_generation`
+regression reproduced termination of the original response before its fix;
+the malformed-metadata and repeated-setup control remained passing. The
+fixture uses a synthetic handle with the independently observed native shape.
+Accepting this auxiliary metadata does not authorize retaining or replaying a
+resume handle, sending another setup, or reconnecting. The original live failure
+remains in `target/session-refactor-evidence/new-live-sessions.log`.
+
+The subsequent four-case retry still failed; its private diagnostics supplied
+the observed empty server envelope and uncorrelated input voice-activity shape.
+The next deterministic batch recorded five failures against 19 passing controls,
+including preserved original deadlines under auxiliary traffic and optional
+transcription completion markers. The two evidence-helper failures separately
+demonstrated conflation of consecutive input transcripts with unavailable command
+identity; the attributed post-final-delta rejection control remained passing.
+Those failures and the live retry remain retained in their own logs, including
+`target/session-refactor-evidence/gemini-live-resumption-fix.log`.
+The separate large-transcript fixture was added before reservation-transfer
+implementation. Its red in `gemini-transcript-budget-red.log` reaches the
+missing-marker protocol error, with a retained secondary close timeout; that
+failure does not independently demonstrate double charging. The enabled case
+requires two consecutive, consumed 17 MiB transcripts to finalize within the
+existing session budget, exercising transfer and release on the repaired path.
+
+The next focused native run passed manual audio, text/audio/transcription, and
+the tool round trip. Its remaining cancellation/recovery failure was a scenario
+constraint: the old request had been invalidated and its result rejected, while
+a distinct new request belonged to the response started by `EndInput`. The
+scenario rejected that valid new obligation. Its correction permits at most
+one distinct, validated recovery call, fulfilled by the test caller, and keeps
+the original invalidation, stale-result rejection, interruption, correlation,
+fresh audio/transcription, completion, and turn-boundary assertions. This is
+not classified as an adapter defect. The failed run remains in
+`target/session-refactor-evidence/gemini-live-optional-fix.log`.
+
 ## Repair status — 2026-10-25
 
 M001 remains resolved. The separately authorized follow-up from `2da7fcaf`

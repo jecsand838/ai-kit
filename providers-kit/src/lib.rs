@@ -68,12 +68,14 @@
 //! | Audience | Start here |
 //! | --- | --- |
 //! | Application builders | [Generation and exact assistant replay](generation), [embeddings](embedding), [owned files](files), [batch lifecycle](batch), and [interactive Sessions](session) |
-//! | Custom-backend implementers | The complete local hierarchy on [`ProviderBackend`], then the sessionless [`ModelBackend`] companion |
+//! | Custom-backend implementers | Direct composition on [`ProviderBackend`], the sessionless [`ModelBackend`] companion, and borrowed halves on [`SessionBackend`] |
 //!
-//! The supplied Session dispatcher supports **OpenAI only**. Supplied Gemini,
-//! Anthropic and Ollama Models return Unsupported from `open_session`. Stateless
-//! OpenAI audio input/audio-chat models are also unsupported; this does not remove
-//! OpenAI Realtime Session support. These supplied-backend restrictions do not
+//! Explicit Conversation Sessions retain exact assistant replay for OpenAI,
+//! Anthropic, Gemini and Ollama. Realtime Sessions map to native OpenAI Realtime
+//! and Gemini Live on supported exact models. Borrowed command/event halves
+//! permit independent submission and observation; the unique Session owns close.
+//! Unsupported model/profile/settings fail explicitly. Stateless OpenAI audio
+//! input/audio-chat models remain unsupported. Supplied restrictions do not
 //! constrain an independently implemented [`SessionBackend`].
 //!
 //! The examples demonstrate API use, not current account/model availability or

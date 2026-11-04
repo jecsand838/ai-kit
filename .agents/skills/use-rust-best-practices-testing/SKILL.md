@@ -30,7 +30,8 @@ strategy.
    repositories, follow their local placement policy.
 3. Keep integration tests under the crate being tested and use the public API.
    Ai-kit primary tests use crate-local structs and exhaustive enums implementing
-   all 16 public behavioral traits directly, including App workflow values, and
+   all 18 public behavioral traits directly, including the two borrowed Session
+   halves and App workflow values, and
    exercise the real Custom Agent/App with caller-owned lower implementations.
    Existing Tool extension tests remain separate; no extension ingress or backend
    erasure belongs in the primary lane. Neither lane proves a built-in service.
@@ -58,6 +59,11 @@ strategy.
 - Source guards may reject prohibited erasure, macro-generated replacements,
   catch-all dispatcher arms, and stale restoration TODO markers; they must not
   freeze private names, files, impl placement, or match-arm spelling.
+- Session proofs cover public token/outcome construction, concrete borrowed
+  halves and Send futures, sole consuming close authority, same-poll acceptance,
+  duplex progress and permanent-drain semantics. Record failing tests before
+  production changes, then require behavioral green evidence and independent
+  review; new-API compilation failures alone do not prove runtime correctness.
 - Strict-live tests use real built-ins and real configured services; mocks,
   recordings, scripted servers, and deterministic substitutes never satisfy a
   strict-live claim.

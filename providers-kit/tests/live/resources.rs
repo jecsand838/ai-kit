@@ -6,12 +6,13 @@ use providers_kit::embedding::EmbedRequest;
 use providers_kit::error::ErrorKind;
 use providers_kit::files::{FileListRequest, FileUploadRequest};
 use providers_kit::generation::{
-    ContentPart, FunctionResult, GenerateRequest, JsonSchema, Message, ProviderFunctionTool,
-    ToolChoice,
+    ContentPart, FunctionResult, GenerateRequest, GenerationConfig, JsonSchema, Message,
+    ProviderFunctionTool, ProviderToolSpec, ToolChoice,
 };
 use providers_kit::models::{ModelBackend, ModelListRequest};
 use providers_kit::session::{
-    SessionBackend, SessionConfig, SessionEvent, SessionInput, SessionTurnDetection,
+    CancelTarget, SessionBackend, SessionCommand, SessionCommands, SessionConfig, SessionEvent,
+    SessionEvents, SessionProfile, SessionToolResult, SessionTurnDetection,
 };
 use serde_json::json;
 
@@ -201,15 +202,15 @@ impl LiveProvider {
         CaseFailure::combine(CaseFailure::combine(journey, cleanup), export)
     }
 
-    async fn send_session_input(
+    async fn submit_session_command(
         session: &mut providers_kit::Session,
         evidence: &mut SessionTurnEvidence,
-        input: SessionInput,
+        input: SessionCommand,
     ) -> Result<(), CaseFailure> {
         evidence.input(&input)?;
-        let result = session.send(input).await.map_err(Self::error);
+        let result = session.split().0.submit(input).await.map_err(Self::error);
         let recorded = evidence.sent(&result).map_err(CaseFailure::from);
-        CaseFailure::combine(result, recorded)
+        CaseFailure::combine(result.map(|_| ()), recorded)
     }
 
     async fn interactive(&mut self, interrupt: bool) -> Result<(), CaseFailure> {
@@ -231,7 +232,7 @@ impl LiveProvider {
             )
             .map_err(Self::error)?;
             let instructions = "Follow each turn independently and speak the exact requested answer, adding nothing. Use tools only when explicitly requested. When the speech input asks you to say audio input received, the full output transcription must be exactly: Audio input received.";
-            let config = SessionConfig::default()
+            let config = SessionConfig::new(SessionProfile::Realtime)
                 .with_instructions(instructions)
                 .map_err(Self::error)?
                 .with_input_audio(input_audio, true)
@@ -239,13 +240,15 @@ impl LiveProvider {
                 .with_output_audio("audio/pcm;rate=24000", true)
                 .map_err(Self::error)?
                 .with_turn_detection(SessionTurnDetection::Manual)
-                .with_functions(vec![function], Some(ToolChoice::Auto))
+                .with_tools(vec![ProviderToolSpec::Function(function)])
+                .map_err(Self::error)?
+                .with_generation(GenerationConfig::default().with_tool_choice(ToolChoice::Auto))
                 .map_err(Self::error)?;
             observation["configuration"] = json!({
                 "instructions":config.instructions(), "input_audio_format":config.input_audio_format(),
                 "input_transcription":config.input_transcription(), "output_audio_format":config.output_audio_format(),
-                "output_transcription":config.output_transcription(), "functions":config.functions(),
-                "tool_choice":config.tool_choice(), "turn_detection":format!("{:?}", config.turn_detection()),
+                "output_transcription":config.output_transcription(), "functions":config.tools(),
+                "tool_choice":config.generation().tool_choice(), "turn_detection":format!("{:?}", config.turn_detection()),
             });
             owned_session = Some(self.selected(&id)?.open_session(config).await.map_err(Self::error)?);
             let session = owned_session.as_mut().expect("opened session remains owned");
@@ -257,17 +260,15 @@ impl LiveProvider {
                 observation["stage"] = json!("interruption");
                 let mut evidence = SessionTurnEvidence::interrupting_audio();
                 let interrupted = async {
-                    Self::send_session_input(session, &mut evidence, SessionInput::Text {
-                        text: "Count aloud from one to one hundred, one number at a time. Add nothing else and do not call tools.".to_owned(),
-                    }).await?;
+                    Self::submit_session_command(session, &mut evidence, SessionCommand::Input(Message::user_text("Count aloud from one to one hundred, one number at a time. Add nothing else and do not call tools.").map_err(Self::error)?)).await?;
                     let mut interruption_sent = false;
                     loop {
-                        let event = session.recv().await.map_err(Self::error)?;
+                        let event = session.split().1.recv().await.ok_or_else(||CaseFailure::from("session drained before required evidence"))?;
                         evidence.observe(&event)?;
-                        if let SessionEvent::Audio { ref data, .. } = event
+                        if let SessionEvent::Output { response, content: ContentPart::Audio { ref data, .. }, .. } = event
                             && !data.is_empty() && !interruption_sent
                         {
-                            Self::send_session_input(session, &mut evidence, SessionInput::CancelTurn).await?;
+                            Self::submit_session_command(session, &mut evidence, SessionCommand::Cancel(CancelTarget::Response(response))).await?;
                             interruption_sent = true;
                         }
                         if evidence.ready() { break; }
@@ -296,18 +297,18 @@ impl LiveProvider {
                 };
                 let turn = async {
                     if audio_turn {
-                        Self::send_session_input(session, &mut evidence, SessionInput::TurnStart).await?;
-                        Self::send_session_input(session, &mut evidence, SessionInput::Audio { media_type: input_audio.to_owned(), data: audio.to_vec() }).await?;
-                        Self::send_session_input(session, &mut evidence, SessionInput::TurnEnd).await?;
+                        Self::submit_session_command(session, &mut evidence, SessionCommand::StartInput).await?;
+                        Self::submit_session_command(session, &mut evidence, SessionCommand::Audio { media_type: input_audio.to_owned(), data: audio.to_vec() }).await?;
+                        Self::submit_session_command(session, &mut evidence, SessionCommand::EndInput).await?;
                     } else {
                         let mut text = "Call strict_live_session_probe exactly once with an empty object. Then speak exactly its entire returned value, preserving words, capitalization, and the final period; add nothing.".to_owned();
                         text.push_str(" Do not speak before calling the tool or while waiting for its result. After the result arrives, speak only its value field; do not narrate the tool call.");
-                        Self::send_session_input(session, &mut evidence, SessionInput::Text { text }).await?;
+                        Self::submit_session_command(session, &mut evidence, SessionCommand::Input(Message::user_text(text).map_err(Self::error)?)).await?;
                     }
                     loop {
-                        let event = session.recv().await.map_err(Self::error)?;
+                        let event = session.split().1.recv().await.ok_or_else(||CaseFailure::from("session drained before required evidence"))?;
                         evidence.observe(&event)?;
-                        if let SessionEvent::FunctionCall(call) = event {
+                        if let SessionEvent::ToolRequested { request, call, .. } = event {
                             // Generate only after the exact expected call has been accepted.
                             let words = ["amber", "birch", "cedar", "dawn", "elm", "fern", "garden", "harbor", "iris", "jade", "kite", "lemon", "maple", "north", "oak", "pine"];
                             let nonce = uuid::Uuid::new_v4();
@@ -315,7 +316,7 @@ impl LiveProvider {
                             evidence.expect_after_function(phrase.clone())?;
                             let result = FunctionResult::new(call.id().map(str::to_owned), call.name().to_owned(),
                                 vec![ContentPart::Json { value: serde_json::json!({"value":phrase}) }], false).map_err(Self::error)?;
-                            Self::send_session_input(session, &mut evidence, SessionInput::FunctionResult(result)).await?;
+                            Self::submit_session_command(session, &mut evidence, SessionCommand::ToolResults(vec![SessionToolResult::new(request,result)])).await?;
                         }
                         if evidence.ready() { break; }
                     }

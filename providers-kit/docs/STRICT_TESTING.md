@@ -1,7 +1,16 @@
 # Strict Testing
 
 Provider validation separates portable contract proof from native provider
-proof.
+proof. The Session requirements below define required deterministic and native
+coverage. Recorded validation of the exact source and invocation establishes
+qualification.
+
+Before Session production edits, add meaningful tests and record red evidence.
+Existing-API regressions must reproduce the actual defect; new-API compile
+failures establish missing surface but do not replace behavioral red/green
+evidence. Each production area requires passing regressions and independent
+review of its actual diff. Preserve failures and enabled regressions in the
+[production bug ledger](../../docs/mock-testing-production-bugs.md).
 
 ## Primary Direct-Trait Lane
 
@@ -14,8 +23,9 @@ bash scripts/check_ci.sh
 
 The scoped command runs `mock_contracts` with the crate's default features;
 `check_ci.sh` owns the complete workspace primary lane. Structs and exhaustive
-caller-owned enums implement Provider, Model, and Session traits directly,
-preserving their exact associated children and continuation types. The target
+caller-owned enums implement Provider, Model, Session and both borrowed
+Session-half traits directly, preserving exact associated children, borrowed
+half lifetimes and continuation types. The target
 constructs no supplied backend, opens no sockets or backend processes, and
 requires no credentials. Dependencies still compile. Scoped results are not
 full-suite evidence, and these fixtures do not prove supplied wire behavior or
@@ -46,7 +56,9 @@ Deterministic coverage must prove:
 
 - external `ProviderBackend -> ModelBackend -> SessionBackend` associated-child
   implementations used directly without Kit conversion;
-- Provider/Model/Session handle trait implementations and ownership bounds;
+- Provider/Model/Session and borrowed-half trait implementations, public
+  construction of tokens/outcomes, `Send` bounds, nonescaping half lifetimes,
+  non-Clone supplied owners/halves and sole consuming owner close authority;
 - non-Clone caller Provider, Model, and Session implementations and exact
   associated children;
 - public caller-constructed streams that yield two incremental deltas and an
@@ -67,17 +79,40 @@ Deterministic coverage must prove:
   and Gemini file-search activity with or without document identifiers in
   generation and streams, projecting only identified file evidence while
   malformed present fields remain errors;
-- OpenAI explicit turn cancellation, plus Gemini session opening returning
-  `Unsupported` before network I/O and retaining Provider `Closed` precedence;
+- explicit profile/configuration validation and render-or-reject coverage,
+  including all four Conversation providers and independent OpenAI/Gemini
+  Realtime mappings; known unsupported cases reject before transport and an
+  already-sealed Provider retains `Closed` precedence;
+- two exchanges and a tool round trip through each supplied Conversation
+  implementation, inspecting subsequent requests for exact mixed/tool-only
+  assistant replay and accepted input/results retained after cancellation;
+- genuinely pending duplex receive coexisting with submission, tool results
+  and targeted cancellation, including native input while output streams;
+- atomic validation of duplicate, stale, cross-session, mismatched, malformed
+  and cancelled tool-result batches; known-cancelled queued calls are retracted
+  and delivered calls receive invalidation;
+- terminal status/identity validation, incomplete output, EOF, duplicate
+  terminals, late auxiliary correlation and scoped usage with unknown counts;
+- cancellation races before response identity, natural completion, mismatched
+  acknowledgements, unrelated errors and finite deadlines, with stop resolution
+  independent from reusable, uncertain or closed continuity;
 - built-in Model selection racing shutdown, sealing across existing and cloned
   Models, and Model use after the original Provider handle is dropped;
 - concurrent and cancelled shutdown waiters, draining admitted work, and
   terminal-result replay;
 - bounded demand-driven streams releasing admission on completion, error, or
   drop, including terminal streams retained without further polling;
-- OpenAI Session setup completing across Provider sealing, cancellation
-  of pending setup and receive work, and consuming close after sealing or after
-  parent handles are dropped;
+- Session opening, command acceptance and every multi-write boundary under
+  dropped futures; pending receive/cancel/close cancellation preserves state
+  and parser ownership, and consuming close remains available after sealing;
+- coordinated seal/admission races, explicit not-started outcomes, observation
+  and cancellation of admitted work, idle Sessions without generation permits,
+  and task joins after owner/close drop;
+- aggregate history/replay, command/event, argument and outstanding-call bounds,
+  checked outbound sizes, slow/no consumers, reserved control/terminal capacity
+  and cancellation/close under full normal queues;
+- fragmented UTF-8, SSE CR/LF/CRLF and multiline data, NDJSON fragmentation and
+  final records, without adapter-local parser substitutes;
 - peer-initiated setup closure preserving its primary rejection and native
   code/reason while acknowledging the peer's close frame without a spurious
   supplementary cleanup error;
@@ -99,7 +134,11 @@ Deterministic coverage must prove:
   APIs.
 
 Minimal downstream implementations may prove the public contract, but they do
-not prove built-in provider behavior.
+not prove built-in provider behavior. Concurrency proofs use barriers or
+notifications rather than timing sleeps. Zero-I/O claims instrument the actual
+transport boundary or use a deterministically coordinated harness. Wire fixtures
+need documented or sanitized-capture provenance and independent native envelopes;
+four providers do not share an invented lifecycle fixture.
 
 ## Public-Surface Review Gate
 
@@ -124,10 +163,41 @@ source providers-kit/strict-tests.env && bash providers-kit/scripts/verify_stric
 Strict-live uses real OpenAI, Anthropic, Gemini, and Ollama services and exact
 configured model ids. It must exercise complete Provider-to-Model selection,
 generation/streaming, supported embeddings/files/batches/hosted tools,
-continuation replay, provider-supported OpenAI interactive behavior,
-provider-wide shutdown, and honest unsupported paths. Supplied Gemini interactive
-sessions are temporarily unsupported; their former live cases are withdrawn
-explicitly, not skipped or counted as passing.
+continuation replay, all four Conversation baselines, native OpenAI Realtime
+and Gemini Live, provider-wide shutdown, and honest unsupported paths. The
+canonical live inventory includes two exchanges and a tool round trip for each
+Conversation provider plus independently implemented Gemini native scenarios.
+Passing a prior inventory does not qualify added scenarios.
+
+The Session cases live under `live::sessions`:
+
+- `openai_conversation_session`, `anthropic_conversation_session`,
+  `gemini_conversation_session`, and `ollama_conversation_session` each require
+  two remembered-history exchanges and a correlated caller-executed tool round trip.
+- `gemini_live_text_audio_transcription` covers native output audio and its
+  transcription after text input.
+- `gemini_live_tool_round_trip` submits a valid result while native interaction
+  remains active and requires subsequent progress.
+- `gemini_live_manual_audio_activity` keeps input activity boundaries separate
+  from response completion and checks unsupported narrow controls explicitly.
+- `gemini_live_tool_cancellation_and_recovery` withholds a delivered tool result,
+  interrupts through manual audio activity, requires exact tool invalidation and
+  stale-result rejection, then proves a distinct correlated recovery response.
+
+These cases retain ordinary blocking assertions. They do not inherit the
+two existing OpenAI verbatim-copy grading exceptions. Each records exact model,
+command/response correlation, terminal outcome, cleanup and required media
+evidence. The executable inventory, rather than historical case counts, governs
+the final full run.
+
+Keep the environment example, verifier, `strict_env_contract`, assertions and
+evidence exporters synchronized with the inventory.
+`TEST_GEMINI_MODEL_INTERACTIVE` is required and initially selects exact
+`models/gemini-3.8-live`; it cannot inherit the ordinary
+Gemini role or silently fall back. Existing configured Conversation roles remain
+exact. Missing credentials/models/services are incomplete evidence, never a pass.
+The approved session-refactor qualification runs the full workspace wrapper and
+all long batches, with no exclusions or historical receipt reuse.
 
 The verifier runs the independent cases for all four providers in one target:
 
@@ -789,18 +859,20 @@ successful completion.
 
 OpenAI interactive proof sends one text/function turn followed by one speech turn.
 Each completed turn independently requires output audio bytes, nonblank output
-transcription and `Completed`. Its model-copy grade separately compares the entire
+transcription and an authoritative successful correlated response outcome.
+Its model-copy grade separately compares the entire
 raw concatenated output transcription with its requested full phrase exactly.
 There is no trimming, case folding, substring check, or punctuation tolerance.
 The text turn requests exactly one function call with an empty object. Only its
 function result contains a fresh pronounceable nonce phrase. That phrase grades
 model copying; it does not independently prove native output fidelity. The speech turn requests
 `Audio input received.` and requires no function calls. It also requires nonblank
-input transcription, which may arrive before or after `Completed` within the same
+input transcription, which may arrive before or after the response outcome within the same
 90-second turn deadline; output transcription is not input evidence. Evidence
 from the first turn cannot satisfy the second. A function turn records one
-transcript-byte/audio-byte checkpoint only after its correlated result send
-succeeds. New audio and nonblank transcription after that checkpoint are required;
+transcript-byte/audio-byte checkpoint only after correlated typed result
+submission returns its local acceptance receipt. A later command failure remains
+blocking. New audio and nonblank transcription after that checkpoint are required;
 pre-tool narration cannot satisfy continuation progress. Missing or repeated
 result submission remains fatal. Session close is attempted before reporting a
 turn failure. These are public Session observations, not native response identity
@@ -808,9 +880,9 @@ or proof that the model semantically used the result.
 
 The nonce phrase is generated only after accepting the expected function call.
 Each turn retains a bounded public Session event chronology, exact input/result
-correlation, raw transcripts, and separate private PCM sidecars. `send_attempt`
-and `send_return` distinguish attempted input from a returned Kit result; neither
-proves native acknowledgement. Evidence survives the observation timeout and is
+correlation, raw transcripts, and separate private PCM sidecars. Submission
+attempt, local command receipt, response outcome and native acknowledgement are
+distinct evidence; a returned command receipt alone proves no native acceptance. Evidence survives the observation timeout and is
 exported only after Session close and shared Provider shutdown have been attempted,
 with their outcomes recorded. An export failure fails the case without erasing
 its primary failure. The existing `PROVIDERS_KIT_EVIDENCE_DIR` or fresh private
@@ -830,30 +902,33 @@ complete function results, exact split transcripts/audio, output before completi
 
 The current-model campaign retains a separate OpenAI interruption case; its
 original positive function/audio journey remains independent. OpenAI requests the
-finite spoken sequence one through one hundred and sends `CancelTurn` once,
-immediately after its first nonempty output audio event. It requires actual
-`TurnCancelled`, then one correlated function/result turn with new post-result
+finite spoken sequence one through one hundred and submits one cancellation
+targeting its response immediately after the first nonempty output audio event.
+It requires a matching acknowledged stop, then one correlated function/result
+turn with new post-result
 audio/transcription, authoritative completion and successful close.
 An ordinary completion before cancellation is missing required evidence, not a
 pass, and does not by itself identify a Kit defect. There is no sleep, retry, or
 extra generation to force the desired outcome.
 
-Gemini interactive audio/session support is temporarily withdrawn by explicit
-scope decision. The supplied implementation returns `Unsupported` from
-`open_session` before network I/O, including for text-input Live sessions, whose
-former implementation requested audio output. Stateless Gemini audio input is
-unchanged. The two former Gemini session live cases and their exclusive protocol
-fixtures are removed; an ordinary public behavior test verifies rejection and
-shutdown precedence. Shared OpenAI assertions, inputs, deadlines and cleanup
-remain intact.
+Gemini Live qualification uses its own native setup, tool, media and activity
+semantics. It must prove tool requests/result submission before response
+completion, native tool cancellation and subsequent uncontaminated progress,
+ongoing input during output, generation-versus-activity boundaries, transcription
+and consuming cleanup. A setup frame is sent once; no second setup invents
+reconfiguration. Native `interrupted`, `generationComplete` and `turnComplete`
+are not interchangeable universal terminal signals. Unsupported narrow
+cancellation or playback reconciliation must reject honestly. Input transcription
+without native attribution remains explicitly uncorrelated, never attached to
+the currently active response. Output attribution follows its actual native
+ordering/evidence. These cases do not inherit OpenAI's copy-grade exception.
 
 The [qualification report](../../storage-kit/docs/feature-split-qualification.md)
-preserves all previous Gemini session results, source identities, diagnostic
-limits, packetization experiments and failed native control. Removing support
-does not resolve their causes, convert failures into passes, or qualify the
-remaining Provider campaign. Restoring this feature requires a new reviewed
-implementation and fresh native qualification; historical passing subsets do
-not establish current support.
+preserves previous Gemini withdrawal, failed native controls, source identities,
+diagnostic limits and packetization experiments. The approved replacement
+supersedes the active unsupported-session restriction; it does not resolve or
+relabel those historical results. Fresh reviewed implementation and native
+qualification are required for the new profile.
 
 Both the ordinary OpenAI function turn and post-cancellation progress explicitly
 prohibit speech before the tool call and while waiting for its result. The entire
@@ -894,10 +969,10 @@ inferred from an observed grade.
 “Please say audio input received.”, synthesized once with
 [eSpeak NG 1.52.0](https://github.com/espeak-ng/espeak-ng/releases/tag/1.52.0),
 its algorithmic `en-us` voice at 150 words/minute, then converted with
-`afconvert` to headerless signed 16-bit little-endian mono PCM. The retained historical 16 kHz
-Gemini asset and active 24 kHz OpenAI input total 192,308 bytes (about 2.4 seconds
-each). The Gemini asset remains available to interpret historical receipts,
-without implying active session coverage.
+`afconvert` to headerless signed 16-bit little-endian mono PCM. The retained 16 kHz
+Gemini asset and 24 kHz OpenAI input total 192,308 bytes (about 2.4 seconds
+each). Reuse the original bytes for the replacement native scenarios and retain
+them for historical interpretation; their presence is not live coverage proof.
 No third-party recording or voice model is included; the original text and
 generated speech are redistributable. eSpeak NG's
 [GPLv3 section 2](https://github.com/espeak-ng/espeak-ng/blob/1.52.0/COPYING)
@@ -1040,15 +1115,21 @@ Historical diagnostics remain bounded, private evidence. Complete native
 observation does not prove Kit application delivery or turn a failed assertion
 into a pass; an absent Kit completion export does not erase native evidence.
 The latest streaming capture's exact accumulator parity remains unavailable,
-and its original incomplete comparison is preserved. No withdrawn OpenAI audio
-or Gemini session case runs as part of the current qualification.
+and its original incomplete comparison is preserved. The withdrawn stateless
+OpenAI audio cases remain outside current qualification. Gemini Live restoration
+has its separate new implementation and proof obligations above.
 
-## October 2026 compatibility qualification
+## Historical October 2026 compatibility qualification
 
-Current-model cases extend the existing concrete live owners. The campaign
-started with 110 cases and added distinct protocol coverage; the two Gemini
-session cases and the three stateless OpenAI audio cases are now explicitly
-withdrawn as described above. Retained cases
+This section records the October campaign and its source-specific acceptance.
+It is not a standing inventory, waiver or resumption instruction for the Session
+refactor. The new campaign must capture its expanded executable inventory and
+run the full canonical gates.
+
+Current-model cases extended the existing concrete live owners. That campaign
+started with 110 cases and added distinct protocol coverage; its two Gemini
+session cases and three stateless OpenAI audio cases were explicitly withdrawn
+at the time. Retained cases
 keep their assertions and deadlines, without multiplying every operation by
 every model. The exact executable
 inventory must be captured before live execution; renamed/split coverage must
@@ -1092,7 +1173,7 @@ The existing `gpt-6-luna` Minimal generation also explicitly supplies temperatur
 exact answer, and deadline. Its Minimal profile maps to native `none`, where
 these sampling controls are supported. This proves native acceptance alongside
 focused wire mapping; output style does not prove parameter effectiveness.
-The current scoped local-Ollama-only inventory is 137 cases: OpenAI 38,
+The recorded scoped local-Ollama-only inventory was 137 cases: OpenAI 38,
 Anthropic 35, Gemini 38, and Ollama 26. In addition to the three stateless OpenAI audio cases above,
 the removed Gemini cases are
 `live::resources::gemini_interactive_session` and
@@ -1102,7 +1183,7 @@ retained cases remain mandatory; the seven explicit long-batch exclusions and
 their partial-coverage reporting rule are unchanged.
 
 
-### PR #21 campaign: explicitly authorized batch-receipt reuse
+### Historical PR #21 campaign: explicitly authorized batch-receipt reuse
 
 The initial October 21, 2026 authorization stopped a repeated 137-case
 invocation and reused 19 verified batch results from

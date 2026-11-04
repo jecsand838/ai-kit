@@ -113,10 +113,14 @@ versions, preserving credentials and exact model selections.
 
 The wrapper continuation receipt and the final clean-checkout proof are separate.
 After reviewed changes are committed, prepare a genuinely clean checkout at that
-commit using the documented vendor preparation, then run the locked workspace
-check with a fresh target directory. Keep the source commit, lockfile identity,
-command, exit status and cleanup evidence. Never infer this result from a dirty
-workspace or an earlier commit.
+commit, retaining Git metadata and the tracked protocol archives. Agent's
+protocol-authority gate reads and verifies those archives directly; no extracted
+vendor tree is required. Run `cargo check --locked --workspace --all-targets`
+with a new, empty `CARGO_TARGET_DIR`, Rust 1.99.0, `CARGO_INCREMENTAL=0` and
+`CARGO_BUILD_JOBS=1`. Do not use workspace `--all-features`; Storage retains its
+supported lane policy. Keep the source commit, lockfile identity, compiler,
+exact command, exit status, before/after tracked cleanliness and cleanup evidence.
+Never infer this result from a dirty workspace or an earlier commit.
 
 Report newly executed passes, reused passes, failures and incomplete work
 separately. The dated [PR #22 receipts](pr22-validation.md) retain historical

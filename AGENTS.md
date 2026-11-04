@@ -16,6 +16,7 @@ Operating contract for the five compiled `ai-kit` crates.
 Only these public behavioral traits are allowed:
 
 - provider: `ProviderBackend`, `ModelBackend`, `SessionBackend`;
+- provider borrowed halves, under `session`: `SessionCommands`, `SessionEvents`;
 - storage: `DatabaseBackend`, `StateStoreBackend`,
   `StateTransactionBackend`;
 - tools: `ToolsetBackend`, `ToolHandlerBackend`;
@@ -33,6 +34,7 @@ Required parent associated types/bounds:
 | --- | --- |
 | `ProviderBackend` | `Model: ModelBackend` |
 | `ModelBackend` | `Session: SessionBackend`; `Continuation: Clone + Send + Sync + 'static` |
+| `SessionBackend` | borrowed `Commands<'a>: SessionCommands` and `Events<'a>: SessionEvents` |
 | `StateStoreBackend` | `Transaction: StateTransactionBackend` |
 | `ToolsetBackend` | `Handler: ToolHandlerBackend` |
 | `AgentBackend` | `Workspace: WorkspaceBackend` |
@@ -51,8 +53,15 @@ Supplied Provider/Storage/Tool/Agent handles implement public traits as opaque
 structs over private exhaustive enums of concrete built-ins. Each Tool dispatcher
 (two total) has exactly one private `Extension` arm; the sole root extension
 constructor creates only that arm. Built-in constructors create concrete
-variants directly. The nine Provider/Storage/Agent dispatchers contain built-ins
-only: no `Extension`, erased adapter, identity carrier or normalization constructor.
+variants directly. The nine Provider/Storage/Agent resource dispatchers and the
+two borrowed Session-half dispatchers contain built-ins only: no `Extension`,
+erased adapter, identity carrier or normalization constructor.
+
+The Session halves remain subordinate to the unique Session owner. Their
+concrete associated types borrow that owner; only the owner has consuming close
+authority. They add no child construction or normalization ingress. These two
+half contracts, the eleven backend traits and five App workflow traits are the
+eighteen approved public behavioral traits.
 
 At each approved seam, the public trait is the sole behavioral contract for
 built-ins, private dispatchers, and supplied handles.
@@ -121,11 +130,36 @@ selection, normalized generation/streaming, embeddings, batches, sessions,
 portable hosted-tool configuration, wire adaptation and shared shutdown.
 
 `Provider -> Model -> Session` is a resource hierarchy. `Model` owns exact
-selected-model stateless calls; `Session` owns provider-supported stateful
-interaction. Model owns no agent loop, transcript, tool runtime, approvals,
+selected-model stateless calls; `Session` owns conversational continuity for
+that exact model. All four supplied providers expose explicit Conversation
+sessions; OpenAI and Gemini also expose native Realtime sessions.
+Managed Conversation sessions reuse generation and preserve
+authoritative assistant messages and opaque continuation unchanged. The
+caller owns tool execution, approvals and agent policy; accepting a validated
+tool-result set may trigger one continuation generation, never an autonomous
+agent loop. Model owns no agent loop, transcript, tool runtime, approvals,
 shell execution, retry controller, or independent shutdown. Provider-owned
 bounded transport retries do not authorize agent-loop or generation-retry
 policy; those remain caller-owned.
+
+Session command acceptance, response outcomes, outstanding tool obligations,
+input capture, playback reconciliation and continuity are distinct. Borrowed
+command and event halves support pending receive alongside submission and
+cancellation. Acceptance returns a correlated receipt in the same poll;
+accepted work survives a dropped waiter. Permanent termination is one
+authoritative observation, and an idle receive never means permanent drain.
+Uncertain continuity blocks further generation mutations. Preserve native
+correlation where available and expose absent attribution rather than inventing
+it. Bound retained history, replay, events, commands and tools; cancellation and
+close remain actionable under backpressure.
+
+Extend existing provider admission/sealing for Session work. Session resource
+lifetime is separate from generation admission; idle sessions hold no normal
+generation admission. Sealing rejects new work while observation, cancellation
+and consuming cleanup remain available. Track and join owned tasks, preserve
+primary failures, and never claim remote stop from local cleanup alone. Exact
+signatures and provider support rules belong to Provider's portable contract.
+Qualification requires recorded validation of the exact source and invocation.
 
 Normalized `FunctionCall`/`FunctionResult` cross the boundary.
 `ModelBackend::Continuation` associates exact selected-Model replay. Supplied
@@ -283,7 +317,7 @@ Test public behavior, not private spelling:
 - Compile contracts: public modules/signatures, associated children, privacy,
   ownership, auto traits, child-ingress rejection.
 - Primary direct-trait mocks: test-local structs and exhaustive caller enums
-  for all sixteen public traits, plus real Custom Agent/App consumers. Preserve
+  for all eighteen public traits, plus real Custom Agent/App consumers. Preserve
   exact associated children and permitted local App futures; no extension
   ingress, supplied lower-backend construction, or shared mock crate in this lane.
 - Deterministic integration: validation, Tool private erasure, direct
@@ -314,6 +348,13 @@ Before completion-work production changes, add/change meaningful tests and
 record red evidence. Require independent subagent review of the actual diff
 before closing an area. Check existing owners for extension/reduction before
 adding abstractions. Run one Cargo command at a time.
+
+For Session contract changes, update and independently review active
+agentic guidance before tests or production edits. Then record
+failing tests before each production area, require green behavioral regressions
+after the public surface compiles, and independently review that area's actual
+implementation diff. A new-API compile failure alone does not establish the
+behavioral done state. Preserve historical failures and enabled regressions.
 
 App may directly use pinned workspace futures-util and serde_json preserve_order
 only when its approved core contract requires them. Record/review the Cargo graph

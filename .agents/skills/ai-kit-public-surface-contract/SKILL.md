@@ -27,10 +27,11 @@ change.
 
 ## Frozen Public Hierarchies
 
-The eleven lower-crate backend traits and five App workflow traits are the
-only public behavioral traits:
+The eleven lower-crate backend traits, two borrowed Session-half traits and
+five App workflow traits are the eighteen approved public behavioral traits:
 
 - provider: `ProviderBackend`, `ModelBackend`, `SessionBackend`;
+- provider borrowed halves, under `session`: `SessionCommands`, `SessionEvents`;
 - storage: `DatabaseBackend`, `StateStoreBackend`,
   `StateTransactionBackend`;
 - tools: `ToolsetBackend`, `ToolHandlerBackend`;
@@ -88,6 +89,12 @@ Storage, and Agent callers implement their public traits directly with their
 own associated children. Never add a Provider/Storage/Agent normalization
 constructor or public child `from_backend`.
 
+SessionBackend associates concrete command/event half types borrowing its
+unique owner. Their two traits use RPITIT and Send bounds without requiring
+the borrowed halves to be `'static`. Supplied halves remain opaque and
+non-Clone, have no independent close authority, and introduce no ingress or
+backend erasure. The Provider portable API owns their exact signatures.
+
 ## Workflow
 
 1. Identify the caller value and owning functional domain for every public
@@ -110,9 +117,9 @@ constructor or public child `from_backend`.
    exact `ChildExecutor` exception above; it adds no backend dispatcher ingress.
 4. Retain exactly one private `Extension` arm in each of the two Tool
    dispatchers. The sole root `from_backend` constructor creates only that
-   arm. Keep all nine Provider, Storage, and Agent dispatchers closed over
-   concrete built-ins; callers remain statically typed or use caller-owned
-   exhaustive enums.
+   arm. Keep the nine Provider, Storage, and Agent resource dispatchers and
+   both Session-half dispatchers closed over concrete built-ins; callers remain
+   statically typed or use caller-owned exhaustive enums.
 5. Normalize the Tool associated child privately. Do not introduce a
    one-field generic extension wrapper, public erased handle, bare trait
    object, duplicate private behavioral trait, dispatch macro, generated
@@ -150,6 +157,10 @@ Never restore:
   generation/streaming/embedding/batch/session behavior, normalized
   function-call/result values, portable hosted-tool configuration, wire
   adaptation, and provider lifecycle.
+  Sessions explicitly select Conversation or Realtime: all four
+  supplied providers retain exact conversational continuity through existing
+  generation paths, while OpenAI and Gemini own their native realtime
+  mappings. These requirements do not grant tool execution or agent policy.
 - `tools-kit` owns executable Local/MCP client Toolsets, ToolHandlers,
   interaction state, and the independent McpServer product.
 - `storage-kit` owns Database behavior and separate transactional StateStore

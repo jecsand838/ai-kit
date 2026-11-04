@@ -1,10 +1,10 @@
 use providers_kit::error::{ErrorKind, ErrorPhase, Operation};
 use std::collections::VecDeque;
 use std::convert::Infallible;
-use std::num::NonZeroUsize;
+use std::num::{NonZeroU64, NonZeroUsize};
 use std::pin::Pin;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use std::time::Duration;
 
@@ -20,7 +20,10 @@ use providers_kit::generation::{
 };
 use providers_kit::models::{ModelBackend, ModelId, ModelListRequest, ModelPage, ModelSummary};
 use providers_kit::runtime::HealthStatus;
-use providers_kit::session::{SessionBackend, SessionConfig, SessionEvent, SessionInput};
+use providers_kit::session::{
+    CommandId, ResponseId, ResponseOutcome, SessionBackend, SessionCommand, SessionCommands,
+    SessionConfig, SessionContinuity, SessionEvent, SessionEvents, SessionProfile,
+};
 use providers_kit::{KitError, ProviderBackend};
 
 struct CustomProvider;
@@ -66,7 +69,21 @@ impl Drop for CustomStream {
 struct CustomSession {
     id: String,
     model_id: ModelId,
-    events: VecDeque<SessionEvent>,
+    events: Mutex<VecDeque<SessionEvent>>,
+    changed: tokio::sync::Notify,
+    sequence: u64,
+}
+
+struct CustomCommands<'a> {
+    id: &'a str,
+    events: &'a Mutex<VecDeque<SessionEvent>>,
+    changed: &'a tokio::sync::Notify,
+    sequence: &'a mut u64,
+}
+
+struct CustomEvents<'a> {
+    events: &'a Mutex<VecDeque<SessionEvent>>,
+    changed: &'a tokio::sync::Notify,
 }
 
 impl CustomModel {
@@ -338,12 +355,16 @@ impl ModelBackend for CustomModel {
         Ok(CustomSession {
             id: "session-1".to_string(),
             model_id: self.id.clone(),
-            events: VecDeque::new(),
+            events: Mutex::new(VecDeque::new()),
+            changed: tokio::sync::Notify::new(),
+            sequence: 0,
         })
     }
 }
 
 impl SessionBackend for CustomSession {
+    type Commands<'a> = CustomCommands<'a>;
+    type Events<'a> = CustomEvents<'a>;
     fn id(&self) -> &str {
         &self.id
     }
@@ -352,13 +373,55 @@ impl SessionBackend for CustomSession {
         &self.model_id
     }
 
-    async fn send(&mut self, input: SessionInput) -> Result<(), KitError> {
+    fn split(&mut self) -> (Self::Commands<'_>, Self::Events<'_>) {
+        (
+            CustomCommands {
+                id: &self.id,
+                events: &self.events,
+                changed: &self.changed,
+                sequence: &mut self.sequence,
+            },
+            CustomEvents {
+                events: &self.events,
+                changed: &self.changed,
+            },
+        )
+    }
+
+    async fn close(self) -> Result<(), KitError> {
+        Ok(())
+    }
+}
+
+impl SessionCommands for CustomCommands<'_> {
+    async fn submit(&mut self, input: SessionCommand) -> Result<CommandId, KitError> {
         match input {
-            SessionInput::Text { text } => {
-                self.events
-                    .push_back(SessionEvent::TextDelta { delta: text });
-                self.events.push_back(SessionEvent::Completed);
-                Ok(())
+            SessionCommand::Input(message) => {
+                *self.sequence += 1;
+                let sequence = NonZeroU64::new(*self.sequence).unwrap();
+                let command = CommandId::new(self.id, sequence)?;
+                let response = ResponseId::new(self.id, sequence)?;
+                let mut events = self.events.lock().unwrap();
+                events.push_back(SessionEvent::ResponseStarted {
+                    command: Some(command.clone()),
+                    response: response.clone(),
+                });
+                for content in message.content() {
+                    events.push_back(SessionEvent::Output {
+                        response: response.clone(),
+                        segment: None,
+                        content: content.clone(),
+                    });
+                }
+                events.push_back(SessionEvent::ResponseFinished {
+                    response,
+                    outcome: ResponseOutcome::Completed,
+                    continuity: SessionContinuity::Reusable,
+                    output: None,
+                });
+                drop(events);
+                self.changed.notify_one();
+                Ok(command)
             }
             _ => Err(KitError::new(
                 ErrorKind::Unsupported,
@@ -367,19 +430,17 @@ impl SessionBackend for CustomSession {
             )),
         }
     }
+}
 
-    async fn recv(&mut self) -> Result<SessionEvent, KitError> {
-        self.events.pop_front().ok_or_else(|| {
-            KitError::new(
-                ErrorKind::InvalidState,
-                Operation::SessionReceive,
-                ErrorPhase::Lifecycle,
-            )
-        })
-    }
-
-    async fn close(self) -> Result<(), KitError> {
-        Ok(())
+impl SessionEvents for CustomEvents<'_> {
+    async fn recv(&mut self) -> Option<SessionEvent> {
+        loop {
+            let notified = self.changed.notified();
+            if let Some(event) = self.events.lock().unwrap().pop_front() {
+                return Some(event);
+            }
+            notified.await;
+        }
     }
 }
 
@@ -526,27 +587,46 @@ async fn caller_hierarchy_is_used_directly_without_sdk_normalization() {
     assert_eq!(submitted.id, "batch-1");
 
     let mut session = model
-        .open_session(SessionConfig::default())
+        .open_session(SessionConfig::new(SessionProfile::Conversation))
         .await
         .expect("model should return its exact session");
     assert_eq!(session.id(), "session-1");
     assert_eq!(session.model_id(), model.model_id());
-    session
-        .send(SessionInput::Text {
-            text: "echo".to_string(),
-        })
-        .await
-        .expect("session input should send");
-    assert_eq!(
-        session.recv().await.expect("text event should exist"),
-        SessionEvent::TextDelta {
-            delta: "echo".to_string()
-        }
-    );
-    assert_eq!(
-        session.recv().await.expect("completion should exist"),
-        SessionEvent::Completed
-    );
+    {
+        let (mut commands, mut events) = session.split();
+        let command = commands
+            .submit(SessionCommand::Input(Message::user_text("echo").unwrap()))
+            .await
+            .expect("session input should send");
+        let SessionEvent::ResponseStarted {
+            command: Some(started),
+            response,
+        } = events.recv().await.expect("start")
+        else {
+            panic!("response starts")
+        };
+        assert_eq!(command, started);
+        let SessionEvent::Output {
+            response: output_response,
+            content: ContentPart::Text { text },
+            ..
+        } = events.recv().await.expect("text event should exist")
+        else {
+            panic!("text output")
+        };
+        assert_eq!(output_response, response);
+        assert_eq!(text, "echo");
+        let SessionEvent::ResponseFinished {
+            response: completed,
+            outcome: ResponseOutcome::Completed,
+            continuity: SessionContinuity::Reusable,
+            output: None,
+        } = events.recv().await.expect("completion should exist")
+        else {
+            panic!("authoritative completion")
+        };
+        assert_eq!(completed, response);
+    }
     session.close().await.expect("consuming close should run");
     provider
         .shutdown()

@@ -57,8 +57,9 @@ Hard constraints:
   output shortcuts, or backwards-compatibility bloat.
 - Preserve private exhaustive enum dispatch. Use the public RPITIT trait as the
   sole behavioral contract only at a seam enumerated by root `AGENTS.md`.
-  The two open Tool dispatchers retain one private `Extension` arm; the nine
-  Provider, Storage, and Agent dispatchers retain concrete built-ins only and
+  The two open Tool dispatchers retain one private `Extension` arm; Provider,
+  Storage, and Agent resource and borrowed Session-half dispatchers retain
+  concrete built-ins only and
   callers remain statically typed. Use a private `pub(crate)` trait only for
   another real closed family.
 - At the approved open Tool seam, every concrete built-in, the private enum,

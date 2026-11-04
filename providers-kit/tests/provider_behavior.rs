@@ -10,7 +10,7 @@ use providers_kit::generation::{
     ReasoningEffort, Role,
 };
 use providers_kit::models::ModelId;
-use providers_kit::session::SessionConfig;
+use providers_kit::session::{SessionConfig, SessionProfile};
 use providers_kit::{ModelBackend, Provider, ProviderBackend, ProviderConfig};
 use serde_json::json;
 use std::num::NonZeroU32;
@@ -55,7 +55,7 @@ fn file_upload_requests_reject_header_unsafe_values_during_construction_and_dese
 }
 
 #[tokio::test]
-async fn sessionless_models_report_unsupported_without_io() {
+async fn unsupported_realtime_profiles_report_unsupported_without_io() {
     let ollama = provider(ProviderKind::Ollama(
         OllamaConfig::local()
             .with_base_url(Url::parse("http://127.0.0.1:9/api").expect("URL should parse"))
@@ -65,7 +65,7 @@ async fn sessionless_models_report_unsupported_without_io() {
         .model(ModelId::new("chat-model").expect("model id should validate"))
         .expect("exact model should construct");
     assert!(matches!(
-        ollama_model.open_session(SessionConfig::default()).await,
+        ollama_model.open_session(SessionConfig::new(SessionProfile::Realtime)).await,
         Err(ref error) if error.kind() == ErrorKind::Unsupported
     ));
 
@@ -83,7 +83,7 @@ async fn sessionless_models_report_unsupported_without_io() {
         Err(ref error) if error.kind() == ErrorKind::Unsupported
     ));
     assert!(matches!(
-        anthropic_model.open_session(SessionConfig::default()).await,
+        anthropic_model.open_session(SessionConfig::new(SessionProfile::Realtime)).await,
         Err(ref error) if error.kind() == ErrorKind::Unsupported
     ));
 
@@ -154,14 +154,14 @@ async fn interactive_model_and_audio_compatibility_is_checked_before_websocket_i
         .expect("exact stateless model should construct");
     assert!(matches!(
         openai_stateless
-            .open_session(SessionConfig::default())
+            .open_session(SessionConfig::new(SessionProfile::Realtime))
             .await,
         Err(ref error) if error.kind() == ErrorKind::Unsupported
     ));
     let openai_model = openai
         .model(ModelId::new("gpt-realtime").expect("model id should validate"))
         .expect("exact model should construct");
-    let unsupported_openai_audio = SessionConfig::default()
+    let unsupported_openai_audio = SessionConfig::new(SessionProfile::Realtime)
         .with_input_audio("audio/opus", false)
         .expect("portable audio media type should validate");
     assert!(matches!(
@@ -178,20 +178,14 @@ async fn interactive_model_and_audio_compatibility_is_checked_before_websocket_i
         .expect("exact stateless model should construct");
     assert!(matches!(
         gemini_stateless
-            .open_session(SessionConfig::default())
+            .open_session(SessionConfig::new(SessionProfile::Realtime))
             .await,
         Err(ref error) if error.kind() == ErrorKind::Unsupported
     ));
     let gemini_live = gemini
-        .model(
-            ModelId::new("models/gemini-3.1-flash-live-preview").expect("model id should validate"),
-        )
+        .model(ModelId::new("models/gemini-3.8-live").expect("model id should validate"))
         .expect("exact live model should construct");
-    assert!(matches!(
-        gemini_live.open_session(SessionConfig::default()).await,
-        Err(ref error) if error.kind() == ErrorKind::Unsupported
-    ));
-    let unsupported_gemini_audio = SessionConfig::default()
+    let unsupported_gemini_audio = SessionConfig::new(SessionProfile::Realtime)
         .with_output_audio("audio/opus", false)
         .expect("portable audio media type should validate");
     assert!(matches!(
@@ -299,4 +293,64 @@ fn function_calls_are_constructed_on_assistant_messages() {
     .expect("assistant message with function call should validate");
     assert_eq!(message.role(), Role::Assistant);
     assert_eq!(message.function_calls().len(), 1);
+}
+
+#[tokio::test]
+async fn session_submission_errors_retain_the_public_operation_context() {
+    use providers_kit::SessionBackend;
+    use providers_kit::error::Operation;
+    use providers_kit::session::{SessionCommand, SessionCommands};
+
+    let provider = provider(ProviderKind::OpenAi(
+        OpenAiConfig::new(key("openai-test"))
+            .with_base_url(Url::parse("http://127.0.0.1:9/v1").unwrap()),
+    ));
+    let model = provider.model(ModelId::new("gpt-6-luna").unwrap()).unwrap();
+    let mut session = model
+        .open_session(SessionConfig::new(SessionProfile::Conversation))
+        .await
+        .unwrap();
+    let error = session
+        .split()
+        .0
+        .submit(SessionCommand::StartInput)
+        .await
+        .unwrap_err();
+    session.close().await.unwrap();
+    provider.shutdown().await.unwrap();
+    assert_eq!(error.kind(), ErrorKind::Unsupported);
+    assert_eq!(error.context().operation, Operation::SessionSend);
+}
+
+#[tokio::test]
+async fn bounded_session_registration_errors_retain_open_operation_context() {
+    use providers_kit::SessionBackend;
+    use providers_kit::error::Operation;
+
+    let provider = provider(ProviderKind::OpenAi(
+        OpenAiConfig::new(key("openai-test"))
+            .with_base_url(Url::parse("http://127.0.0.1:9/v1").unwrap()),
+    ));
+    let model = provider.model(ModelId::new("gpt-6-luna").unwrap()).unwrap();
+    let mut sessions = Vec::new();
+    let mut rejection = None;
+    for _ in 0..2048 {
+        match model
+            .open_session(SessionConfig::new(SessionProfile::Conversation))
+            .await
+        {
+            Ok(session) => sessions.push(session),
+            Err(error) => {
+                rejection = Some(error);
+                break;
+            }
+        }
+    }
+    for session in sessions {
+        session.close().await.unwrap();
+    }
+    provider.shutdown().await.unwrap();
+    let error = rejection.expect("session resource admission must remain bounded");
+    assert_eq!(error.kind(), ErrorKind::InvalidState);
+    assert_eq!(error.context().operation, Operation::OpenSession);
 }

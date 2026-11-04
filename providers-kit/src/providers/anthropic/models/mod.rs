@@ -32,7 +32,18 @@ impl AnthropicModel {
 
 impl ModelBackend for AnthropicModel {
     type Continuation = GenerationContinuation;
-    type Session = std::convert::Infallible;
+    type Session = super::session::AnthropicSession;
+
+    async fn open_session(
+        &self,
+        config: crate::session::SessionConfig,
+    ) -> Result<Self::Session, KitError> {
+        super::session::AnthropicSession::new(
+            self.clone(),
+            config,
+            self.client.api().transport().timeout(),
+        )
+    }
 
     fn model_id(&self) -> &ModelId {
         &self.id

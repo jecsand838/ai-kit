@@ -1,5 +1,9 @@
 # Anthropic Provider Notes
 
+Session behavior follows the current [portable API contract](../PORTABLE_API.md).
+Native qualification is recorded separately for the tested source and configuration.
+Other provider behavior retains its existing scope.
+
 Anthropic construction uses provider-owned config and credential types. Model
 selection uses the exact Anthropic model id through
 `Provider::model(ModelId)`.
@@ -10,10 +14,14 @@ The concrete Anthropic Model owns Messages API generation, streaming, and
 model-bound batch submission. The current adapter returns `Unsupported` for
 embeddings; Anthropic's [embedding guide](https://platform.claude.com/docs/en/build-with-claude/embeddings)
 describes a separate provider rather than an Anthropic embedding model.
-Anthropic has no supplied interactive Session; its associated Session is
-`Infallible`. Anthropic role conversion belongs to a private typed role owner;
-do not route it through
-stringly standalone conversion helpers.
+Anthropic owns a Conversation Session through its concrete associated child;
+the Realtime profile is unsupported. Compose the existing Messages generation
+and SSE paths without another client or parser. Retain authoritative assistant
+content in order, including thinking and tool-only responses, and commit it
+before releasing executable calls. Accepted tool results survive cancellation
+and are replayed once. No automatic cache markers, summarization or agent policy
+are introduced. Anthropic role conversion belongs to a private typed role owner;
+do not route it through stringly standalone conversion helpers.
 
 The current exact generation and hosted-tool profiles include
 `claude-fable-5-1`, `claude-opus-5-5`, `claude-sonnet-5-5`, and

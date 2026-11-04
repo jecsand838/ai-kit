@@ -45,16 +45,18 @@ generics, lifetimes, error types, panic policy, or duplicated domain logic.
 5. For `ai-kit` enum dispatch over agent, provider, provider-model, database,
    tool-runtime, or tool-source implementation families, keep one hand-written
    provider-agnostic behavioral contract. At the eleven root-approved
-   lower-crate backend seams it is the public RPITIT trait; other closed
-   families keep a private contract. App's five workflow traits remain static;
+   lower-crate backend seams and the two borrowed Session-half seams it is the
+   public RPITIT trait; other closed families keep a private contract. App's
+   five workflow traits remain static;
    `ChildExecutor` alone uses the exact GAT future in the App specification.
    Only App's field/tag serialization registry may erase codec functions;
    runtime values and lower backends must not enter it. The dispatcher must
    route through that trait and must not rely on
    inherent-method parity by convention. The two approved open Tool
    dispatchers retain concrete built-ins plus one private erased `Extension`
-   variant. The nine Provider, Storage, and Agent dispatchers retain concrete
-   built-ins only; callers implement those traits statically or define their
+   variant. The nine Provider, Storage, and Agent resource dispatchers and the
+   two Session-half dispatchers retain concrete built-ins only; callers
+   implement those traits statically or define their
    own exhaustive enum hierarchies.
    Shared contract modules own only provider-agnostic trait definitions,
    shared handles, and

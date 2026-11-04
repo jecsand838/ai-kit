@@ -7,8 +7,6 @@ use crate::generation::{
 };
 use crate::models::{ModelBackend, ModelId};
 
-use std::convert::Infallible;
-
 use super::chat::{build_chat_body, normalize_chat_response};
 use super::client::OllamaClient;
 use super::native::thinking::OllamaThinkingProfile;
@@ -38,7 +36,18 @@ impl OllamaModel {
 
 impl ModelBackend for OllamaModel {
     type Continuation = GenerationContinuation;
-    type Session = Infallible;
+    type Session = super::session::OllamaSession;
+
+    async fn open_session(
+        &self,
+        config: crate::session::SessionConfig,
+    ) -> Result<Self::Session, KitError> {
+        super::session::OllamaSession::new(
+            self.clone(),
+            config,
+            self.client.api().transport().timeout(),
+        )
+    }
 
     fn model_id(&self) -> &ModelId {
         &self.id

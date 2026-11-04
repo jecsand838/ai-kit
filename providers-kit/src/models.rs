@@ -2,7 +2,7 @@
 //!
 //! [`ModelId`] is validated but never normalized, aliased, or replaced by a default.
 //! Select a model through [`crate::ProviderBackend::model`]; [`ModelBackend`] owns
-//! generation, embeddings, batch submission, and native session opening.
+//! generation, embeddings, batch submission, and explicit-profile session opening.
 //! Operation errors, not a capability matrix, establish unsupported combinations.
 //! Supplied Model clones share their Provider lifecycle and have no separate shutdown.
 
@@ -340,7 +340,7 @@ pub struct ModelPage {
 /// assert!(events.next().await.is_none());
 /// assert_eq!(
 ///     model
-///         .open_session(Default::default())
+///         .open_session(providers_kit::session::SessionConfig::new(providers_kit::session::SessionProfile::Conversation))
 ///         .await
 ///         .unwrap_err()
 ///         .kind(),
@@ -519,8 +519,9 @@ pub trait ModelBackend: Send + Sync + 'static {
 
     /// Opens a stateful model session.
     ///
-    /// Supplied Sessions support OpenAI only; Gemini, Anthropic and Ollama return
-    /// Unsupported. Caller Models retain their own associated Session semantics.
+    /// Supplied Conversation sessions retain exact generation history on all four
+    /// providers. Realtime explicitly selects OpenAI Realtime or Gemini Live.
+    /// Caller Models retain their own associated Session semantics.
     /// See the complete [Session progression](crate::session) and consuming cleanup.
     ///
     /// # Errors
@@ -635,9 +636,12 @@ impl ModelBackend for ModelInner {
     async fn open_session(&self, config: SessionConfig) -> Result<SessionInner, KitError> {
         match self {
             Self::OpenAi(model) => model.open_session(config).await.map(SessionInner::OpenAi),
-            Self::Anthropic(model) => model.open_session(config).await.map(|never| match never {}),
-            Self::Gemini(model) => model.open_session(config).await.map(|never| match never {}),
-            Self::Ollama(model) => model.open_session(config).await.map(|never| match never {}),
+            Self::Anthropic(model) => model
+                .open_session(config)
+                .await
+                .map(SessionInner::Anthropic),
+            Self::Gemini(model) => model.open_session(config).await.map(SessionInner::Gemini),
+            Self::Ollama(model) => model.open_session(config).await.map(SessionInner::Ollama),
         }
     }
 }
@@ -709,7 +713,8 @@ impl ModelBackend for Model {
             .open_session(config)
             .await
             .map_err(|error| error.at_operation(Operation::OpenSession))?;
-        Ok(Session::new(session, Arc::clone(&self.provider)))
+        Session::new(session, Arc::clone(&self.provider))
+            .map_err(|error| error.at_operation(Operation::OpenSession))
     }
 }
 

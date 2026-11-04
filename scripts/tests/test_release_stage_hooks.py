@@ -35,6 +35,7 @@ class ReleaseStageHooksTests(unittest.TestCase):
     ).split()
     PROVIDER_TARGETS = (
         "compile_fail public_api provider_backend mock_contracts shutdown_lifecycle session_lifecycle "
+        "session_contract managed_conversation gemini_session "
         "provider_behavior wire_behavior error_contract transport_diagnostics strict_live_assertions "
         "strict_env_contract source_contract"
     ).split()

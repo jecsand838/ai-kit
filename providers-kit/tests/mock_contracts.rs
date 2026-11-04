@@ -4,7 +4,7 @@ mod mock_support;
 use std::collections::VecDeque;
 use std::convert::Infallible;
 use std::marker::PhantomPinned;
-use std::num::{NonZeroU32, NonZeroUsize};
+use std::num::{NonZeroU32, NonZeroU64, NonZeroUsize};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -33,13 +33,18 @@ use providers_kit::hosted::{
 };
 use providers_kit::models::{ModelId, ModelListRequest, ModelPage, ModelSummary};
 use providers_kit::runtime::HealthStatus;
-use providers_kit::session::{SessionConfig, SessionEvent, SessionInput, SessionTurnDetection};
+use providers_kit::session::{
+    CancelTarget, CancellationResolution, CommandId, OutputSegmentId, ResponseId, ResponseOutcome,
+    SessionCommand, SessionCommands, SessionConfig, SessionContinuity, SessionEvent, SessionEvents,
+    SessionProfile, SessionToolResult, SessionTurnDetection, ToolRequestId, TranscriptionSource,
+    UsageScope,
+};
 use providers_kit::{KitError, ModelBackend, ProviderBackend, SessionBackend};
 
 struct Case;
 
 enum SessionExchange {
-    Input(SessionInput),
+    Input(SessionCommand),
     Event(SessionEvent),
 }
 
@@ -53,6 +58,9 @@ impl Wake for WakeProbe {
 }
 
 impl Case {
+    fn send_future<F: Future + Send>(future: F) -> F {
+        future
+    }
     fn id() -> ModelId {
         ModelId::new("caller-exact-model-v2").unwrap()
     }
@@ -96,7 +104,7 @@ impl Case {
         }
     }
     fn config() -> SessionConfig {
-        SessionConfig::default()
+        SessionConfig::new(SessionProfile::Realtime)
             .with_instructions("Keep exact caller instructions")
             .unwrap()
             .with_input_audio("audio/pcm", true)
@@ -104,7 +112,9 @@ impl Case {
             .with_output_audio("audio/pcm", true)
             .unwrap()
             .with_turn_detection(SessionTurnDetection::Manual)
-            .with_functions(vec![Self::function()], Some(ToolChoice::Auto))
+            .with_tools(vec![ProviderToolSpec::Function(Self::function())])
+            .unwrap()
+            .with_generation(GenerationConfig::default().with_tool_choice(ToolChoice::Auto))
             .unwrap()
     }
     fn function() -> ProviderFunctionTool {
@@ -114,9 +124,149 @@ impl Case {
             JsonSchema::new(serde_json::json!({"type":"object","properties":{"key":{"type":"integer"}},"required":["key"]})).unwrap(),
         ).unwrap()
     }
-    fn input() -> SessionInput {
-        SessionInput::Text {
-            text: "session turn".into(),
+    fn input() -> SessionCommand {
+        SessionCommand::Input(Message::user_text("session turn").unwrap())
+    }
+    fn session_response_id(session: &str, sequence: u64) -> ResponseId {
+        ResponseId::new(session, NonZeroU64::new(sequence).unwrap()).unwrap()
+    }
+    fn command(session: &str, sequence: u64) -> CommandId {
+        CommandId::new(session, NonZeroU64::new(sequence).unwrap()).unwrap()
+    }
+    fn tool(sequence: u64) -> ToolRequestId {
+        ToolRequestId::new("session-media", NonZeroU64::new(sequence).unwrap()).unwrap()
+    }
+    fn completed(session: &str, sequence: u64) -> SessionEvent {
+        SessionEvent::ResponseFinished {
+            response: Self::session_response_id(session, sequence),
+            outcome: ResponseOutcome::Completed,
+            continuity: SessionContinuity::Reusable,
+            output: None,
+        }
+    }
+    fn text(session: &str, sequence: u64, text: &str) -> SessionEvent {
+        SessionEvent::Output {
+            response: Self::session_response_id(session, sequence),
+            segment: None,
+            content: ContentPart::Text { text: text.into() },
+        }
+    }
+    fn assert_event(actual: SessionEvent, expected: SessionEvent) {
+        match (actual, expected) {
+            (
+                SessionEvent::ResponseStarted {
+                    command: a,
+                    response: b,
+                },
+                SessionEvent::ResponseStarted {
+                    command: c,
+                    response: d,
+                },
+            ) => assert_eq!((a, b), (c, d)),
+            (
+                SessionEvent::Output {
+                    response: a,
+                    segment: b,
+                    content: c,
+                },
+                SessionEvent::Output {
+                    response: d,
+                    segment: e,
+                    content: f,
+                },
+            ) => assert_eq!((a, b, c), (d, e, f)),
+            (
+                SessionEvent::Transcription {
+                    source: a,
+                    text: b,
+                    finalized: c,
+                },
+                SessionEvent::Transcription {
+                    source: d,
+                    text: e,
+                    finalized: f,
+                },
+            ) => assert_eq!((a, b, c), (d, e, f)),
+            (
+                SessionEvent::ToolRequested {
+                    response: a,
+                    request: b,
+                    call: c,
+                },
+                SessionEvent::ToolRequested {
+                    response: d,
+                    request: e,
+                    call: f,
+                },
+            ) => assert_eq!((a, b, c), (d, e, f)),
+            (
+                SessionEvent::ToolsInvalidated { requests: a },
+                SessionEvent::ToolsInvalidated { requests: b },
+            ) => assert_eq!(a, b),
+            (
+                SessionEvent::Usage {
+                    scope: a,
+                    usage: b,
+                    finalized: c,
+                },
+                SessionEvent::Usage {
+                    scope: d,
+                    usage: e,
+                    finalized: f,
+                },
+            ) => assert_eq!((a, b, c), (d, e, f)),
+            (
+                SessionEvent::ResponseFinished {
+                    response: a,
+                    outcome: b,
+                    continuity: c,
+                    output: d,
+                },
+                SessionEvent::ResponseFinished {
+                    response: e,
+                    outcome: f,
+                    continuity: g,
+                    output: h,
+                },
+            ) => {
+                assert_eq!((a, c), (e, g));
+                assert!(
+                    d.is_none() && h.is_none(),
+                    "scripted native observations carry no fabricated projection"
+                );
+                assert!(matches!(
+                    (b, f),
+                    (ResponseOutcome::Completed, ResponseOutcome::Completed)
+                        | (ResponseOutcome::Cancelled, ResponseOutcome::Cancelled)
+                        | (ResponseOutcome::Interrupted, ResponseOutcome::Interrupted)
+                ));
+            }
+            (
+                SessionEvent::Cancellation {
+                    command: a,
+                    target: b,
+                    resolution: c,
+                    continuity: d,
+                },
+                SessionEvent::Cancellation {
+                    command: e,
+                    target: f,
+                    resolution: g,
+                    continuity: h,
+                },
+            ) => {
+                assert_eq!((a, b, d), (e, f, h));
+                assert!(matches!(
+                    (c, g),
+                    (
+                        CancellationResolution::Stopped,
+                        CancellationResolution::Stopped
+                    )
+                ));
+            }
+            (actual, expected) => {
+                panic!("unexpected session event {actual:?}; expected {expected:?}")
+            }
         }
     }
     fn request<C: Clone>(token: C) -> GenerateRequest<C> {
@@ -322,32 +472,55 @@ impl Case {
         events
     }
     fn session_dialogue() -> Vec<SessionExchange> {
+        let first = Self::session_response_id("session-media", 1);
+        let second = Self::session_response_id("session-media", 2);
+        let segment = OutputSegmentId::new("session-media", NonZeroU64::new(1).unwrap()).unwrap();
         vec![
-            SessionExchange::Input(SessionInput::TurnStart),
-            SessionExchange::Input(SessionInput::Audio {
+            SessionExchange::Input(SessionCommand::StartInput),
+            SessionExchange::Input(SessionCommand::Audio {
                 media_type: "audio/pcm".into(),
                 data: vec![0, 1, 127, 128, 255, 0],
             }),
-            SessionExchange::Input(SessionInput::TurnEnd),
-            SessionExchange::Event(SessionEvent::InputTranscriptionDelta {
-                delta: "resolve forty-two".into(),
+            SessionExchange::Input(SessionCommand::EndInput),
+            SessionExchange::Event(SessionEvent::ResponseStarted {
+                command: Some(Self::command("session-media", 3)),
+                response: first.clone(),
             }),
-            SessionExchange::Event(SessionEvent::Audio {
-                media_type: "audio/pcm".into(),
-                data: vec![0, 128, 255, 127],
+            SessionExchange::Event(SessionEvent::Transcription {
+                source: TranscriptionSource::Input {
+                    command: Some(Self::command("session-media", 1)),
+                },
+                text: "resolve forty-two".into(),
+                finalized: true,
             }),
-            SessionExchange::Event(SessionEvent::OutputTranscriptionDelta {
-                delta: "checking the record".into(),
+            SessionExchange::Event(SessionEvent::Output {
+                response: first.clone(),
+                segment: Some(segment.clone()),
+                content: ContentPart::Audio {
+                    media_type: "audio/pcm".into(),
+                    data: vec![0, 128, 255, 127],
+                },
             }),
-            SessionExchange::Event(SessionEvent::FunctionCall(
-                FunctionCall::new(
+            SessionExchange::Event(SessionEvent::Transcription {
+                source: TranscriptionSource::Output {
+                    response: first.clone(),
+                    segment,
+                },
+                text: "checking the record".into(),
+                finalized: false,
+            }),
+            SessionExchange::Event(SessionEvent::ToolRequested {
+                response: first.clone(),
+                request: Self::tool(1),
+                call: FunctionCall::new(
                     Some("session-call".into()),
                     "resolve",
                     serde_json::json!({"key":42}),
                 )
                 .unwrap(),
-            )),
-            SessionExchange::Input(SessionInput::FunctionResult(
+            }),
+            SessionExchange::Input(SessionCommand::ToolResults(vec![SessionToolResult::new(
+                Self::tool(1),
                 FunctionResult::new(
                     Some("session-call".into()),
                     "resolve",
@@ -357,31 +530,56 @@ impl Case {
                     false,
                 )
                 .unwrap(),
-            )),
-            SessionExchange::Event(SessionEvent::Usage(Usage {
-                input_tokens: Some(5),
-                output_tokens: Some(3),
-                total_tokens: Some(8),
-                ..Usage::default()
-            })),
-            SessionExchange::Event(SessionEvent::Completed),
-            SessionExchange::Input(Self::input()),
-            SessionExchange::Event(SessionEvent::TextDelta {
-                delta: "response before cancellation".into(),
+            )])),
+            SessionExchange::Event(SessionEvent::Usage {
+                scope: UsageScope::Response(first),
+                usage: Usage {
+                    input_tokens: Some(5),
+                    output_tokens: Some(3),
+                    total_tokens: Some(8),
+                    ..Usage::default()
+                },
+                finalized: true,
             }),
-            SessionExchange::Event(SessionEvent::FunctionCall(
-                FunctionCall::new(
+            SessionExchange::Event(Self::completed("session-media", 1)),
+            SessionExchange::Input(Self::input()),
+            SessionExchange::Event(SessionEvent::ResponseStarted {
+                command: Some(Self::command("session-media", 5)),
+                response: second.clone(),
+            }),
+            SessionExchange::Event(Self::text(
+                "session-media",
+                2,
+                "response before cancellation",
+            )),
+            SessionExchange::Event(SessionEvent::ToolRequested {
+                response: second.clone(),
+                request: Self::tool(2),
+                call: FunctionCall::new(
                     Some("cancelled-call".into()),
                     "resolve",
                     serde_json::json!({"key":43}),
                 )
                 .unwrap(),
-            )),
-            SessionExchange::Input(SessionInput::CancelTurn),
-            SessionExchange::Event(SessionEvent::FunctionCallsCancelled {
-                call_ids: vec!["cancelled-call".into()],
             }),
-            SessionExchange::Event(SessionEvent::TurnCancelled),
+            SessionExchange::Input(SessionCommand::Cancel(CancelTarget::Response(
+                second.clone(),
+            ))),
+            SessionExchange::Event(SessionEvent::ToolsInvalidated {
+                requests: vec![Self::tool(2)],
+            }),
+            SessionExchange::Event(SessionEvent::Cancellation {
+                command: Self::command("session-media", 6),
+                target: CancelTarget::Response(second.clone()),
+                resolution: CancellationResolution::Stopped,
+                continuity: SessionContinuity::Reusable,
+            }),
+            SessionExchange::Event(SessionEvent::ResponseFinished {
+                response: second,
+                outcome: ResponseOutcome::Cancelled,
+                continuity: SessionContinuity::Reusable,
+                output: None,
+            }),
         ]
     }
     fn session_script<C>() -> Vec<Step<C>> {
@@ -414,14 +612,23 @@ impl Case {
         let mut session = model.open_session(Self::config()).await.unwrap();
         assert_eq!(session.id(), "session-media");
         assert_eq!(session.model_id(), &Self::id());
+        let (mut commands, mut events) = session.split();
+        let mut sequence = 0;
         for exchange in Self::session_dialogue() {
             match exchange {
-                SessionExchange::Input(input) => session.send(input).await.unwrap(),
+                SessionExchange::Input(input) => {
+                    sequence += 1;
+                    assert_eq!(
+                        commands.submit(input).await.unwrap(),
+                        Self::command("session-media", sequence)
+                    );
+                }
                 SessionExchange::Event(expected) => {
-                    assert_eq!(session.recv().await.unwrap(), expected)
+                    Self::assert_event(events.recv().await.unwrap(), expected)
                 }
             }
         }
+        drop((commands, events));
         session.close().await.unwrap();
         provider.shutdown().await.unwrap();
     }
@@ -588,13 +795,11 @@ impl Case {
             ),
             Self::step(
                 Request::Recv("session-opaque".into()),
-                Reply::Event(SessionEvent::TextDelta {
-                    delta: "session answer".into(),
-                }),
+                Reply::Event(Self::text("session-opaque", 1, "session answer")),
             ),
             Self::step(
                 Request::Recv("session-opaque".into()),
-                Reply::Event(SessionEvent::Completed),
+                Reply::Event(Self::completed("session-opaque", 1)),
             ),
             Self::step(Request::Close("session-opaque".into()), Reply::Unit),
             Self::step(Request::Shutdown, Reply::Unit),
@@ -777,14 +982,20 @@ impl Case {
         let mut session = model.open_session(Self::config()).await.unwrap();
         assert_eq!(session.id(), "session-opaque");
         assert_eq!(session.model_id(), &Self::id());
-        session.send(Self::input()).await.unwrap();
+        let (mut commands, mut events) = session.split();
         assert_eq!(
-            session.recv().await.unwrap(),
-            SessionEvent::TextDelta {
-                delta: "session answer".into()
-            }
+            commands.submit(Self::input()).await.unwrap(),
+            Self::command("session-opaque", 1)
         );
-        assert_eq!(session.recv().await.unwrap(), SessionEvent::Completed);
+        Self::assert_event(
+            events.recv().await.unwrap(),
+            Self::text("session-opaque", 1, "session answer"),
+        );
+        Self::assert_event(
+            events.recv().await.unwrap(),
+            Self::completed("session-opaque", 1),
+        );
+        drop((commands, events));
         session.close().await.unwrap();
         provider.shutdown().await.unwrap();
         provider.shutdown().await.unwrap();
@@ -1035,12 +1246,22 @@ impl Case {
             ),
         ]);
         let mut session = model.open_session(Self::config()).await.unwrap();
+        let (mut commands, mut events) = session.split();
+        errors.push((
+            commands.submit(Self::input()).await.unwrap_err(),
+            Operation::SessionSend,
+        ));
+        let Some(SessionEvent::Terminated {
+            reason, continuity, ..
+        }) = events.recv().await
+        else {
+            panic!("receive failure must terminate")
+        };
+        assert_eq!(continuity, SessionContinuity::Closed);
+        assert!(events.recv().await.is_none());
+        errors.push((reason, Operation::SessionReceive));
+        drop((commands, events));
         errors.extend([
-            (
-                session.send(Self::input()).await.unwrap_err(),
-                Operation::SessionSend,
-            ),
-            (session.recv().await.unwrap_err(), Operation::SessionReceive),
             (session.close().await.unwrap_err(), Operation::SessionClose),
             (provider.shutdown().await.unwrap_err(), Operation::Shutdown),
             (provider.shutdown().await.unwrap_err(), Operation::Shutdown),
@@ -1053,6 +1274,58 @@ impl Case {
             assert_eq!(error.correlation_id(), Some("fixture-correlation"));
         }
     }
+}
+
+#[tokio::test]
+async fn borrowed_session_halves_are_send_and_pending_receive_keeps_submission_available() {
+    let (provider, probe) = ScriptedProvider::<Beta>::new(vec![
+        Case::step(Request::Model(Case::id()), Reply::Unit),
+        Case::step(
+            Request::OpenSession(Case::config()),
+            Reply::Session("duplex".into()),
+        ),
+        Case::step(Request::Send("duplex".into(), Case::input()), Reply::Unit),
+        Case::step(
+            Request::Recv("duplex".into()),
+            Reply::Event(Case::text("duplex", 1, "accepted while pending")),
+        ),
+        Case::step(
+            Request::Recv("duplex".into()),
+            Reply::Event(Case::completed("duplex", 1)),
+        ),
+        Case::step(Request::Close("duplex".into()), Reply::Unit),
+        Case::step(Request::Shutdown, Reply::Unit),
+    ]);
+    let provider = CallerProvider::Beta(provider);
+    let model = provider.model(Case::id()).unwrap();
+    let mut session = model.open_session(Case::config()).await.unwrap();
+    {
+        let (mut commands, mut events) = session.split();
+        {
+            let pending = Case::send_future(events.recv());
+            tokio::pin!(pending);
+            assert!(
+                pending
+                    .as_mut()
+                    .poll(&mut Context::from_waker(Waker::noop()))
+                    .is_pending()
+            );
+            let receipt = Case::send_future(commands.submit(Case::input()))
+                .await
+                .unwrap();
+            assert_eq!(receipt, Case::command("duplex", 1));
+            Case::assert_event(
+                pending.await.unwrap(),
+                Case::text("duplex", 1, "accepted while pending"),
+            );
+        }
+        Case::assert_event(events.recv().await.unwrap(), Case::completed("duplex", 1));
+    }
+    session.close().await.unwrap();
+    provider.shutdown().await.unwrap();
+    probe.assert_complete();
+    assert_eq!(probe.close_count(), 1);
+    assert_eq!(probe.dropped_session_count(), 1);
 }
 
 #[tokio::test]
@@ -1380,7 +1653,7 @@ async fn sessions_retain_independent_identity_and_consuming_close_does_not_close
         Case::step(Request::Close("first".into()), Reply::Unit),
         Case::step(
             Request::Recv("second".into()),
-            Reply::Event(SessionEvent::Completed),
+            Reply::Event(Case::completed("second", 1)),
         ),
         Case::step(Request::Close("second".into()), Reply::Unit),
         Case::step(Request::Shutdown, Reply::Unit),
@@ -1390,9 +1663,15 @@ async fn sessions_retain_independent_identity_and_consuming_close_does_not_close
     let mut second = model.open_session(Case::config()).await.unwrap();
     assert_eq!(first.id(), "first");
     assert_eq!(second.id(), "second");
-    second.send(Case::input()).await.unwrap();
-    first.close().await.unwrap();
-    assert_eq!(second.recv().await.unwrap(), SessionEvent::Completed);
+    {
+        let (mut commands, mut events) = second.split();
+        assert_eq!(
+            commands.submit(Case::input()).await.unwrap(),
+            Case::command("second", 1)
+        );
+        first.close().await.unwrap();
+        Case::assert_event(events.recv().await.unwrap(), Case::completed("second", 1));
+    }
     second.close().await.unwrap();
     provider.shutdown().await.unwrap();
     probe.assert_complete();
@@ -1428,11 +1707,22 @@ async fn session_cleanup_remains_available_after_provider_shutdown_seals_work() 
             .kind(),
         ErrorKind::Closed
     );
-    assert_eq!(
-        session.send(Case::input()).await.unwrap_err().kind(),
-        ErrorKind::Closed
-    );
-    assert_eq!(session.recv().await.unwrap_err().kind(), ErrorKind::Closed);
+    {
+        let (mut commands, mut events) = session.split();
+        assert_eq!(
+            commands.submit(Case::input()).await.unwrap_err().kind(),
+            ErrorKind::Closed
+        );
+        let Some(SessionEvent::Terminated {
+            reason, continuity, ..
+        }) = events.recv().await
+        else {
+            panic!("sealed terminal")
+        };
+        assert_eq!(reason.kind(), ErrorKind::Closed);
+        assert_eq!(continuity, SessionContinuity::Closed);
+        assert!(events.recv().await.is_none());
+    }
     session.close().await.unwrap();
     provider.shutdown().await.unwrap();
     probe.assert_complete();

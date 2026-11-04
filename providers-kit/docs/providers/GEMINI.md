@@ -1,5 +1,9 @@
 # Gemini Provider Notes
 
+Session behavior follows the current [portable API contract](../PORTABLE_API.md).
+Native qualification is recorded separately for the tested source and configuration.
+Other provider behavior retains its existing scope.
+
 Gemini construction uses provider-owned config. Model selection uses the exact
 Gemini resource/model id through `Provider::model(ModelId)`; the Kit does not
 insert or remove resource prefixes.
@@ -7,7 +11,8 @@ insert or remove resource prefixes.
 ## Model And Continuation
 
 The concrete Gemini Model owns generation, streaming, embeddings and model-bound
-batch submission. Interactive sessions are currently unsupported.
+batch submission. Conversation Sessions reuse that selected-model path; native
+Gemini Live is a separate explicit Realtime profile.
 
 Current exact generation profiles include `models/gemini-4-argon` and
 `models/gemini-3.8-flash`. Both expose `low`, `medium`, and `high` thinking
@@ -22,24 +27,68 @@ The existing `responseMimeType`/`responseJsonSchema` encoding remains listed
 in the REST contract; `responseFormat` is a newer alternative, not evidence
 that the existing encoding has been removed.
 
-Gemini interactive audio/session support is temporarily withdrawn by explicit
-project scope decision. `ModelBackend::open_session` returns the existing
-`Unsupported` error before network I/O for every Gemini model and valid
-`SessionConfig`, including the former `models/gemini-3.8-live` and
-`models/gemini-3.1-flash-live-preview` selections. Calls after Provider shutdown
-retain the existing `Closed` admission error. The private Gemini model uses the
-same `Infallible` session child as the other sessionless implementations.
+Conversation Sessions retain complete authoritative assistant messages and exact
+signed parts through the existing generation/continuation implementation. They
+must not create another GenerateContent client, parser or replay format.
 
-The withdrawn implementation always requested audio output, so this restriction
-also covers text input through Gemini Live. It does not change stateless
-`GenerateContent` audio input, generation, streaming, embeddings or resources.
-Public Session types and caller-owned implementations remain available. This
-is a Kit support limitation, not a claim that Google's native Live API lacks
-audio. The previous manual/automatic audio, transcription, function, metadata
-and cancellation tests are withdrawn coverage; their receipts and unresolved
-failures remain in the [qualification report](../../../storage-kit/docs/feature-split-qualification.md).
-Reintroducing Gemini sessions requires a separately reviewed implementation and
-fresh live qualification; local `Unsupported` coverage is not native success.
+Native Live opens one bounded WebSocket and sends one setup before waiting for
+`setupComplete`. Render or reject every accepted generation/tool/media setting
+for the exact selected Live model; a second setup on the same connection is not
+reconfiguration. `TEST_GEMINI_MODEL_INTERACTIVE` initially selects exact
+`models/gemini-3.8-live`, independently from ordinary generation roles. Unknown
+models do not inherit settings from name prefixes and no failure substitutes a
+different model/profile. See the [Live protocol](https://ai.google.dev/api/live)
+and [model capabilities](https://ai.google.dev/gemini-api/docs/live-api/capabilities).
+
+Live tool calls may require results before response completion. Process complete
+validated calls promptly, accept correlated results while native interaction is
+active, and handle `toolCallCancellation` independently. `generationComplete`,
+`interrupted` and `turnComplete` have different scopes; none establishes that
+all late events or outstanding tools have drained. Input activity start/end and
+`audioStreamEnd` are distinct controls. Do not implement cancellation through an
+empty completed input or claim narrow response cancellation/playback semantics
+that the protocol cannot support; reject those requests honestly.
+
+Native `voiceActivity` reports uncorrelated input VAD telemetry. Its speech
+start/end signals are distinct from caller activity commands and from native
+`serverContent.interrupted`/`turnComplete` interaction boundaries. The adapter
+validates this telemetry without inventing a command acknowledgement, response
+correlation or interaction event. Empty server envelopes carry no progress and
+never extend an active response deadline. See the [server-message schema and
+voice activity fields](https://ai.google.dev/api/live#BidiGenerateContentServerMessage).
+
+Supplied Live function declarations explicitly select native `behavior: BLOCKING`.
+Gemini 3.8 Live defaults to `NON_BLOCKING` but also supports blocking execution;
+the supplied mapping chooses blocking continuation so the caller can resolve a
+function request during the active response before generation completes. This
+is a provider-local wire choice, with no new portable policy option or automatic
+tool execution. Asynchronous function scheduling is outside this supplied
+mapping. See the [official model comparison and asynchronous function calling
+guide](https://ai.google.dev/gemini-api/docs/live-api/capabilities).
+
+Input transcription arrives independently with no guaranteed ordering and may
+lack an attribution identifier. Preserve that absence rather than attaching it
+to the active response; retain genuine output correlation and any supported
+transcription boundaries. Keep command, response, audio segment and tool state
+separate. Continuity uncertainty after a partial mutation blocks new generation
+commands, but observation and consuming cleanup remain available. Native Live
+uses the same shared admission/sealing authority without holding a generation
+permit throughout an idle session.
+
+The [Google SDK transcription schema](https://googleapis.github.io/js-genai/release_docs/interfaces/types.Transcription.html)
+permits omitted text and an optional `finished` marker. Text fragments are
+accumulated within their input transcript or output response/segment; a finished
+marker publishes the full accumulated snapshot, including when that marker has
+no text. The next input observation after a finished unattributed transcript,
+including a final-only observation, starts a new transcript with `command: None`.
+An explicit final marker transfers the buffer into the observation. An unfinished output buffer is released at generation completion or interruption, after that turn's last output transcript. [Gemini Live server content](https://ai.google.dev/api/live#BidiGenerateContentServerContent)
+
+This approved replacement supersedes the earlier active Gemini-session
+withdrawal. The previous manual/automatic audio, transcription, function,
+metadata and cancellation receipts and unresolved failures remain in the
+[qualification report](../../../storage-kit/docs/feature-split-qualification.md).
+They neither qualify the new implementation nor become passes. Stateless
+GenerateContent audio and unrelated resource operations retain their scope.
 
 Gemini thought signatures are private continuation metadata. Preserve the
 complete model-authored assistant Message and replay every signed part exactly

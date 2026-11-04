@@ -15,10 +15,12 @@ Provider -> Model -> Session
 
 `Provider` selects an exact `ModelId` and owns provider-wide resources.
 `Model` performs generation, streaming, embeddings, batch submission, and
-interactive session opening. Supplied `Session` values own OpenAI Realtime
-interaction. Stateless OpenAI audio and supplied Gemini sessions are temporarily
-unsupported; OpenAI Realtime and stateless Gemini generation remain available.
-Ordinary multi-turn generation reuses returned messages.
+session opening. All four supplied providers expose a Conversation profile
+retaining exact conversational continuity. OpenAI Realtime and Gemini Live
+provide explicit native Realtime profiles. Qualification is established by
+recorded validation of the exact source and invocation. Stateless OpenAI
+audio remains separately unsupported. Direct stateless multi-turn generation
+continues to reuse returned messages.
 
 ```rust,ignore
 use providers_kit::{ModelBackend, ModelId, Provider, ProviderBackend};
@@ -28,19 +30,51 @@ let model = provider.model(ModelId::new("exact-provider-model-id")?)?;
 let response = model.generate(&request).await?;
 ```
 
-The three public traits are also the caller implementation system.
+The three public backend traits are also the caller implementation system.
 `ProviderBackend` returns its own associated `Model: ModelBackend`. That model
 owns its exact `Continuation` type and returns its associated
 `Session: SessionBackend`. Callers use those concrete values directly; they do
 not convert them into the supplied handles.
 Applications needing heterogeneous runtime selection can define their own
-exhaustive Provider, Model, and Session enums.
+exhaustive Provider, Model, and Session enums. A Session returns concrete borrowed
+halves implementing `session::SessionCommands` and `session::SessionEvents`;
+their owner alone has consuming close authority.
 
 `Provider`, `Model`, and `Session` are the Kit's built-in implementations of
-those traits. The private Provider and Model dispatchers contain only OpenAI,
-Anthropic, Gemini, and Ollama variants; the Session dispatcher contains only
-OpenAI. Sessionless concrete Models use `Infallible` and return `Unsupported`
-before I/O when a session is requested.
+those traits. Their private dispatchers and borrowed-half dispatchers contain
+only concrete built-ins. All four supplied Models own Conversation Sessions;
+unsupported profile/model combinations return `Unsupported` without fallback.
+External Models that are genuinely sessionless may use `Infallible`.
+
+### Breaking Session migration
+
+Choose the profile explicitly, borrow the two halves, submit typed commands and
+observe correlated events, then release both halves before consuming close:
+
+```rust,ignore
+use providers_kit::{ModelBackend, SessionBackend};
+use providers_kit::session::{
+    SessionCommands, SessionConfig, SessionEvents, SessionProfile,
+};
+
+let config = SessionConfig::new(SessionProfile::Conversation);
+let mut session = model.open_session(config).await?;
+{
+    let (mut commands, mut events) = session.split();
+    let accepted = commands.submit(command).await?;
+    // Drive events while submitting subsequent commands through the other half.
+    // Match correlated response/control outcomes; None means permanent drain.
+    let event = events.recv().await;
+}
+session.close().await?;
+```
+
+Submission acceptance is local ownership, not remote acknowledgement. Realtime
+uses the same command/event boundary with `SessionProfile::Realtime`; unsupported
+controls fail explicitly. A response outcome does not close the conversation,
+finish playback or settle unrelated tools. Cancellation leaves accepted input
+intact and reports stop resolution separately from continuity. The old default
+profile and owner-level `send`/`recv` are replaced, without compatibility facades.
 
 Function calling is normalized without moving agent-loop policy into this
 crate. A model response exposes validated `FunctionCall` values while its

@@ -343,50 +343,19 @@ current Git checkout and retain their receipts separately. Those scripts use
 A fresh export/build target establishes the clean-candidate build inputs,
 including untracked files, without claiming they were committed to Git.
 
-Agent's separate source-contract gates read pinned native protocol source. A
-clean checkout/export contains its tracked ZIP archives and `vendor-lock.toml`, while
-`**/vendor/*/` extraction directories are ignored. Before running those Agent
-source-contract gates, materialize the **currently locked** Codex/OpenCode
-archives with the existing extraction owner and verify their complete file contents. This is a
-local prerequisite, not a vendor update, download or new version selection.
-Run from the source root; existing extraction directories are verified rather
-than overwritten:
+Agent's separate protocol-authority gate reads the currently locked Codex and
+OpenCode ZIP archives directly and verifies their hashes against the tracked
+`vendor-lock.toml`. A clean checkout includes those archives; extracted vendor
+trees are not a prerequisite for current gates. Run the same authority check
+owned by Agent's verifier:
 
 ```bash
-python3 - <<'PY'
-from pathlib import Path, PurePosixPath
-import hashlib
-import tomllib
-import zipfile
-from scripts.vendor_update import VendorUpdater
-
-root = Path.cwd()
-vendor = root / "agents-kit/vendor"
-locked = tomllib.loads((vendor / "vendor-lock.toml").read_text())["vendors"]
-updater = VendorUpdater(root)
-for name in ("codex", "opencode"):
-    selected = locked[name]
-    archive = vendor / selected["archive"]
-    destination = vendor / selected["extracted_dir"]
-    assert hashlib.sha256(archive.read_bytes()).hexdigest() == selected["sha256"]
-    if not destination.exists():
-        updater._extract_archive_to_path(archive, destination)
-    with zipfile.ZipFile(archive) as source:
-        entries = [item for item in source.infolist() if not item.is_dir()
-                   and not updater._is_archive_metadata_path(PurePosixPath(item.filename))]
-        assert len({PurePosixPath(item.filename).parts[0] for item in entries}) == 1
-        expected = {"/".join(PurePosixPath(item.filename).parts[1:]): item for item in entries}
-        actual = {str(path.relative_to(destination)) for path in destination.rglob("*") if path.is_file()}
-        assert actual == set(expected)
-        for relative, item in expected.items():
-            assert (destination / relative).read_bytes() == source.read(item)
-        print(name, selected["tag"], len(expected), "files verified")
-PY
+python3 -m unittest -v scripts.tests.test_vendor_update.AgentKitProtocolAuthorityTests
 ```
 
-Do not run the vendor update workflow to satisfy this prerequisite. Keep the
-selected tags, lock hashes and archived bytes unchanged, and retain any initial
-missing-extraction test failure separately from the subsequent full-gate result.
+Do not run the vendor update workflow for this proof. Keep the selected tags,
+lock hashes and archived bytes unchanged. Preserve any historical missing-source
+failure separately; it does not describe the current archive-based gate.
 
 ### Packaging and downstream composition
 

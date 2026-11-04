@@ -1,136 +1,223 @@
 use std::collections::{BTreeMap, VecDeque};
+use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::Duration;
 
 use base64::Engine as _;
 use serde_json::{Value, json};
+use tokio::time::Instant;
 
 use crate::KitError;
-use crate::core::{SessionSocket, SessionSocketMessage, tool_result_text};
-use crate::error::ValidationViolation;
-use crate::error::{ErrorPhase, Operation, ResponseDetails, ResponseViolation};
-use crate::generation::{FunctionCall, ToolChoice};
-use crate::models::{ModelBackend, ModelId};
-use crate::session::{
-    SessionBackend, SessionConfig, SessionEvent, SessionInput, SessionTurnDetection,
+use crate::core::{
+    ManagedCommands, ManagedConversation, SessionControl, SessionEventPort, SessionSocket,
+    SessionSocketMessage, tool_result_text,
 };
+use crate::error::{
+    ErrorKind, ErrorPhase, Operation, ResponseDetails, ResponseViolation, ValidationViolation,
+};
+use crate::generation::{
+    ContentPart, FinishReason, FunctionCall, ProviderToolSpec, ResponseFormat, Role, ToolChoice,
+};
+use crate::models::{ModelBackend, ModelId};
+use crate::provider::{ProviderAdmission, ProviderRuntime};
+use crate::session::{
+    CancelTarget, CancellationResolution, CommandId, OutputSegmentId, ResponseId, ResponseOutcome,
+    SessionBackend, SessionCommand, SessionCommands, SessionConfig, SessionContinuity,
+    SessionEvent, SessionProfile, SessionTurnDetection, ToolRequestId, TranscriptionSource,
+    UsageScope,
+};
+use crate::transport::CheckedRequestSpec;
 
 use super::api::OPENAI_REQUESTS;
 use super::models::OpenAiModel;
-use super::responses::usage_from_openai;
+use super::responses::{tool_result_to_function_call_output, usage_from_openai};
 use super::wire::OpenAiErrorObject;
-use crate::transport::CheckedRequestSpec;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum OpenAiTurn {
-    Idle,
-    Text,
-    AutomaticAudio,
-    ManualAudioOpen,
-    ManualAudioSubmitted,
+/// Exact selected OpenAI model's stateful child.
+pub(crate) struct OpenAiSession {
+    model_id: ModelId,
+    mode: OpenAiMode,
 }
 
-/// Concrete OpenAI session child selected by one exact OpenAI model.
-pub(crate) struct OpenAiSession {
-    id: String,
-    model_id: ModelId,
+enum OpenAiMode {
+    Conversation(ManagedConversation<OpenAiModel>),
+    Realtime(OpenAiRealtime),
+}
+
+struct OpenAiRealtime {
+    control: Arc<SessionControl>,
+    engine: OpenAiEngine,
+    capturing: bool,
+    segments: Arc<Mutex<BTreeMap<OutputSegmentId, OpenAiSegment>>>,
+}
+
+enum OpenAiEngine {
+    Prepared(Box<OpenAiDriver>),
+    Running,
+}
+
+pub(crate) struct OpenAiCommands<'a> {
+    mode: OpenAiCommandMode<'a>,
+}
+
+enum OpenAiCommandMode<'a> {
+    Conversation(ManagedCommands<'a, OpenAiModel>),
+    Realtime {
+        control: &'a Arc<SessionControl>,
+        capturing: &'a mut bool,
+        segments: &'a Arc<Mutex<BTreeMap<OutputSegmentId, OpenAiSegment>>>,
+    },
+}
+
+/// Socket and native correlation stay within this independently mapped protocol owner.
+struct OpenAiDriver {
     socket: SessionSocket,
-    config: SessionConfig,
-    pending: VecDeque<SessionEvent>,
-    outstanding_calls: BTreeMap<String, String>,
-    function_response_pending: bool,
-    turn: OpenAiTurn,
-    closed: bool,
+    control: Arc<SessionControl>,
+    timeout: Duration,
+    pending: BTreeMap<CommandId, OpenAiPending>,
+    responses: BTreeMap<String, OpenAiResponse>,
+    segments: Arc<Mutex<BTreeMap<OutputSegmentId, OpenAiSegment>>>,
+    calls: BTreeMap<ToolRequestId, OpenAiCall>,
+    input_commands: BTreeMap<String, CommandId>,
+    capture: Option<CommandId>,
+    capture_work: Option<OpenAiPending>,
+    continuation: Option<CommandId>,
+    acknowledgements: BTreeMap<String, VecDeque<(CommandId, Instant)>>,
+    command_started: bool,
+}
+
+struct OpenAiPending {
+    admission: ProviderAdmission,
+    deadline: Instant,
+    cancellations: Vec<(CommandId, CancelTarget)>,
+}
+
+struct OpenAiResponse {
+    id: ResponseId,
+    command: Option<CommandId>,
+    admission: Option<ProviderAdmission>,
+    deadline: Instant,
+    settled: bool,
+    cancellations: Vec<(CommandId, CancelTarget)>,
+    calls: Vec<(ToolRequestId, FunctionCall)>,
+}
+
+struct OpenAiSegment {
+    response: ResponseId,
+    item: String,
+    content_index: u64,
+}
+
+struct OpenAiCall {
+    response: ResponseId,
+    native_id: String,
+    settled: bool,
 }
 
 impl OpenAiSession {
     pub(crate) async fn open(model: &OpenAiModel, config: SessionConfig) -> Result<Self, KitError> {
-        Self::validate_model(model.model_id())?;
-        Self::validate_config(&config)?;
-        let update = Self::session_update_payload(&config)?;
-        let api = model.api();
-        let request = api.live_request(model.model_id().as_str())?;
-        let (mut socket, deadline) = SessionSocket::connect(
-            request,
-            api.transport().connect_timeout(),
-            api.transport().timeout(),
-            OPENAI_REQUESTS,
-        )
-        .await?;
-        let setup = async {
-        let expected_modalities = update["session"]["output_modalities"].clone();
-        socket.send(update, deadline).await?;
-        let mut created = false;
-        loop {
-            let payload = socket
-                .receive_payload(deadline, "OpenAI websocket ended during interactive setup")
-                .await?;
-            match payload.get("type").and_then(Value::as_str) {
-                Some("session.created") if !created => created = true,
-                Some("session.updated") => {
-                    let valid = payload.get("session").is_some_and(|session| {
-                        session["type"] == "realtime"
-                            && session["model"] == model.model_id().as_str()
-                            && session["output_modalities"] == expected_modalities
-                    });
-                    if !valid {
-                        return Err(KitError::invalid_response(ResponseViolation::ProtocolViolation { rule: "session_configuration_acknowledgement" }).at_phase(ErrorPhase::SessionHandshake).with_message("OpenAI session.updated did not acknowledge the selected model and modalities".to_string()).with_diagnostic(CheckedRequestSpec::diagnostic_json(&payload)));
-                    }
-                    break;
-                }
-                Some("error" | "response.error") => {
-                    return Err(
-                        Self::provider_error(&payload).at_phase(ErrorPhase::SessionHandshake)
-                    );
-                }
-                unexpected => {
-                    return Err(
-                        KitError::invalid_response(ResponseViolation::UnknownVariant {
-                            field: "setup.event",
-                        })
-                        .at_phase(ErrorPhase::SessionHandshake)
-                        .with_message(format!(
-                            "OpenAI sent unexpected interactive setup event `{unexpected:?}`"
-                        ))
-                        .with_diagnostic(CheckedRequestSpec::diagnostic_json(&payload)),
-                    );
-                }
+        let timeout = model.api().transport().timeout();
+        let mode = match config.profile() {
+            SessionProfile::Conversation => {
+                OpenAiMode::Conversation(ManagedConversation::new(model.clone(), config, timeout)?)
             }
-        }
-
-            Ok(())
-        }.await;
-        if let Err(error) = setup {
-            return Err(socket.fail_setup(error).await);
-        }
-
+            SessionProfile::Realtime => {
+                Self::validate_model(model.model_id())?;
+                Self::validate_config(&config)?;
+                let update = Self::session_update_payload(&config)?;
+                let control = SessionControl::new(config, timeout)?;
+                let api = model.api();
+                let (mut socket, deadline) = SessionSocket::connect(
+                    api.live_request(model.model_id().as_str())?,
+                    api.transport().connect_timeout(),
+                    timeout,
+                    OPENAI_REQUESTS,
+                )
+                .await?;
+                let setup = async {
+                    let expected_modalities = update["session"]["output_modalities"].clone();
+                    socket.send(update, deadline).await?;
+                    let mut created = false;
+                    loop {
+                        let payload = socket.receive_payload(deadline, "OpenAI websocket ended during interactive setup").await?;
+                        match payload.get("type").and_then(Value::as_str) {
+                            Some("session.created") if !created => created = true,
+                            Some("session.updated") => {
+                                if !payload.get("session").is_some_and(|session| session["type"] == "realtime" && session["model"] == model.model_id().as_str() && session["output_modalities"] == expected_modalities) {
+                                    return Err(OpenAiDriver::protocol("session_configuration_acknowledgement", "OpenAI session.updated did not acknowledge selected model and modalities").at_phase(ErrorPhase::SessionHandshake).with_diagnostic(CheckedRequestSpec::diagnostic_json(&payload)));
+                                }
+                                break;
+                            }
+                            Some("error" | "response.error") => return Err(OpenAiDriver::provider_error(&payload).at_phase(ErrorPhase::SessionHandshake)),
+                            _ => return Err(KitError::invalid_response(ResponseViolation::UnknownVariant {field: "setup.event"}).at_phase(ErrorPhase::SessionHandshake).with_diagnostic(CheckedRequestSpec::diagnostic_json(&payload))),
+                        }
+                    }
+                    Ok(())
+                }.await;
+                if let Err(error) = setup {
+                    return Err(socket.fail_setup(error).await);
+                }
+                let segments = Arc::new(Mutex::new(BTreeMap::new()));
+                let driver = OpenAiDriver {
+                    socket,
+                    control: Arc::clone(&control),
+                    timeout,
+                    pending: BTreeMap::new(),
+                    responses: BTreeMap::new(),
+                    segments: Arc::clone(&segments),
+                    calls: BTreeMap::new(),
+                    input_commands: BTreeMap::new(),
+                    capture: None,
+                    capture_work: None,
+                    continuation: None,
+                    acknowledgements: BTreeMap::new(),
+                    command_started: false,
+                };
+                OpenAiMode::Realtime(OpenAiRealtime {
+                    control,
+                    engine: OpenAiEngine::Prepared(Box::new(driver)),
+                    capturing: false,
+                    segments,
+                })
+            }
+        };
         Ok(Self {
-            id: uuid::Uuid::new_v4().to_string(),
             model_id: model.model_id().clone(),
-            socket,
-            config,
-            pending: VecDeque::new(),
-            outstanding_calls: BTreeMap::new(),
-            function_response_pending: false,
-            turn: OpenAiTurn::Idle,
-            closed: false,
+            mode,
         })
     }
 
-    fn validate_model(model_id: &ModelId) -> Result<(), KitError> {
-        match model_id.as_str() {
+    pub(crate) fn bind_provider(&mut self, provider: Arc<ProviderRuntime>) -> Result<(), KitError> {
+        match &mut self.mode {
+            OpenAiMode::Conversation(owner) => owner.bind_provider(provider),
+            OpenAiMode::Realtime(owner) => {
+                owner.control.bind_provider(provider)?;
+                match std::mem::replace(&mut owner.engine, OpenAiEngine::Running) {
+                    OpenAiEngine::Prepared(driver) => owner.control.spawn(driver.run()),
+                    OpenAiEngine::Running => {
+                        Err(KitError::invalid_state("OpenAI session already bound"))
+                    }
+                }
+            }
+        }
+    }
+
+    fn validate_model(model: &ModelId) -> Result<(), KitError> {
+        match model.as_str() {
             "gpt-realtime"
             | "gpt-realtime-mini"
             | "gpt-realtime-1.5"
             | "gpt-realtime-2"
             | "gpt-realtime-2.1"
             | "gpt-realtime-2.1-mini" => Ok(()),
-            other => Err(KitError::unsupported(
-                ValidationViolation::Unsupported {
-                    field: "session",
-                    rule: "selected model does not support interactive sessions",
-                },
-                format!("OpenAI interactive sessions for selected model `{other}`"),
+            _ => Err(Self::unsupported(
+                "session.model",
+                "selected model does not support OpenAI Realtime",
             )),
         }
+    }
+
+    fn unsupported(field: &'static str, rule: &'static str) -> KitError {
+        KitError::unsupported(ValidationViolation::Unsupported { field, rule }, rule)
     }
 
     fn validate_config(config: &SessionConfig) -> Result<(), KitError> {
@@ -147,7 +234,45 @@ impl OpenAiSession {
                 ValidationViolation::MissingField {
                     field: "session.input_audio_format",
                 },
-                "OpenAI manual turn detection requires audio input",
+                "manual input requires audio configuration",
+            ));
+        }
+        let generation = config.generation();
+        if generation.temperature().is_some()
+            || generation.top_p().is_some()
+            || generation.top_k().is_some()
+            || generation.presence_penalty().is_some()
+            || generation.frequency_penalty().is_some()
+            || generation.seed().is_some()
+            || !generation.stop_sequences().is_empty()
+        {
+            return Err(Self::unsupported(
+                "session.generation",
+                "OpenAI Realtime does not support requested sampling settings",
+            ));
+        }
+        if config.reasoning().is_some()
+            || !matches!(config.response_format(), None | Some(ResponseFormat::Text))
+        {
+            return Err(Self::unsupported(
+                "session.generation",
+                "OpenAI Realtime does not support requested reasoning or response format",
+            ));
+        }
+        if config
+            .tools()
+            .iter()
+            .any(|tool| matches!(tool, ProviderToolSpec::Hosted(_)))
+        {
+            return Err(Self::unsupported(
+                "session.tools",
+                "OpenAI Realtime supports function tools only",
+            ));
+        }
+        if matches!(generation.tool_choice(), Some(ToolChoice::Allowed { .. })) {
+            return Err(Self::unsupported(
+                "session.tool_choice",
+                "OpenAI Realtime allowed-function subsets are unavailable",
             ));
         }
         Ok(())
@@ -155,482 +280,773 @@ impl OpenAiSession {
 
     fn audio_format(media_type: &str) -> Result<Value, KitError> {
         match media_type {
-            "audio/pcm" | "audio/pcm;rate=24000" => {
-                Ok(json!({ "type": "audio/pcm", "rate": 24_000 }))
-            }
-            "audio/pcmu" => Ok(json!({ "type": "audio/pcmu" })),
-            "audio/pcma" => Ok(json!({ "type": "audio/pcma" })),
-            _ => Err(KitError::unsupported(
-                ValidationViolation::Unsupported {
-                    field: "session.audio_format",
-                    rule: "unsupported audio format",
-                },
-                format!("OpenAI interactive audio format `{media_type}`"),
+            "audio/pcm" | "audio/pcm;rate=24000" => Ok(json!({"type":"audio/pcm","rate":24_000})),
+            "audio/pcmu" => Ok(json!({"type":"audio/pcmu"})),
+            "audio/pcma" => Ok(json!({"type":"audio/pcma"})),
+            _ => Err(Self::unsupported(
+                "session.audio_format",
+                "unsupported OpenAI Realtime audio format",
             )),
         }
     }
 
     fn session_update_payload(config: &SessionConfig) -> Result<Value, KitError> {
-        let tools = config
-            .functions()
-            .iter()
-            .filter(|function| !matches!(config.tool_choice(), Some(ToolChoice::Tool { name }) if name != function.name()))
-            .map(|function| json!({
-                "type": "function",
-                "name": function.name(),
-                "description": function.description(),
-                "parameters": function.input_schema().schema().clone(),
-            }))
-            .collect::<Vec<_>>();
-        let mut session = json!({
-            "type": "realtime",
-            "output_modalities": if config.output_audio_format().is_some() {
-                json!(["audio"])
-            } else {
-                json!(["text"])
-            },
-        });
+        let tools = config.tools().iter().filter_map(|tool| match tool {
+            ProviderToolSpec::Function(function) => Some(json!({"type":"function","name":function.name(),"description":function.description(),"parameters":function.input_schema().schema()})),
+            ProviderToolSpec::Hosted(_) => None,
+        }).collect::<Vec<_>>();
+        let mut session = json!({"type":"realtime","output_modalities":if config.output_audio_format().is_some() {json!(["audio"])} else {json!(["text"])}});
         if let Some(instructions) = config.instructions() {
-            session["instructions"] = Value::String(instructions.to_string());
+            session["instructions"] = json!(instructions);
+        }
+        if let Some(maximum) = config.generation().max_output_tokens() {
+            session["max_output_tokens"] = json!(maximum.get());
         }
         if !tools.is_empty() {
-            session["tools"] = Value::Array(tools);
-            if let Some(choice) = config.tool_choice() {
-                session["tool_choice"] = match choice {
-                    ToolChoice::Auto => json!("auto"),
-                    ToolChoice::None => json!("none"),
-                    ToolChoice::Required | ToolChoice::Any => json!("required"),
-                    ToolChoice::Tool { name } => json!({ "type": "function", "name": name }),
-                    ToolChoice::Allowed { .. } => {
-                        return Err(KitError::unsupported(
-                            ValidationViolation::Unsupported {
-                                field: "session.tool_choice",
-                                rule: "allowed-function subsets unavailable",
-                            },
-                            "OpenAI interactive allowed-function subsets",
-                        ));
-                    }
-                };
-            }
+            session["tools"] = json!(tools);
         }
-
+        if let Some(choice) = config.generation().tool_choice() {
+            session["tool_choice"] = match choice {
+                ToolChoice::Auto => json!("auto"),
+                ToolChoice::None => json!("none"),
+                ToolChoice::Required | ToolChoice::Any => json!("required"),
+                ToolChoice::Tool { name } => json!({"type":"function","name":name}),
+                ToolChoice::Allowed { .. } => {
+                    return Err(Self::unsupported(
+                        "session.tool_choice",
+                        "allowed-function subsets unavailable",
+                    ));
+                }
+            };
+        }
         let mut audio = serde_json::Map::new();
         if let Some(format) = config.input_audio_format() {
-            let mut input = serde_json::Map::new();
-            input.insert("format".to_string(), Self::audio_format(format)?);
+            let mut input = json!({"format":Self::audio_format(format)?,"turn_detection":match config.turn_detection(){SessionTurnDetection::Automatic=>json!({"type":"server_vad"}),SessionTurnDetection::Manual=>Value::Null}});
             if config.input_transcription() {
-                input.insert(
-                    "transcription".to_string(),
-                    json!({ "model": "gpt-transcribe" }),
-                );
+                input["transcription"] = json!({"model":"gpt-transcribe"});
             }
-            input.insert(
-                "turn_detection".to_string(),
-                match config.turn_detection() {
-                    SessionTurnDetection::Automatic => json!({ "type": "server_vad" }),
-                    SessionTurnDetection::Manual => Value::Null,
-                },
-            );
-            audio.insert("input".to_string(), Value::Object(input));
+            audio.insert("input".to_string(), input);
         }
         if let Some(format) = config.output_audio_format() {
             audio.insert(
                 "output".to_string(),
-                json!({ "format": Self::audio_format(format)? }),
+                json!({"format":Self::audio_format(format)?}),
             );
         }
         if !audio.is_empty() {
             session["audio"] = Value::Object(audio);
         }
-        Ok(json!({ "type": "session.update", "session": session }))
+        Ok(json!({"type":"session.update","session":session}))
     }
+}
 
-    fn ensure_open(&self, operation: &'static str) -> Result<(), KitError> {
-        if self.closed {
-            Err(KitError::closed(operation))
-        } else {
-            Ok(())
+impl SessionBackend for OpenAiSession {
+    type Commands<'a> = OpenAiCommands<'a>;
+    type Events<'a> = SessionEventPort<'a>;
+    fn id(&self) -> &str {
+        match &self.mode {
+            OpenAiMode::Conversation(owner) => owner.control().id(),
+            OpenAiMode::Realtime(owner) => owner.control.id(),
         }
     }
-
-    fn ensure_idle(&self) -> Result<(), KitError> {
-        if self.turn == OpenAiTurn::Idle && self.outstanding_calls.is_empty() {
-            Ok(())
-        } else {
-            Err(KitError::invalid_state(
-                "OpenAI interactive session already has an active turn",
-            ))
-        }
+    fn model_id(&self) -> &ModelId {
+        &self.model_id
     }
-
-    async fn send_input(
-        &mut self,
-        input: SessionInput,
-        deadline: tokio::time::Instant,
-    ) -> Result<(), KitError> {
-        self.ensure_open("session.send")?;
-        match input {
-            SessionInput::Text { text } => {
-                if text.trim().is_empty() {
-                    return Err(KitError::invalid_input(
-                        ValidationViolation::Empty {
-                            field: "session.input.text",
-                        },
-                        "interactive text input must not be blank",
-                    ));
-                }
-                self.ensure_idle()?;
-                self.socket
-                    .send(
-                        json!({
-                            "type": "conversation.item.create",
-                            "item": {
-                                "type": "message",
-                                "role": "user",
-                                "content": [{ "type": "input_text", "text": text }],
-                            },
-                        }),
-                        deadline,
-                    )
-                    .await?;
-                self.socket
-                    .send(json!({ "type": "response.create" }), deadline)
-                    .await?;
-                self.turn = OpenAiTurn::Text;
+    fn split(&mut self) -> (Self::Commands<'_>, Self::Events<'_>) {
+        match &mut self.mode {
+            OpenAiMode::Conversation(owner) => {
+                let (commands, events) = owner.split(|model, result| {
+                    tool_result_to_function_call_output(model, result).map(drop)
+                });
+                (
+                    OpenAiCommands {
+                        mode: OpenAiCommandMode::Conversation(commands),
+                    },
+                    events,
+                )
             }
-            SessionInput::Audio { media_type, data } => {
-                let expected = self.config.input_audio_format().ok_or_else(|| {
-                    KitError::invalid_state(
-                        "OpenAI interactive session was not configured for audio input",
-                    )
-                })?;
-                if media_type != expected {
-                    return Err(KitError::invalid_input(
-                        ValidationViolation::Incompatible {
-                            field: "session.input.audio.media_type",
-                            other: "session.input_audio_format",
-                        },
-                        format!(
-                            "interactive audio media type `{media_type}` does not match configured `{expected}`"
-                        ),
-                    ));
-                }
-                if data.is_empty() {
-                    return Err(KitError::invalid_input(
-                        ValidationViolation::Empty {
-                            field: "session.input.audio.data",
-                        },
-                        "interactive audio data must not be empty",
-                    ));
-                }
-                let automatic = match (self.config.turn_detection(), self.turn) {
-                    (
-                        SessionTurnDetection::Automatic,
-                        OpenAiTurn::Idle | OpenAiTurn::AutomaticAudio,
-                    ) => true,
-                    (SessionTurnDetection::Manual, OpenAiTurn::ManualAudioOpen) => false,
-                    (SessionTurnDetection::Manual, _) => {
-                        return Err(KitError::invalid_state(
-                            "OpenAI manual audio input requires an open turn",
+            OpenAiMode::Realtime(owner) => (
+                OpenAiCommands {
+                    mode: OpenAiCommandMode::Realtime {
+                        control: &owner.control,
+                        capturing: &mut owner.capturing,
+                        segments: &owner.segments,
+                    },
+                },
+                SessionEventPort::new(&owner.control),
+            ),
+        }
+    }
+    async fn close(self) -> Result<(), KitError> {
+        match self.mode {
+            OpenAiMode::Conversation(owner) => owner.close().await,
+            OpenAiMode::Realtime(owner) => owner.control.close().await,
+        }
+    }
+}
+
+impl Drop for OpenAiRealtime {
+    fn drop(&mut self) {
+        self.control.stop();
+    }
+}
+
+impl SessionCommands for OpenAiCommands<'_> {
+    async fn submit(&mut self, command: SessionCommand) -> Result<CommandId, KitError> {
+        match &mut self.mode {
+            OpenAiCommandMode::Conversation(commands) => commands.submit(command).await,
+            OpenAiCommandMode::Realtime {
+                control,
+                capturing,
+                segments,
+            } => {
+                let config = control.config();
+                match &command {
+                    SessionCommand::Input(message) => {
+                        if message.role() != Role::User
+                            || message
+                                .content()
+                                .iter()
+                                .any(|part| !matches!(part, ContentPart::Text { .. }))
+                        {
+                            return Err(OpenAiSession::unsupported(
+                                "session.input",
+                                "OpenAI Realtime Input requires user text; use Audio for capture",
+                            ));
+                        }
+                    }
+                    SessionCommand::Audio { media_type, data } => {
+                        if config.input_audio_format() != Some(media_type.as_str()) {
+                            return Err(KitError::invalid_input(
+                                ValidationViolation::Incompatible {
+                                    field: "session.input.audio.media_type",
+                                    other: "session.input_audio_format",
+                                },
+                                "audio format does not match session",
+                            ));
+                        }
+                        let encoded = data
+                            .len()
+                            .checked_add(2)
+                            .and_then(|size| size.checked_div(3))
+                            .and_then(|size| size.checked_mul(4))
+                            .and_then(|size| size.checked_add(64))
+                            .ok_or_else(|| KitError::invalid_state("audio size overflow"))?;
+                        SessionSocket::validate_message_bytes(encoded)?;
+                        if data.is_empty() {
+                            return Err(KitError::invalid_input(
+                                ValidationViolation::Empty {
+                                    field: "session.input.audio.data",
+                                },
+                                "audio input must not be empty",
+                            ));
+                        }
+                        if config.turn_detection() == SessionTurnDetection::Manual && !**capturing {
+                            return Err(KitError::invalid_state(
+                                "manual audio requires StartInput",
+                            ));
+                        }
+                    }
+                    SessionCommand::StartInput => {
+                        if config.turn_detection() != SessionTurnDetection::Manual || **capturing {
+                            return Err(KitError::invalid_state(
+                                "StartInput requires idle manual capture",
+                            ));
+                        }
+                    }
+                    SessionCommand::EndInput => {
+                        if config.turn_detection() != SessionTurnDetection::Manual || !**capturing {
+                            return Err(KitError::invalid_state(
+                                "EndInput requires manual capture",
+                            ));
+                        }
+                    }
+                    SessionCommand::EndAudioStream => {
+                        return Err(OpenAiSession::unsupported(
+                            "session.command",
+                            "OpenAI has no separate end-of-audio-stream operation",
                         ));
                     }
-                    (SessionTurnDetection::Automatic, _) => {
-                        return Err(KitError::invalid_state(
-                            "OpenAI interactive session already has an active turn",
-                        ));
+                    SessionCommand::DiscardInput => {
+                        if config.input_audio_format().is_none() {
+                            return Err(OpenAiSession::unsupported(
+                                "session.command",
+                                "input discard requires audio capture",
+                            ));
+                        }
                     }
+                    SessionCommand::ToolResults(results) => {
+                        for result in results {
+                            tool_result_text(result.result().content())?;
+                        }
+                    }
+                    SessionCommand::ReconcilePlayback { segment, played } => {
+                        if segment.session_id() != control.id() {
+                            return Err(KitError::invalid_state("foreign playback segment"));
+                        }
+                        if !segments
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
+                            .contains_key(segment)
+                        {
+                            return Err(KitError::invalid_state(
+                                "playback segment was not observed from this session",
+                            ));
+                        }
+                        u64::try_from(played.as_millis()).map_err(|_| {
+                            KitError::invalid_state("playback duration exceeds native range")
+                        })?;
+                        if config.output_audio_format().is_none() {
+                            return Err(OpenAiSession::unsupported(
+                                "session.command",
+                                "playback reconciliation requires audio output",
+                            ));
+                        }
+                    }
+                    SessionCommand::Cancel(_) => {}
+                }
+                let capture = match &command {
+                    SessionCommand::StartInput => Some(true),
+                    SessionCommand::EndInput | SessionCommand::DiscardInput => Some(false),
+                    _ => None,
                 };
-                self.socket
-                    .send(
-                        json!({
-                            "type": "input_audio_buffer.append",
-                            "audio": base64::engine::general_purpose::STANDARD.encode(data),
-                        }),
-                        deadline,
-                    )
-                    .await?;
-                if automatic {
-                    self.turn = OpenAiTurn::AutomaticAudio;
+                let receipt = control.accept(command)?;
+                if let Some(capture) = capture {
+                    **capturing = capture;
+                }
+                Ok(receipt)
+            }
+        }
+    }
+}
+
+impl OpenAiDriver {
+    async fn run(mut self: Box<Self>) -> Result<(), KitError> {
+        let outcome = self.drive().await.map_err(|error| {
+            let error = if error.context().operation == Operation::Unspecified {
+                error.at_operation(Operation::SessionReceive)
+            } else {
+                error
+            };
+            self.socket.attach_error(error)
+        });
+        let cleanup = match self.socket.operation_deadline() {
+            Ok(deadline) => self.socket.close(deadline).await,
+            Err(error) => Err(error),
+        };
+        let reason = match outcome {
+            Err(error) => match &cleanup {
+                Ok(()) => error,
+                Err(cleanup) => error.with_supplementary(cleanup.clone()),
+            },
+            Ok(()) => match &cleanup {
+                Ok(()) => KitError::closed("OpenAI session closed"),
+                Err(error) => error.clone(),
+            },
+        };
+        // A missing stop acknowledgement is never promoted to a successful cancellation.
+        for response in self.responses.values_mut() {
+            for (command, target) in std::mem::take(&mut response.cancellations) {
+                let _ = self.control.publish(SessionEvent::Cancellation {
+                    command,
+                    target,
+                    resolution: CancellationResolution::Unconfirmed(reason.clone()),
+                    continuity: SessionContinuity::Uncertain,
+                });
+            }
+        }
+        for pending in self.pending.values_mut() {
+            for (command, target) in std::mem::take(&mut pending.cancellations) {
+                let _ = self.control.publish(SessionEvent::Cancellation {
+                    command,
+                    target,
+                    resolution: CancellationResolution::Unconfirmed(reason.clone()),
+                    continuity: SessionContinuity::Uncertain,
+                });
+            }
+        }
+        self.control.terminate(reason, SessionContinuity::Closed);
+        cleanup
+    }
+
+    async fn drive(&mut self) -> Result<(), KitError> {
+        let control = Arc::clone(&self.control);
+        let mut sealed = false;
+        loop {
+            if sealed
+                && self.pending.is_empty()
+                && self.capture_work.is_none()
+                && self.acknowledgements.values().all(VecDeque::is_empty)
+                && self.responses.values().all(|response| response.settled)
+            {
+                return Ok(());
+            }
+            let deadline = self
+                .pending
+                .values()
+                .map(|pending| pending.deadline)
+                .chain(self.capture_work.as_ref().map(|work| work.deadline))
+                .chain(
+                    self.acknowledgements
+                        .values()
+                        .flat_map(|commands| commands.iter().map(|(_, deadline)| *deadline)),
+                )
+                .chain(
+                    self.responses
+                        .values()
+                        .filter(|response| !response.settled)
+                        .map(|response| response.deadline),
+                )
+                .min();
+            tokio::select! {
+                biased;
+                ()=control.stopped()=>return Ok(()),
+                ()=control.sealed(),if !sealed=>{sealed=true;},
+                command=control.next_command()=>{
+                    let Some((id,command))=command else{return Ok(());};
+                    self.command_started=false;
+                    if let Err(error)=self.command(id.clone(),command).await {
+                        let error=if error.context().operation==Operation::Unspecified {error.at_operation(Operation::SessionSend)} else {error};
+                        control.publish(SessionEvent::CommandFailed{command:id,error:error.clone(),not_started:!self.command_started})?;
+                        return Err(error);
+                    }
+                },
+                ()=async {match deadline{Some(deadline)=>tokio::time::sleep_until(deadline).await,None=>std::future::pending().await}}=>return Err(KitError::new(ErrorKind::Timeout,Operation::SessionReceive,ErrorPhase::SessionReceive).with_timeout(self.timeout)),
+                message=self.socket.receive_unbounded()=>match message? {
+                    SessionSocketMessage::Payload(payload)=>{
+                        self.observe(&payload).await.map_err(|error|if error.native_details().body.is_some(){error}else{error.with_diagnostic(CheckedRequestSpec::diagnostic_json(&payload))})?;
+                    },
+                    SessionSocketMessage::Closed(_)|SessionSocketMessage::Exhausted=>return Err(KitError::closed("OpenAI websocket ended").at_phase(ErrorPhase::SessionReceive)),
+                },
+            }
+        }
+    }
+
+    async fn write(&mut self, payload: Value) -> Result<(), KitError> {
+        self.command_started = true;
+        let deadline = self.socket.operation_deadline()?;
+        let control = Arc::clone(&self.control);
+        tokio::select! { biased; ()=control.stopped()=>Err(KitError::closed("OpenAI write interrupted by close")), result=self.socket.send(payload,deadline)=>result }
+    }
+
+    fn admit_response(&mut self, command: &CommandId) -> Result<(), KitError> {
+        let admission = self.control.generation_admission()?;
+        self.pending.insert(
+            command.clone(),
+            OpenAiPending {
+                admission,
+                deadline: self.socket.operation_deadline()?,
+                cancellations: Vec::new(),
+            },
+        );
+        Ok(())
+    }
+
+    async fn create_response(&mut self, command: CommandId) -> Result<(), KitError> {
+        self.write(json!({"type":"response.create","event_id":format!("command-{}",command.sequence()),"response":{"metadata":{"ai_kit_command":command.sequence().to_string()}}})).await
+    }
+
+    async fn command(&mut self, id: CommandId, command: SessionCommand) -> Result<(), KitError> {
+        match command {
+            SessionCommand::Input(message) => {
+                // Acquire admission before the first external mutation and record identity before writing.
+                self.admit_response(&id)?;
+                let content = message
+                    .content()
+                    .iter()
+                    .filter_map(|part| match part {
+                        ContentPart::Text { text } => {
+                            Some(json!({"type":"input_text","text":text}))
+                        }
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+                self.write(json!({"type":"conversation.item.create","item":{"type":"message","role":"user","content":content}})).await?;
+                self.create_response(id).await?;
+            }
+            SessionCommand::ToolResults(results) => {
+                self.admit_response(&id)?;
+                for result in results {
+                    let call = self.calls.get_mut(result.request()).ok_or_else(|| {
+                        KitError::invalid_state("OpenAI result references unknown native tool")
+                    })?;
+                    if call.settled {
+                        return Err(KitError::invalid_state("OpenAI tool already settled"));
+                    }
+                    call.settled = true;
+                    let native_id = call.native_id.clone();
+                    let output = tool_result_text(result.result().content())?;
+                    self.write(json!({"type":"conversation.item.create","item":{"type":"function_call_output","call_id":native_id,"output":output}})).await?;
+                }
+                if self.calls.values().all(|call| call.settled) {
+                    if self.responses.values().any(|response| !response.settled) {
+                        self.continuation = Some(id);
+                    } else {
+                        self.create_response(id).await?;
+                    }
+                } else {
+                    self.pending.remove(&id);
+                    self.control
+                        .publish(SessionEvent::ControlApplied { command: id })?;
                 }
             }
-            SessionInput::FunctionResult(result) => {
-                let call_id = result.call_id().ok_or_else(|| {
-                    KitError::invalid_input(
-                        ValidationViolation::MissingField {
-                            field: "function_result.call_id",
-                        },
-                        "OpenAI interactive function results require a call id",
-                    )
+            SessionCommand::Cancel(target) => self.cancel(id, target).await?,
+            SessionCommand::StartInput => {
+                self.capture = Some(id.clone());
+                self.control
+                    .publish(SessionEvent::ControlApplied { command: id })?;
+            }
+            SessionCommand::Audio { data, .. } => {
+                // Audio capture is admitted independently of an active output response.
+                let admission = self.control.generation_admission()?;
+                if self.capture.is_none() {
+                    self.capture = Some(id.clone());
+                }
+                let local_admission = if self.control.config().turn_detection()
+                    == SessionTurnDetection::Automatic
+                    && self.capture_work.is_none()
+                {
+                    self.capture_work = Some(OpenAiPending {
+                        admission,
+                        deadline: self.socket.operation_deadline()?,
+                        cancellations: Vec::new(),
+                    });
+                    None
+                } else {
+                    Some(admission)
+                };
+                self.write(json!({"type":"input_audio_buffer.append","audio":base64::engine::general_purpose::STANDARD.encode(data)})).await?;
+                drop(local_admission);
+                self.control
+                    .publish(SessionEvent::ControlApplied { command: id })?;
+            }
+            SessionCommand::EndInput => {
+                self.admit_response(&id)?;
+                if let Some(capture) = self.capture.take() {
+                    self.acknowledgements
+                        .entry("input_audio_buffer.committed".into())
+                        .or_default()
+                        .push_back((capture, self.socket.operation_deadline()?));
+                }
+                self.write(json!({"type":"input_audio_buffer.commit"}))
+                    .await?;
+                self.create_response(id).await?;
+            }
+            SessionCommand::DiscardInput => {
+                self.capture = None;
+                self.acknowledgements
+                    .entry("input_audio_buffer.cleared".to_string())
+                    .or_default()
+                    .push_back((id, self.socket.operation_deadline()?));
+                self.write(json!({"type":"input_audio_buffer.clear"}))
+                    .await?;
+            }
+            SessionCommand::ReconcilePlayback { segment, played } => {
+                let (item, content_index) = {
+                    let segments = self.segments();
+                    let segment = segments.get(&segment).ok_or_else(|| {
+                        KitError::invalid_state("unknown OpenAI playback segment")
+                    })?;
+                    (segment.item.clone(), segment.content_index)
+                };
+                self.acknowledgements
+                    .entry(format!("truncate:{item}:{content_index}"))
+                    .or_default()
+                    .push_back((id, self.socket.operation_deadline()?));
+                let audio_end_ms = u64::try_from(played.as_millis()).map_err(|_| {
+                    KitError::invalid_state("playback duration exceeds native range")
                 })?;
-                let expected_name = self.outstanding_calls.get(call_id).ok_or_else(|| {
-                    KitError::invalid_state(format!(
-                        "OpenAI interactive function call `{call_id}` is not outstanding"
-                    ))
-                })?;
-                if result.name() != expected_name {
-                    return Err(KitError::invalid_input(
-                        ValidationViolation::Incompatible {
-                            field: "function_result.name",
-                            other: "outstanding_function.name",
-                        },
-                        format!(
-                            "OpenAI interactive function result `{}` does not match outstanding function `{expected_name}`",
-                            result.name()
-                        ),
-                    ));
-                }
-                let output = tool_result_text(result.content())?;
-                self.socket
-                    .send(
-                        json!({
-                            "type": "conversation.item.create",
-                            "item": {
-                                "type": "function_call_output",
-                                "call_id": call_id,
-                                "output": output,
-                            }
-                        }),
-                        deadline,
-                    )
-                    .await?;
-                self.outstanding_calls.remove(call_id);
-                if self.outstanding_calls.is_empty() {
-                    self.socket
-                        .send(json!({ "type": "response.create" }), deadline)
-                        .await?;
-                    self.turn = OpenAiTurn::Text;
-                }
+                self.write(json!({"type":"conversation.item.truncate","item_id":item,"content_index":content_index,"audio_end_ms":audio_end_ms})).await?;
             }
-            SessionInput::TurnStart => {
-                if self.config.turn_detection() != SessionTurnDetection::Manual {
-                    return Err(KitError::invalid_state(
-                        "OpenAI TurnStart requires manual turn detection",
-                    ));
-                }
-                self.ensure_idle()?;
-                self.turn = OpenAiTurn::ManualAudioOpen;
-            }
-            SessionInput::TurnEnd => {
-                if self.turn != OpenAiTurn::ManualAudioOpen {
-                    return Err(KitError::invalid_state(
-                        "OpenAI TurnEnd requires an open manual audio turn",
-                    ));
-                }
-                self.socket
-                    .send(json!({ "type": "input_audio_buffer.commit" }), deadline)
-                    .await?;
-                self.socket
-                    .send(json!({ "type": "response.create" }), deadline)
-                    .await?;
-                self.turn = OpenAiTurn::ManualAudioSubmitted;
-            }
-            SessionInput::CancelTurn => {
-                if self.turn == OpenAiTurn::Idle {
-                    return Err(KitError::invalid_state(
-                        "OpenAI interactive session has no active turn to cancel",
-                    ));
-                }
-                self.socket
-                    .send(json!({ "type": "response.cancel" }), deadline)
-                    .await?;
+            SessionCommand::EndAudioStream => {
+                return Err(OpenAiSession::unsupported(
+                    "session.command",
+                    "end of stream unavailable",
+                ));
             }
         }
         Ok(())
     }
 
-    async fn receive_event(
-        &mut self,
-        deadline: tokio::time::Instant,
-    ) -> Result<SessionEvent, KitError> {
-        self.ensure_open("session.recv")?;
-        loop {
-            let function_call_waits_for_response = self.function_response_pending
-                && matches!(self.pending.front(), Some(SessionEvent::FunctionCall(_)));
-            if !function_call_waits_for_response && let Some(event) = self.pending.pop_front() {
-                if matches!(event, SessionEvent::Completed | SessionEvent::TurnCancelled) {
-                    self.turn = OpenAiTurn::Idle;
+    async fn cancel(&mut self, id: CommandId, target: CancelTarget) -> Result<(), KitError> {
+        if let CancelTarget::Command(command) = &target
+            && let Some(pending) = self.pending.get_mut(command)
+        {
+            pending.cancellations.push((id, target));
+            return Ok(());
+        }
+        let found = self
+            .responses
+            .iter()
+            .find(|(_, response)| match &target {
+                CancelTarget::Response(id) => &response.id == id,
+                CancelTarget::Command(id) => response.command.as_ref() == Some(id),
+            })
+            .map(|(native, response)| (native.clone(), response.id.clone(), response.settled));
+        match found {
+            Some((_, _, true)) | None => self.control.publish(SessionEvent::Cancellation {
+                command: id,
+                target,
+                resolution: CancellationResolution::AlreadySettled,
+                continuity: SessionContinuity::Reusable,
+            }),
+            Some((native, _, false)) => {
+                if let Some(response) = self.responses.get_mut(&native) {
+                    response.cancellations.push((id, target));
                 }
-                return Ok(event);
-            }
-            match self.socket.receive(deadline).await? {
-                SessionSocketMessage::Payload(payload) => {
-                    self.push_events(&payload).map_err(|error| {
-                        if error.native_details().body.is_some() {
-                            error
-                        } else {
-                            error.with_diagnostic(CheckedRequestSpec::diagnostic_json(&payload))
-                        }
-                    })?
-                }
-                SessionSocketMessage::Closed(details) => {
-                    self.closed = true;
-                    return Err(KitError::closed(match details {
-                        Some(details) => {
-                            format!("OpenAI interactive session received a close frame: {details}")
-                        }
-                        None => "OpenAI interactive session received a close frame".to_string(),
-                    })
-                    .at_phase(ErrorPhase::SessionReceive));
-                }
-                SessionSocketMessage::Exhausted => {
-                    self.closed = true;
-                    return Err(
-                        KitError::closed("OpenAI interactive session websocket ended")
-                            .at_phase(ErrorPhase::SessionReceive),
-                    );
-                }
+                self.write(json!({"type":"response.cancel","response_id":native}))
+                    .await
             }
         }
     }
 
-    fn push_events(&mut self, payload: &Value) -> Result<(), KitError> {
-        let event_type = payload.get("type").and_then(Value::as_str).ok_or_else(|| {
-            KitError::invalid_response(ResponseViolation::MissingField { field: "type" })
+    fn response(&self, payload: &Value) -> Result<&OpenAiResponse, KitError> {
+        let id = Self::required_text(payload, "response_id")?;
+        self.responses.get(&id).ok_or_else(|| {
+            Self::protocol("known_response", "OpenAI event references unknown response")
+        })
+    }
+
+    fn segments(&self) -> MutexGuard<'_, BTreeMap<OutputSegmentId, OpenAiSegment>> {
+        self.segments
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn segment(
+        &mut self,
+        payload: &Value,
+        response: &ResponseId,
+    ) -> Result<OutputSegmentId, KitError> {
+        let item = Self::required_text(payload, "item_id")?;
+        let content_index = payload
+            .get("content_index")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| {
+                KitError::invalid_response(ResponseViolation::MissingField {
+                    field: "content_index",
+                })
                 .at_phase(ErrorPhase::SessionReceive)
-                .with_message("OpenAI interactive event omitted type".to_string())
-                .with_diagnostic(CheckedRequestSpec::diagnostic_json(payload))
-        })?;
-        match event_type {
-            "response.output_text.delta" => {
-                self.pending.push_back(SessionEvent::TextDelta {
-                    delta: Self::required_text(payload, "delta", event_type)?,
-                });
-            }
-            "response.output_audio_transcript.delta" => {
-                if self.config.output_transcription() {
-                    self.pending
-                        .push_back(SessionEvent::OutputTranscriptionDelta {
-                            delta: Self::required_text(payload, "delta", event_type)?,
-                        });
-                }
-            }
-            "response.output_audio.delta" => {
-                let media_type = self.config.output_audio_format().ok_or_else(|| {
-                    KitError::invalid_response(ResponseViolation::ProtocolViolation {
-                        rule: "session_output_modality",
+            })?;
+        if let Some((id, _)) = self.segments().iter().find(|(_, segment)| {
+            segment.response == *response
+                && segment.item == item
+                && segment.content_index == content_index
+        }) {
+            return Ok(id.clone());
+        }
+        self.control
+            .reserve_history(item.len() + std::mem::size_of::<OpenAiSegment>())?;
+        let id = self.control.next_segment()?;
+        self.segments().insert(
+            id.clone(),
+            OpenAiSegment {
+                response: response.clone(),
+                item,
+                content_index,
+            },
+        );
+        Ok(id)
+    }
+
+    fn acknowledged(&mut self, key: &str) -> Option<CommandId> {
+        Some(self.acknowledgements.get_mut(key)?.pop_front()?.0)
+    }
+
+    async fn observe(&mut self, payload: &Value) -> Result<(), KitError> {
+        let event = Self::required_text(payload, "type")?;
+        match event.as_str() {
+            "response.created" => {
+                let response = payload.get("response").ok_or_else(|| {
+                    KitError::invalid_response(ResponseViolation::MissingField {
+                        field: "response",
                     })
-                    .at_phase(ErrorPhase::SessionReceive)
-                    .with_message("OpenAI returned audio for a text-only session".to_string())
-                    .with_diagnostic(CheckedRequestSpec::diagnostic_json(payload))
                 })?;
-                let data = base64::engine::general_purpose::STANDARD
-                    .decode(Self::required_text(payload, "delta", event_type)?)
-                    .map_err(|error| {
-                        KitError::invalid_response(ResponseViolation::InvalidField {
-                            field: "delta",
-                        })
-                        .at_phase(ErrorPhase::SessionReceive)
-                        .with_message(format!(
-                            "OpenAI interactive audio was invalid base64: {error}"
-                        ))
-                        .with_diagnostic(CheckedRequestSpec::diagnostic_json(payload))
-                    })?;
-                self.pending.push_back(SessionEvent::Audio {
-                    media_type: media_type.to_string(),
-                    data,
-                });
-            }
-            "conversation.item.input_audio_transcription.delta" => {
-                if self.config.input_transcription() {
-                    self.pending
-                        .push_back(SessionEvent::InputTranscriptionDelta {
-                            delta: Self::required_text(payload, "delta", event_type)?,
-                        });
+                let native = Self::required_text(response, "id")?;
+                if self.responses.contains_key(&native) {
+                    return Err(Self::protocol(
+                        "unique_response",
+                        "duplicate OpenAI response identity",
+                    ));
                 }
-            }
-            "conversation.item.input_audio_transcription.completed" => {}
-            "response.function_call_arguments.done" => {
-                let call_id = Self::required_text(payload, "call_id", event_type)?;
-                let name = Self::required_text(payload, "name", event_type)?;
-                let arguments = serde_json::from_str::<Value>(&Self::required_text(
-                    payload,
-                    "arguments",
-                    event_type,
-                )?)
-                .map_err(|error| {
-                    KitError::invalid_response(ResponseViolation::MalformedJson)
-                        .with_response_details(ResponseDetails::json(&error))
-                        .at_phase(ErrorPhase::Decode)
-                        .with_message(format!(
-                            "OpenAI interactive function arguments were invalid JSON: {error}"
-                        ))
-                        .with_diagnostic(CheckedRequestSpec::diagnostic_json(payload))
-                })?;
-                let call = FunctionCall::new(Some(call_id.clone()), name.as_str(), arguments)
-                    .map_err(|error| {
-                        KitError::invalid_response(ResponseViolation::InvalidField {
-                            field: "function_call",
-                        })
-                        .at_phase(ErrorPhase::SessionReceive)
-                        .with_message("OpenAI returned an invalid function call")
-                        .with_diagnostic(CheckedRequestSpec::diagnostic_json(payload))
-                        .with_supplementary(error)
-                    })?;
-                if !self
-                    .config
-                    .functions()
-                    .iter()
-                    .any(|function| function.name() == name)
+                let command = match response
+                    .pointer("/metadata/ai_kit_command")
+                    .and_then(Value::as_str)
                 {
-                    return Err(
-                        KitError::invalid_response(ResponseViolation::ProtocolViolation {
-                            rule: "declared_function",
-                        })
-                        .at_phase(ErrorPhase::SessionReceive)
-                        .with_message(format!(
-                            "OpenAI requested undeclared interactive function `{name}`"
-                        ))
-                        .with_diagnostic(CheckedRequestSpec::diagnostic_json(payload)),
-                    );
-                }
-                if self.outstanding_calls.insert(call_id, name).is_some() {
-                    return Err(
-                        KitError::invalid_response(ResponseViolation::ProtocolViolation {
-                            rule: "unique_outstanding_call_id",
-                        })
-                        .at_phase(ErrorPhase::SessionReceive)
-                        .with_message("OpenAI repeated an outstanding function-call id".to_string())
-                        .with_diagnostic(CheckedRequestSpec::diagnostic_json(payload)),
-                    );
-                }
-                self.function_response_pending = true;
-                self.pending.push_back(SessionEvent::FunctionCall(call));
-            }
-            "response.usage.updated" => {
-                let usage = payload.get("usage").cloned().ok_or_else(|| {
-                    KitError::invalid_response(ResponseViolation::MissingField { field: "usage" })
-                        .at_phase(ErrorPhase::SessionReceive)
-                        .with_message("OpenAI interactive usage event omitted usage".to_string())
-                        .with_diagnostic(CheckedRequestSpec::diagnostic_json(payload))
+                    Some(sequence) => self
+                        .pending
+                        .keys()
+                        .find(|id| id.sequence().to_string() == sequence)
+                        .cloned(),
+                    None => None,
+                };
+                let pending = command
+                    .as_ref()
+                    .and_then(|id| self.pending.remove(id))
+                    .or_else(|| self.capture_work.take());
+                let (admission, deadline, cancellations) = match pending {
+                    Some(pending) => (pending.admission, pending.deadline, pending.cancellations),
+                    None => (
+                        self.control.generation_admission()?,
+                        self.socket.operation_deadline()?,
+                        Vec::new(),
+                    ),
+                };
+                self.control
+                    .reserve_history(native.len() + std::mem::size_of::<OpenAiResponse>())?;
+                let id = self.control.next_response()?;
+                self.responses.insert(
+                    native.clone(),
+                    OpenAiResponse {
+                        id: id.clone(),
+                        command: command.clone(),
+                        admission: Some(admission),
+                        deadline,
+                        settled: false,
+                        cancellations: Vec::new(),
+                        calls: Vec::new(),
+                    },
+                );
+                self.control.publish(SessionEvent::ResponseStarted {
+                    command,
+                    response: id,
                 })?;
-                let usage =
-                    serde_json::from_value::<super::wire::OpenAiUsage>(usage).map_err(|error| {
-                        KitError::invalid_response(ResponseViolation::InvalidField {
-                            field: "usage",
-                        })
-                        .with_response_details(ResponseDetails::json(&error))
-                        .at_phase(ErrorPhase::Decode)
-                        .with_message(format!("OpenAI interactive usage was invalid: {error}"))
-                        .with_diagnostic(CheckedRequestSpec::diagnostic_json(payload))
-                    })?;
-                self.pending
-                    .push_back(SessionEvent::Usage(usage_from_openai(Some(&usage))));
+                for (command, target) in cancellations {
+                    self.cancel(command, target).await?;
+                }
             }
-            "response.done" => self.push_response_done(payload)?,
+            "response.output_text.delta" | "response.output_audio.delta" => {
+                let response = self.response(payload)?;
+                if response.settled {
+                    return Err(Self::protocol(
+                        "response_output_before_terminal",
+                        "output arrived after response settled",
+                    ));
+                }
+                let response = response.id.clone();
+                let segment = self.segment(payload, &response)?;
+                let delta = Self::required_text(payload, "delta")?;
+                let content = if event == "response.output_text.delta" {
+                    ContentPart::Text { text: delta }
+                } else {
+                    let media_type = self
+                        .control
+                        .config()
+                        .output_audio_format()
+                        .ok_or_else(|| {
+                            Self::protocol(
+                                "session_output_modality",
+                                "audio returned for text-only session",
+                            )
+                        })?
+                        .to_string();
+                    let data = base64::engine::general_purpose::STANDARD
+                        .decode(delta)
+                        .map_err(|_| {
+                            KitError::invalid_response(ResponseViolation::InvalidField {
+                                field: "delta",
+                            })
+                            .at_phase(ErrorPhase::SessionReceive)
+                        })?;
+                    ContentPart::Audio { media_type, data }
+                };
+                self.control.publish(SessionEvent::Output {
+                    response,
+                    segment: Some(segment),
+                    content,
+                })?;
+            }
+            "response.output_audio_transcript.delta" | "response.output_audio_transcript.done" => {
+                if self.control.config().output_transcription() {
+                    let response = self.response(payload)?.id.clone();
+                    let segment = self.segment(payload, &response)?;
+                    let finalized = event.ends_with(".done");
+                    let text = Self::required_text(
+                        payload,
+                        if finalized { "transcript" } else { "delta" },
+                    )?;
+                    self.control.publish(SessionEvent::Transcription {
+                        source: TranscriptionSource::Output { response, segment },
+                        text,
+                        finalized,
+                    })?;
+                }
+            }
+            "conversation.item.input_audio_transcription.delta"
+            | "conversation.item.input_audio_transcription.completed" => {
+                if self.control.config().input_transcription() {
+                    let command = payload
+                        .get("item_id")
+                        .and_then(Value::as_str)
+                        .and_then(|id| self.input_commands.get(id))
+                        .cloned();
+                    let finalized = event.ends_with(".completed");
+                    let text = Self::required_text(
+                        payload,
+                        if finalized { "transcript" } else { "delta" },
+                    )?;
+                    self.control.publish(SessionEvent::Transcription {
+                        source: TranscriptionSource::Input { command },
+                        text,
+                        finalized,
+                    })?;
+                }
+            }
+            "response.function_call_arguments.done" => self.function_call(payload)?,
+            "response.usage.updated" => {
+                let usage = Self::usage(payload.get("usage"))?;
+                let response = self.response(payload)?.id.clone();
+                self.control.publish(SessionEvent::Usage {
+                    scope: UsageScope::Response(response),
+                    usage,
+                    finalized: false,
+                })?;
+            }
+            "response.done" => self.response_done(payload).await?,
+            "input_audio_buffer.committed" => {
+                let item = Self::required_text(payload, "item_id")?;
+                let capture = match self.control.config().turn_detection() {
+                    SessionTurnDetection::Automatic => self.capture.take(),
+                    SessionTurnDetection::Manual => self.acknowledged(&event),
+                };
+                if let Some(command) = capture {
+                    self.control
+                        .reserve_history(item.len() + std::mem::size_of::<CommandId>())?;
+                    self.input_commands.insert(item, command);
+                }
+            }
+            "input_audio_buffer.cleared" => {
+                self.capture_work.take();
+                if let Some(command) = self.acknowledged(&event) {
+                    self.control
+                        .publish(SessionEvent::ControlApplied { command })?;
+                }
+            }
+            "conversation.item.truncated" => {
+                let item = Self::required_text(payload, "item_id")?;
+                let content_index = payload
+                    .get("content_index")
+                    .and_then(Value::as_u64)
+                    .ok_or_else(|| {
+                        Self::protocol("truncate_content_index", "truncation omitted content index")
+                    })?;
+                if let Some(command) =
+                    self.acknowledged(&format!("truncate:{item}:{content_index}"))
+                {
+                    self.control
+                        .publish(SessionEvent::ControlApplied { command })?;
+                }
+            }
             "error" | "response.error" | "conversation.item.input_audio_transcription.failed" => {
                 return Err(Self::provider_error(payload));
             }
             "session.created"
             | "session.updated"
-            | "response.created"
             | "response.content_part.added"
             | "response.content_part.done"
             | "response.output_text.done"
             | "response.output_audio.done"
-            | "response.output_audio_transcript.done"
             | "response.function_call_arguments.delta"
-            | "input_audio_buffer.committed"
-            | "input_audio_buffer.cleared"
             | "input_audio_buffer.speech_started"
             | "input_audio_buffer.speech_stopped"
             | "input_audio_buffer.timeout_triggered"
@@ -639,83 +1055,221 @@ impl OpenAiSession {
             | "conversation.item.created"
             | "conversation.item.deleted"
             | "conversation.item.done"
-            | "conversation.item.truncated"
             | "response.output_item.added"
             | "response.output_item.done" => {}
-            other => {
+            _ => {
                 return Err(
                     KitError::invalid_response(ResponseViolation::UnknownVariant { field: "type" })
-                        .at_phase(ErrorPhase::SessionReceive)
-                        .with_message(format!("unsupported OpenAI interactive event `{other}`"))
-                        .with_diagnostic(CheckedRequestSpec::diagnostic_json(payload)),
+                        .at_phase(ErrorPhase::SessionReceive),
                 );
             }
         }
         Ok(())
     }
 
-    fn push_response_done(&mut self, payload: &Value) -> Result<(), KitError> {
-        match payload
-            .get("response")
-            .and_then(|response| response.get("status"))
-            .and_then(Value::as_str)
-        {
-            None | Some("completed") if self.function_response_pending => {
-                self.function_response_pending = false;
-            }
-            None | Some("completed") if self.outstanding_calls.is_empty() => {
-                self.pending.push_back(SessionEvent::Completed);
-            }
-            None | Some("completed") => {}
-            Some("cancelled") => {
-                self.function_response_pending = false;
-                if !self.outstanding_calls.is_empty() {
-                    self.pending
-                        .push_back(SessionEvent::FunctionCallsCancelled {
-                            call_ids: std::mem::take(&mut self.outstanding_calls)
-                                .into_keys()
-                                .collect(),
-                        });
-                }
-                self.pending.push_back(SessionEvent::TurnCancelled);
-            }
-            Some("failed" | "incomplete") => return Err(Self::provider_error(payload)),
-            Some(status) => {
+    fn function_call(&mut self, payload: &Value) -> Result<(), KitError> {
+        // Decode independently before identity checks so malformed JSON retains decode diagnostics.
+        let arguments = serde_json::from_str::<Value>(&Self::required_text(payload, "arguments")?)
+            .map_err(|error| {
+                KitError::invalid_response(ResponseViolation::MalformedJson)
+                    .with_response_details(ResponseDetails::json(&error))
+                    .at_phase(ErrorPhase::Decode)
+            })?;
+        let native_id = Self::required_text(payload, "call_id")?;
+        let name = Self::required_text(payload, "name")?;
+        if !self.control.config().tools().iter().any(
+            |tool| matches!(tool,ProviderToolSpec::Function(function) if function.name()==name),
+        ) {
+            return Err(Self::protocol(
+                "declared_function",
+                "OpenAI requested undeclared function",
+            ));
+        }
+        let response = self.response(payload)?;
+        if response.settled {
+            return Err(Self::protocol(
+                "tool_before_terminal",
+                "function call arrived after terminal",
+            ));
+        }
+        if self.calls.values().any(|call| call.native_id == native_id) {
+            return Err(Self::protocol(
+                "unique_call",
+                "OpenAI repeated function call identity",
+            ));
+        }
+        let response = response.id.clone();
+        let request = self.control.next_tool()?;
+        let call =
+            FunctionCall::new(Some(native_id.clone()), name, arguments).map_err(|error| {
+                KitError::invalid_response(ResponseViolation::InvalidField {
+                    field: "function_call",
+                })
+                .at_phase(ErrorPhase::SessionReceive)
+                .with_message("OpenAI returned an invalid function call")
+                .with_supplementary(error)
+            })?;
+        let mut retained = crate::generation::RetainedSize::new();
+        retained.call(&call)?;
+        retained.add(native_id.len() + std::mem::size_of::<OpenAiCall>())?;
+        self.control.reserve_history(retained.bytes())?;
+        self.calls.insert(
+            request.clone(),
+            OpenAiCall {
+                response: response.clone(),
+                native_id,
+                settled: false,
+            },
+        );
+        let native = Self::required_text(payload, "response_id")?;
+        if let Some(response) = self.responses.get_mut(&native) {
+            response.calls.push((request, call));
+        }
+        Ok(())
+    }
+
+    async fn response_done(&mut self, payload: &Value) -> Result<(), KitError> {
+        let native_response = payload.get("response").ok_or_else(|| {
+            KitError::invalid_response(ResponseViolation::MissingField { field: "response" })
+                .at_phase(ErrorPhase::SessionReceive)
+        })?;
+        if !native_response.is_object() {
+            return Err(KitError::invalid_response(ResponseViolation::InvalidField {
+                field: "response",
+            })
+            .at_phase(ErrorPhase::SessionReceive));
+        }
+        let status = Self::required_text(native_response, "status")?;
+        let outcome = match status.as_str() {
+            "completed" => ResponseOutcome::Completed,
+            "incomplete" => ResponseOutcome::Partial {
+                reason: match native_response
+                    .pointer("/status_details/reason")
+                    .and_then(Value::as_str)
+                {
+                    Some("max_output_tokens") => Some(FinishReason::Length),
+                    Some("content_filter") => Some(FinishReason::ContentFilter),
+                    _ => None,
+                },
+            },
+            "cancelled" => ResponseOutcome::Cancelled,
+            "failed" => ResponseOutcome::Failed(Self::provider_error(payload)),
+            _ => {
                 return Err(
                     KitError::invalid_response(ResponseViolation::UnknownVariant {
                         field: "response.status",
                     })
-                    .at_phase(ErrorPhase::SessionReceive)
-                    .with_message(format!(
-                        "OpenAI response.done used unknown status `{status}`"
-                    ))
-                    .with_diagnostic(CheckedRequestSpec::diagnostic_json(payload)),
+                    .at_phase(ErrorPhase::SessionReceive),
                 );
             }
+        };
+        let native = Self::required_text(native_response, "id")?;
+        let response = self.responses.get_mut(&native).ok_or_else(|| {
+            Self::protocol(
+                "known_terminal_response",
+                "terminal references unknown response",
+            )
+        })?;
+        if response.settled {
+            return Err(Self::protocol(
+                "one_response_terminal",
+                "duplicate response terminal",
+            ));
+        }
+        response.settled = true;
+        let response_id = response.id.clone();
+        let calls = std::mem::take(&mut response.calls);
+        let cancellations = std::mem::take(&mut response.cancellations);
+        response.admission.take();
+        if matches!(outcome, ResponseOutcome::Completed) {
+            for (request, call) in calls {
+                self.control.publish(SessionEvent::ToolRequested {
+                    response: response_id.clone(),
+                    request,
+                    call,
+                })?;
+            }
+        } else {
+            self.control.invalidate_response(&response_id)?;
+            for call in self
+                .calls
+                .values_mut()
+                .filter(|call| call.response == response_id)
+            {
+                call.settled = true;
+            }
+        }
+        if native_response
+            .get("usage")
+            .is_some_and(|usage| !usage.is_null())
+        {
+            self.control.publish(SessionEvent::Usage {
+                scope: UsageScope::Response(response_id.clone()),
+                usage: Self::usage(native_response.get("usage"))?,
+                finalized: true,
+            })?;
+        }
+        let cancelled = matches!(outcome, ResponseOutcome::Cancelled);
+        self.control.publish(SessionEvent::ResponseFinished {
+            response: response_id,
+            outcome,
+            continuity: SessionContinuity::Reusable,
+            output: None,
+        })?;
+        for (command, target) in cancellations {
+            self.control.publish(SessionEvent::Cancellation {
+                command,
+                target,
+                resolution: if cancelled {
+                    CancellationResolution::Stopped
+                } else {
+                    CancellationResolution::AlreadySettled
+                },
+                continuity: SessionContinuity::Reusable,
+            })?;
+        }
+        if self.calls.values().all(|call| call.settled)
+            && let Some(command) = self.continuation.take()
+        {
+            self.create_response(command).await?;
         }
         Ok(())
     }
 
-    fn required_text(
-        payload: &Value,
-        field: &'static str,
-        event_type: &str,
-    ) -> Result<String, KitError> {
-        payload
-            .get(field)
-            .and_then(Value::as_str)
+    fn usage(value: Option<&Value>) -> Result<crate::generation::Usage, KitError> {
+        let value = value.ok_or_else(|| {
+            KitError::invalid_response(ResponseViolation::MissingField { field: "usage" })
+                .at_phase(ErrorPhase::SessionReceive)
+        })?;
+        let usage =
+            serde_json::from_value::<super::wire::OpenAiUsage>(value.clone()).map_err(|error| {
+                KitError::invalid_response(ResponseViolation::InvalidField { field: "usage" })
+                    .with_response_details(ResponseDetails::json(&error))
+                    .at_phase(ErrorPhase::Decode)
+            })?;
+        Ok(usage_from_openai(Some(&usage)))
+    }
+
+    fn protocol(rule: &'static str, message: &'static str) -> KitError {
+        KitError::invalid_response(ResponseViolation::ProtocolViolation { rule })
+            .at_phase(ErrorPhase::SessionReceive)
+            .with_message(message)
+    }
+
+    fn required_text(payload: &Value, field: &'static str) -> Result<String, KitError> {
+        let value = payload.get(field).ok_or_else(|| {
+            KitError::invalid_response(ResponseViolation::MissingField { field })
+                .at_phase(ErrorPhase::SessionReceive)
+        })?;
+        value
+            .as_str()
             .filter(|value| !value.is_empty())
             .map(str::to_string)
             .ok_or_else(|| {
-                KitError::invalid_response(ResponseViolation::MissingField { field })
+                KitError::invalid_response(ResponseViolation::InvalidField { field })
                     .at_phase(ErrorPhase::SessionReceive)
-                    .with_message(format!(
-                        "OpenAI interactive event `{event_type}` omitted `{field}`"
-                    ))
-                    .with_diagnostic(CheckedRequestSpec::diagnostic_json(payload))
             })
     }
-
     fn provider_error(payload: &Value) -> KitError {
         let error = payload
             .get("error")
@@ -747,42 +1301,5 @@ impl OpenAiSession {
             }
             Err(error) => error.at_phase(ErrorPhase::SessionReceive),
         }
-    }
-
-    async fn close_socket(mut self) -> Result<(), KitError> {
-        let deadline = self.socket.operation_deadline()?;
-        self.closed = true;
-        self.pending.clear();
-        self.outstanding_calls.clear();
-        self.function_response_pending = false;
-        self.socket.close(deadline).await
-    }
-}
-
-impl SessionBackend for OpenAiSession {
-    fn id(&self) -> &str {
-        &self.id
-    }
-
-    fn model_id(&self) -> &ModelId {
-        &self.model_id
-    }
-
-    async fn send(&mut self, input: SessionInput) -> Result<(), KitError> {
-        let deadline = self.socket.operation_deadline()?;
-        self.send_input(input, deadline)
-            .await
-            .map_err(|error| self.socket.attach_error(error))
-    }
-
-    async fn recv(&mut self) -> Result<SessionEvent, KitError> {
-        let deadline = self.socket.operation_deadline()?;
-        self.receive_event(deadline)
-            .await
-            .map_err(|error| self.socket.attach_error(error))
-    }
-
-    async fn close(self) -> Result<(), KitError> {
-        self.close_socket().await
     }
 }

@@ -31,6 +31,19 @@ pub(crate) struct SessionSocket {
 }
 
 impl SessionSocket {
+    pub(crate) fn validate_message_bytes(bytes: usize) -> Result<(), KitError> {
+        if bytes > MAX_WEBSOCKET_MESSAGE_BYTES {
+            Err(KitError::invalid_input(
+                ValidationViolation::LimitExceeded {
+                    field: "session.message",
+                    limit: MAX_WEBSOCKET_MESSAGE_BYTES,
+                },
+                "serialized session websocket message exceeds 8 MiB",
+            ))
+        } else {
+            Ok(())
+        }
+    }
     pub(crate) async fn connect(
         request: http::Request<()>,
         connect_timeout: Duration,
@@ -139,7 +152,22 @@ impl SessionSocket {
         &mut self,
         deadline: Instant,
     ) -> Result<SessionSocketMessage, KitError> {
-        tokio::time::timeout_at(deadline, async {
+        tokio::time::timeout_at(deadline, self.receive_unbounded())
+            .await
+            .map_err(|_| {
+                self.attach_error(
+                    KitError::new(
+                        ErrorKind::Timeout,
+                        Operation::SessionReceive,
+                        ErrorPhase::SessionReceive,
+                    )
+                    .with_timeout(self.timeout),
+                )
+            })?
+    }
+
+    pub(crate) async fn receive_unbounded(&mut self) -> Result<SessionSocketMessage, KitError> {
+        let result = async {
             loop {
                 let Some(message) = self.socket.next().await else {
                     return Ok(SessionSocketMessage::Exhausted);
@@ -224,19 +252,9 @@ impl SessionSocket {
                     | WebSocketMessage::Frame(_) => {}
                 }
             }
-        })
-        .await
-        .map_err(|_| {
-            self.attach_error(
-                KitError::new(
-                    ErrorKind::Timeout,
-                    Operation::SessionReceive,
-                    ErrorPhase::SessionReceive,
-                )
-                .with_timeout(self.timeout),
-            )
-        })?
-        .map_err(|error| self.attach_error(error))
+        }
+        .await;
+        result.map_err(|error| self.attach_error(error))
     }
 
     pub(crate) async fn receive_payload(
@@ -283,7 +301,18 @@ impl SessionSocket {
                 )
             })? {
             Ok(()) | Err(WebSocketError::ConnectionClosed | WebSocketError::AlreadyClosed) => {
-                Ok(())
+                loop {
+                    match self.receive(deadline).await.map_err(|error| {
+                        error
+                            .at_operation(Operation::SessionClose)
+                            .at_phase(ErrorPhase::SessionClose)
+                    })? {
+                        SessionSocketMessage::Closed(_) | SessionSocketMessage::Exhausted => {
+                            return Ok(());
+                        }
+                        SessionSocketMessage::Payload(_) => {}
+                    }
+                }
             }
             Err(error) => Err(self.attach_error(Self::socket_error(
                 error,

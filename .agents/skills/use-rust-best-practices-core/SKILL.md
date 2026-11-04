@@ -26,8 +26,9 @@ code, manifests, or test and lint behavior.
   helpers.
 - Load `use-rust-best-practices-abstractions` for enum-dispatcher work,
   especially closed implementation families that need private trait contracts
-  or the eleven lower-crate backend seams enumerated by root `AGENTS.md`
-  that require a public trait over a retained private dispatcher. App's five
+  or the eleven lower-crate backend seams and two borrowed Session-half seams
+  enumerated by root `AGENTS.md` that require a public trait over a retained
+  private dispatcher. App's five
   additional workflow traits stay concrete; only `ChildExecutor` uses its
   exact associated-future exception. Its serialization registry may erase
   field/tag codecs only, never runtime or lower-backend values.

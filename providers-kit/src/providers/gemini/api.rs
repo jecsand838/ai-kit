@@ -48,6 +48,14 @@ impl GeminiApiContext {
         &self.transport
     }
 
+    pub(crate) fn live_request(&self) -> Result<http::Request<()>, KitError> {
+        self.transport.websocket_request(
+            "ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent",
+            AuthMode::Apply,
+            |_| {},
+        )
+    }
+
     pub(crate) fn exact_model_id(
         &self,
         target: &'static str,

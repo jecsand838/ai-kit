@@ -28,8 +28,9 @@ construction, validation, serialization or conversion, and simple accessors.
 
 Non-DTO domains keep fields private and expose state and invariants through
 receiver methods or the owning trait contract. Public behavioral traits are
-permitted only at the eleven lower-crate backend seams and five App workflow
-seams enumerated by root `AGENTS.md`; internal dispatch remains private.
+permitted only at the eleven lower-crate backend seams, two borrowed Session-half
+seams and five App workflow seams enumerated by root `AGENTS.md`; internal
+dispatch remains private.
 App's `ChildExecutor` associated-future and serialization-only field/tag
 registry exceptions do not authorize another trait or erased runtime owner.
 Cross-module field access is not an acceptable substitute for a domain interface. The purpose is
@@ -186,7 +187,8 @@ impl ToolStatus {
 Use an enum when exactly one known case is active. At the approved Tool public
 seam, retain concrete variants and add one private erased extension variant
 behind the public trait. Use a closed built-in dispatcher plus direct static
-caller implementations for the nine Provider, Storage, and Agent traits. Use
+caller implementations for the nine Provider, Storage, and Agent backend
+traits and the two borrowed Session-half traits. Use
 a separate flag-set model when cases may coexist.
 Use a trait only for a real
 polymorphic or closed dispatch contract, not to make unrelated types look

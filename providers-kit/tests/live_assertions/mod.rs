@@ -1,7 +1,7 @@
 mod batches;
 mod sessions;
 mod stores;
-pub use sessions::SessionTurnEvidence;
+pub use sessions::{InputTranscriptionEvidence, SessionTurnEvidence};
 pub use stores::StoreFixture;
 
 pub use batches::{

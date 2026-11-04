@@ -1,20 +1,111 @@
 use std::path::Path;
 use std::time::Instant;
 
-use providers_kit::generation::FunctionCall;
-use providers_kit::session::{SessionEvent, SessionInput};
+use providers_kit::generation::{ContentPart, FunctionCall};
+use providers_kit::session::{
+    CancelTarget, CancellationResolution, CommandId, ResponseId, ResponseOutcome, SessionCommand,
+    SessionContinuity, SessionEvent, ToolRequestId, TranscriptionSource,
+};
 use serde_json::{Value, json};
 
 use crate::live_failures::CaseFailure;
+
+/// Retains input utterances using each final as an unattributed boundary.
+/// Every later unattributed observation starts another utterance, even a final-only
+/// or duplicate snapshot: missing native identity never permits deduplication.
+pub struct InputTranscriptionEvidence {
+    segments: Vec<(Option<CommandId>, String, bool)>,
+    text: String,
+    capture_failure: Option<String>,
+}
+
+impl InputTranscriptionEvidence {
+    pub fn new() -> Self {
+        Self {
+            segments: Vec::new(),
+            text: String::new(),
+            capture_failure: None,
+        }
+    }
+
+    pub fn observe(
+        &mut self,
+        command: Option<&CommandId>,
+        text: &str,
+        finalized: bool,
+    ) -> Result<(), String> {
+        if let Some(error) = &self.capture_failure {
+            return Err(error.clone());
+        }
+        let mut index = self
+            .segments
+            .iter()
+            .rposition(|(retained, _, _)| retained.as_ref() == command);
+        if index.is_some_and(|index| self.segments[index].2) {
+            if command.is_none() {
+                index = None;
+            } else if !finalized {
+                return Err("session transcription delta followed its finalized snapshot".into());
+            }
+        }
+        let previous = index.map_or(0, |index| self.segments[index].1.len());
+        let next = if finalized {
+            Some(text.len())
+        } else {
+            previous.checked_add(text.len())
+        };
+        let total = next.and_then(|next| {
+            self.text
+                .len()
+                .checked_sub(previous)
+                .and_then(|retained| retained.checked_add(next))
+        });
+        if total.is_none_or(|total| total > 32 * 1024) {
+            let error = "session transcription exceeded 32 KiB".to_owned();
+            self.capture_failure = Some(error.clone());
+            return Err(error);
+        }
+        if let Some(index) = index {
+            let (_, retained, finished) = &mut self.segments[index];
+            if finalized {
+                text.clone_into(retained);
+            } else {
+                retained.push_str(text);
+            }
+            *finished = finalized;
+        } else {
+            self.segments
+                .push((command.cloned(), text.to_owned(), finalized));
+        }
+        self.text = self
+            .segments
+            .iter()
+            .map(|(_, text, _)| text.as_str())
+            .collect();
+        Ok(())
+    }
+
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+}
 
 /// Evidence belongs to exactly one turn; text and input transcripts are not audio output.
 pub struct SessionTurnEvidence {
     expectation: SessionExpectation,
     audio_input: bool,
     function_call: Option<FunctionCall>,
+    function_request: Option<ToolRequestId>,
+    function_response: Option<ResponseId>,
+    result_command: Option<CommandId>,
+    continuation_response: Option<ResponseId>,
+    completed_response: Option<ResponseId>,
+    result_audio_bytes: usize,
+    result_transcription: bool,
+    transcripts: Vec<(TranscriptionSource, String, bool, bool)>,
     audio_bytes: usize,
     output_transcript: String,
-    input_transcript: String,
+    input_transcript: InputTranscriptionEvidence,
     completed: bool,
     started: Instant,
     events: Vec<Value>,
@@ -32,6 +123,9 @@ enum SessionExpectation {
         function_result_checkpoint: Option<(usize, usize)>,
     },
     AudioCancellation {
+        response: Option<ResponseId>,
+        pending: Option<CancelTarget>,
+        accepted: Option<(CommandId, CancelTarget)>,
         cancelled: bool,
     },
 }
@@ -46,9 +140,17 @@ impl SessionTurnEvidence {
             },
             audio_input,
             function_call: None,
+            function_request: None,
+            function_response: None,
+            result_command: None,
+            continuation_response: None,
+            completed_response: None,
+            result_audio_bytes: 0,
+            result_transcription: false,
+            transcripts: Vec::new(),
             audio_bytes: 0,
             output_transcript: String::new(),
-            input_transcript: String::new(),
+            input_transcript: InputTranscriptionEvidence::new(),
             completed: false,
             started: Instant::now(),
             events: Vec::new(),
@@ -62,7 +164,12 @@ impl SessionTurnEvidence {
 
     pub fn interrupting_audio() -> Self {
         let mut evidence = Self::new("", false);
-        evidence.expectation = SessionExpectation::AudioCancellation { cancelled: false };
+        evidence.expectation = SessionExpectation::AudioCancellation {
+            response: None,
+            pending: None,
+            accepted: None,
+            cancelled: false,
+        };
         evidence
     }
 
@@ -122,8 +229,8 @@ impl SessionTurnEvidence {
         Ok(())
     }
 
-    pub fn input(&mut self, input: &SessionInput) -> Result<(), String> {
-        if let SessionInput::Audio { media_type, data } = input {
+    pub fn input(&mut self, input: &SessionCommand) -> Result<(), String> {
+        if let SessionCommand::Audio { media_type, data } = input {
             if data.len() > 8 * 1024 * 1024 - self.input_audio.len() {
                 return Err(self.capture_error("session input PCM evidence exceeded 8 MiB"));
             }
@@ -135,7 +242,33 @@ impl SessionTurnEvidence {
             self.input_audio.extend_from_slice(data);
             Ok(())
         } else {
-            if let SessionInput::FunctionResult(result) = input {
+            if let SessionCommand::Cancel(target) = input {
+                let SessionExpectation::AudioCancellation {
+                    response: Some(response),
+                    pending: None,
+                    accepted: None,
+                    cancelled: false,
+                } = &self.expectation
+                else {
+                    return Err(
+                        "session cancellation must follow its observed audio response once".into(),
+                    );
+                };
+                if target != &CancelTarget::Response(response.clone()) {
+                    return Err(
+                        "session cancellation differs from the observed audio response".into(),
+                    );
+                }
+            }
+            if let SessionCommand::ToolResults(results) = input {
+                if results.len() != 1 {
+                    return Err("session evidence requires its one correlated result".into());
+                }
+                let submitted = &results[0];
+                if self.function_request.as_ref() != Some(submitted.request()) {
+                    return Err("session result differs from the active tool request".into());
+                }
+                let result = submitted.result();
                 let Some(call) = &self.function_call else {
                     return Err("session result has no validated function call".into());
                 };
@@ -156,11 +289,13 @@ impl SessionTurnEvidence {
                     return Err("session result differs from the active function identity".into());
                 }
             }
-            self.retain(
-                "send_attempt",
-                serde_json::to_value(input).map_err(|error| error.to_string())?,
-            )?;
-            if matches!(input, SessionInput::FunctionResult(_))
+            self.retain("send_attempt", Self::command_value(input)?)?;
+            if let SessionCommand::Cancel(target) = input
+                && let SessionExpectation::AudioCancellation { pending, .. } = &mut self.expectation
+            {
+                *pending = Some(target.clone());
+            }
+            if matches!(input, SessionCommand::ToolResults(_))
                 && let SessionExpectation::Complete {
                     function_result_pending,
                     ..
@@ -172,12 +307,21 @@ impl SessionTurnEvidence {
         }
     }
 
-    pub fn sent(&mut self, result: &Result<(), CaseFailure>) -> Result<(), String> {
+    pub fn sent(&mut self, result: &Result<CommandId, CaseFailure>) -> Result<(), String> {
         self.retain(
             "send_return",
             json!({"succeeded":result.is_ok(),
+            "receipt":result.as_ref().ok().map(|id|json!({"session":id.session_id(),"sequence":id.sequence().get()})),
             "failure":result.as_ref().err().map(CaseFailure::evidence)}),
         )?;
+        if let SessionExpectation::AudioCancellation {
+            pending, accepted, ..
+        } = &mut self.expectation
+            && let Some(target) = pending.take()
+            && let Ok(command) = result
+        {
+            *accepted = Some((command.clone(), target));
+        }
         if let SessionExpectation::Complete {
             function_result_pending,
             function_result_checkpoint,
@@ -186,6 +330,7 @@ impl SessionTurnEvidence {
             && *function_result_pending
             && result.is_ok()
         {
+            self.result_command = result.as_ref().ok().cloned();
             *function_result_pending = false;
             *function_result_checkpoint = Some((self.output_transcript.len(), self.audio_bytes));
         }
@@ -193,37 +338,59 @@ impl SessionTurnEvidence {
     }
 
     pub fn observe(&mut self, event: &SessionEvent) -> Result<(), String> {
-        if let SessionEvent::Audio { media_type, data } = event {
+        if let SessionEvent::Output {
+            content: ContentPart::Audio { media_type, data },
+            response,
+            segment,
+        } = event
+        {
             if data.len() > 8 * 1024 * 1024 - self.output_audio.len() {
                 return Err(self.capture_error("session output PCM evidence exceeded 8 MiB"));
             }
-            self.retain(
-                "received",
-                json!({"event":"audio", "media_type":media_type,
-                "pcm_offset":self.output_audio.len(), "byte_len":data.len()}),
-            )?;
+            self.retain("received",json!({"event":"audio","response":{"session":response.session_id(),"sequence":response.sequence().get()},"segment":segment.as_ref().map(|id|id.sequence().get()),"media_type":media_type,"pcm_offset":self.output_audio.len(),"byte_len":data.len()}))?;
             self.output_audio.extend_from_slice(data);
         } else {
-            self.retain(
-                "received",
-                serde_json::to_value(event).map_err(|error| error.to_string())?,
-            )?;
+            self.retain("received", Self::event_value(event)?)?;
         }
         let terminal = self.completed
-            || match &self.expectation {
-                SessionExpectation::AudioCancellation { cancelled } => *cancelled,
-                SessionExpectation::Complete { .. } => false,
-            };
+            || matches!(
+                self.expectation,
+                SessionExpectation::AudioCancellation {
+                    cancelled: true,
+                    ..
+                }
+            );
         if terminal
             && !matches!(
                 event,
-                SessionEvent::InputTranscriptionDelta { .. } | SessionEvent::Usage(_)
+                SessionEvent::Transcription {
+                    source: TranscriptionSource::Input { .. },
+                    ..
+                } | SessionEvent::Usage { .. }
+                    | SessionEvent::Transcription {
+                        finalized: true,
+                        ..
+                    }
+                    | SessionEvent::TurnEnded { .. }
+                    | SessionEvent::ControlApplied { .. }
             )
         {
             return Err("session emitted generation activity after turn completion".into());
         }
         match event {
-            SessionEvent::FunctionCall(call) => {
+            SessionEvent::ResponseStarted { command, response } => {
+                if command
+                    .as_ref()
+                    .is_some_and(|command| self.result_command.as_ref() == Some(command))
+                {
+                    self.continuation_response = Some(response.clone());
+                }
+            }
+            SessionEvent::ToolRequested {
+                response,
+                request,
+                call,
+            } => {
                 if self.audio_input
                     || matches!(
                         self.expectation,
@@ -232,51 +399,282 @@ impl SessionTurnEvidence {
                     || self.completed
                     || self.function_call.is_some()
                     || call.name() != "strict_live_session_probe"
-                    || call.arguments() != &serde_json::json!({})
+                    || call.arguments() != &json!({})
                 {
                     return Err("session requested an unexpected or repeated function".into());
                 }
                 self.function_call = Some(call.clone());
+                self.function_request = Some(request.clone());
+                self.function_response = Some(response.clone());
             }
-            SessionEvent::Audio { data, .. } => self.audio_bytes += data.len(),
-            SessionEvent::OutputTranscriptionDelta { delta } => {
-                if delta.len() > 32 * 1024 - self.output_transcript.len() {
-                    return Err(self.capture_error("session output transcription exceeded 32 KiB"));
+            SessionEvent::Output {
+                content: ContentPart::Audio { data, .. },
+                response,
+                ..
+            } => {
+                if !data.is_empty()
+                    && let SessionExpectation::AudioCancellation {
+                        response: observed, ..
+                    } = &mut self.expectation
+                {
+                    if observed.as_ref().is_some_and(|prior| prior != response) {
+                        return Err(
+                            "session cancellation audio belongs to multiple responses".into()
+                        );
+                    }
+                    *observed = Some(response.clone());
                 }
-                self.output_transcript.push_str(delta);
-            }
-            SessionEvent::InputTranscriptionDelta { delta } => {
-                if delta.len() > 32 * 1024 - self.input_transcript.len() {
-                    return Err(self.capture_error("session input transcription exceeded 32 KiB"));
+                self.audio_bytes += data.len();
+                if self.continuation_response.as_ref() == Some(response) {
+                    self.result_audio_bytes += data.len();
                 }
-                self.input_transcript.push_str(delta);
             }
-            SessionEvent::Completed => {
+            SessionEvent::Transcription {
+                source,
+                text,
+                finalized,
+            } => self.transcript(source, text, *finalized)?,
+            SessionEvent::Interruption { .. } => {
+                return Err("session reported an unexpected native interruption".into());
+            }
+            SessionEvent::TurnEnded { .. } => {}
+            SessionEvent::ResponseFinished {
+                response,
+                outcome: ResponseOutcome::Completed,
+                continuity: SessionContinuity::Reusable,
+                ..
+            } => {
                 if !matches!(self.expectation, SessionExpectation::Complete { .. }) {
-                    return Err("interruption case completed without required cancellation".into());
+                    return Err("interruption completed without required cancellation".into());
                 }
-                self.completed = true;
+                if self.function_response.as_ref() != Some(response) {
+                    self.completed = true;
+                    self.completed_response = Some(response.clone());
+                }
             }
-            SessionEvent::TurnCancelled => match &mut self.expectation {
+            SessionEvent::ResponseFinished {
+                outcome: ResponseOutcome::Cancelled,
+                ..
+            } => {
+                if matches!(self.expectation, SessionExpectation::Complete { .. }) {
+                    return Err("positive session response was cancelled".into());
+                }
+            }
+            SessionEvent::Cancellation {
+                command,
+                target,
+                resolution: CancellationResolution::Stopped,
+                continuity: SessionContinuity::Reusable,
+            } => match &mut self.expectation {
+                SessionExpectation::AudioCancellation {
+                    accepted,
+                    cancelled,
+                    ..
+                } => {
+                    if accepted.as_ref().is_none_or(|(receipt, submitted)| {
+                        receipt != command || submitted != target
+                    }) {
+                        return Err("session cancellation acknowledgement differs from its accepted receipt or target".into());
+                    }
+                    *cancelled = true;
+                }
                 SessionExpectation::Complete { .. } => {
-                    return Err("positive session turn was cancelled".into());
+                    return Err("positive session response was cancelled".into());
                 }
-                SessionExpectation::AudioCancellation { cancelled } => *cancelled = true,
             },
-            SessionEvent::FunctionCallsCancelled { .. } => {
-                return Err("session cancelled an unowned function".into());
+            SessionEvent::ToolsInvalidated { .. } => {
+                return Err("session invalidated an owned function".into());
             }
-            SessionEvent::TextDelta { .. } | SessionEvent::Usage(_) => {}
+            SessionEvent::CommandFailed { error, .. }
+            | SessionEvent::Terminated { reason: error, .. } => {
+                return Err(format!("session failed accepted work: {error}"));
+            }
+            SessionEvent::ResponseFinished { .. } | SessionEvent::Cancellation { .. } => {
+                return Err("session did not affirm successful completion or cancellation".into());
+            }
+            SessionEvent::Output { .. }
+            | SessionEvent::Usage { .. }
+            | SessionEvent::ControlApplied { .. } => {}
         }
         Ok(())
+    }
+
+    fn transcript(
+        &mut self,
+        source: &TranscriptionSource,
+        text: &str,
+        finalized: bool,
+    ) -> Result<(), String> {
+        if let TranscriptionSource::Input { command } = source {
+            let result = self
+                .input_transcript
+                .observe(command.as_ref(), text, finalized);
+            if let Some(error) = &self.input_transcript.capture_failure {
+                self.capture_failure.get_or_insert_with(|| error.clone());
+            }
+            return result;
+        }
+        let index = self
+            .transcripts
+            .iter()
+            .position(|(retained, _, _, _)| retained == source);
+        let previous = index.map_or(0, |index| self.transcripts[index].1.len());
+        if index.is_some_and(|index| self.transcripts[index].2) && !finalized {
+            return Err("session transcription delta followed its finalized snapshot".into());
+        }
+        let next = if finalized {
+            Some(text.len())
+        } else {
+            previous.checked_add(text.len())
+        };
+        let retained = self.output_transcript.len();
+        let total = next.and_then(|next| {
+            retained
+                .checked_sub(previous)
+                .and_then(|retained| retained.checked_add(next))
+        });
+        if total.is_none_or(|total| total > 32 * 1024) {
+            return Err(self.capture_error("session transcription exceeded 32 KiB"));
+        }
+        let new_progress = matches!(source,TranscriptionSource::Output{response,..} if self.continuation_response.as_ref()==Some(response))
+            && text.chars().any(|character| !character.is_whitespace());
+        if let Some(index) = index {
+            let (_, retained, finished, progress) = &mut self.transcripts[index];
+            if finalized {
+                text.clone_into(retained);
+            } else {
+                retained.push_str(text);
+            }
+            *finished = finalized;
+            if finalized {
+                *progress = new_progress;
+            } else {
+                *progress |= new_progress;
+            }
+        } else {
+            self.transcripts
+                .push((source.clone(), text.to_owned(), finalized, new_progress));
+        }
+        self.output_transcript = self
+            .transcripts
+            .iter()
+            .filter_map(|(source, text, _, _)| {
+                matches!(source, TranscriptionSource::Output { .. }).then_some(text.as_str())
+            })
+            .collect();
+        self.result_transcription=self.transcripts.iter().any(|(source,_,_,progress)|*progress && matches!(source,TranscriptionSource::Output{response,..} if self.continuation_response.as_ref()==Some(response)));
+        Ok(())
+    }
+
+    fn command_value(command: &SessionCommand) -> Result<Value, String> {
+        Ok(match command {
+            SessionCommand::Input(message) => json!({"type":"input","message":message}),
+            SessionCommand::ToolResults(results) => {
+                json!({"type":"tool_results","results":results.iter().map(|result|json!({"request":{"session":result.request().session_id(),"sequence":result.request().sequence().get()},"result":result.result()})).collect::<Vec<_>>()})
+            }
+            SessionCommand::Cancel(target) => {
+                json!({"type":"cancel","target":format!("{target:?}")})
+            }
+            SessionCommand::StartInput => json!({"type":"start_input"}),
+            SessionCommand::EndInput => json!({"type":"end_input"}),
+            SessionCommand::EndAudioStream => json!({"type":"end_audio_stream"}),
+            SessionCommand::DiscardInput => json!({"type":"discard_input"}),
+            SessionCommand::ReconcilePlayback { segment, played } => {
+                json!({"type":"reconcile_playback","segment":{"session":segment.session_id(),"sequence":segment.sequence().get()},"played_ms":played.as_millis()})
+            }
+            SessionCommand::Audio { .. } => {
+                return Err("audio evidence requires PCM sidecar capture".into());
+            }
+        })
+    }
+
+    fn event_value(event: &SessionEvent) -> Result<Value, String> {
+        Ok(match event {
+            SessionEvent::ResponseStarted { command, response } => {
+                json!({"event":"response_started","response":{"session":response.session_id(),"sequence":response.sequence().get()},"command":command.as_ref().map(|id|json!({"session":id.session_id(),"sequence":id.sequence().get()}))})
+            }
+            SessionEvent::Output {
+                response,
+                segment,
+                content,
+            } => {
+                json!({"event":"output","response":{"session":response.session_id(),"sequence":response.sequence().get()},"segment":segment.as_ref().map(|id|id.sequence().get()),"content":content})
+            }
+            SessionEvent::Transcription {
+                source,
+                text,
+                finalized,
+            } => {
+                json!({"event":"transcription","source":format!("{source:?}"),"text":text,"finalized":finalized})
+            }
+            SessionEvent::ToolRequested {
+                response,
+                request,
+                call,
+            } => {
+                json!({"event":"tool_requested","response":{"session":response.session_id(),"sequence":response.sequence().get()},"request":{"session":request.session_id(),"sequence":request.sequence().get()},"call":call})
+            }
+            SessionEvent::ToolsInvalidated { requests } => {
+                json!({"event":"tools_invalidated","requests":requests.iter().map(|id|json!({"session":id.session_id(),"sequence":id.sequence().get()})).collect::<Vec<_>>()})
+            }
+            SessionEvent::ResponseFinished {
+                response,
+                outcome,
+                continuity,
+                output,
+            } => {
+                json!({"event":"response_finished","response":{"session":response.session_id(),"sequence":response.sequence().get()},"outcome":format!("{outcome:?}"),"continuity":format!("{continuity:?}"),"output":output})
+            }
+            SessionEvent::Usage {
+                scope,
+                usage,
+                finalized,
+            } => {
+                json!({"event":"usage","scope":format!("{scope:?}"),"usage":usage,"finalized":finalized})
+            }
+            SessionEvent::Cancellation {
+                command,
+                target,
+                resolution,
+                continuity,
+            } => {
+                json!({"event":"cancellation","command":{"session":command.session_id(),"sequence":command.sequence().get()},"target":format!("{target:?}"),"resolution":format!("{resolution:?}"),"continuity":format!("{continuity:?}")})
+            }
+            SessionEvent::CommandFailed {
+                command,
+                error,
+                not_started,
+            } => {
+                json!({"event":"command_failed","command":{"session":command.session_id(),"sequence":command.sequence().get()},"error":CaseFailure::from(error.clone()).evidence(),"not_started":not_started})
+            }
+            SessionEvent::Interruption { response } => {
+                json!({"event":"interruption","response":response.as_ref().map(|id|json!({"session":id.session_id(),"sequence":id.sequence().get()}))})
+            }
+            SessionEvent::TurnEnded { response } => {
+                json!({"event":"turn_ended","response":response.as_ref().map(|id|json!({"session":id.session_id(),"sequence":id.sequence().get()}))})
+            }
+            SessionEvent::ControlApplied { command } => {
+                json!({"event":"control_applied","command":{"session":command.session_id(),"sequence":command.sequence().get()}})
+            }
+            SessionEvent::Terminated {
+                reason,
+                continuity,
+                unfinished_commands,
+                unfinished_responses,
+                outstanding_tools,
+            } => {
+                json!({"event":"terminated","reason":CaseFailure::from(reason.clone()).evidence(),"continuity":format!("{continuity:?}"),"unfinished_commands":format!("{unfinished_commands:?}"),"unfinished_responses":format!("{unfinished_responses:?}"),"outstanding_tools":format!("{outstanding_tools:?}")})
+            }
+        })
     }
 
     pub fn ready(&self) -> bool {
         match &self.expectation {
             SessionExpectation::Complete { .. } => {
-                self.completed && (!self.audio_input || !self.input_transcript.trim().is_empty())
+                self.completed
+                    && (!self.audio_input || !self.input_transcript.text().trim().is_empty())
             }
-            SessionExpectation::AudioCancellation { cancelled } => *cancelled,
+            SessionExpectation::AudioCancellation { cancelled, .. } => *cancelled,
         }
     }
 
@@ -303,6 +701,14 @@ impl SessionTurnEvidence {
         if self.function_call.is_some() == self.audio_input {
             return Err("session omitted its exactly-once function call".into());
         }
+        if !self.audio_input
+            && (self.continuation_response.is_none()
+                || self.completed_response != self.continuation_response
+                || self.result_audio_bytes == 0
+                || !self.result_transcription)
+        {
+            return Err("session omitted correlated result-response completion, audio or substantive transcription".into());
+        }
         if self.audio_bytes == 0 {
             return Err("session turn omitted output audio bytes".into());
         }
@@ -317,20 +723,24 @@ impl SessionTurnEvidence {
         if expected.is_empty() {
             return Err("session expected answer was empty".into());
         }
-        let (transcript_start, audio_start) = if self.audio_input {
+        let (_transcript_start, audio_start) = if self.audio_input {
             (0, 0)
         } else {
             if *function_result_pending {
-                return Err("session function result has no successful send return".into());
+                return Err(
+                    "session function result has no successful local acceptance receipt".into(),
+                );
             }
-            function_result_checkpoint.ok_or("session function result was not successfully sent")?
+            function_result_checkpoint.ok_or("session function result was not locally accepted")?
         };
         if self.audio_bytes <= audio_start {
             return Err("session omitted audio after successful function result".into());
         }
-        if !self.output_transcript[transcript_start..]
-            .chars()
-            .any(|character| !character.is_whitespace())
+        if self.audio_input
+            && !self
+                .output_transcript
+                .chars()
+                .any(|character| !character.is_whitespace())
         {
             return Err("session omitted substantive output transcription after its input".into());
         }
@@ -393,7 +803,7 @@ impl SessionTurnEvidence {
             SessionExpectation::Complete { expected, .. } => {
                 (expected.as_deref(), json!({"kind":"complete"}))
             }
-            SessionExpectation::AudioCancellation { cancelled } => (
+            SessionExpectation::AudioCancellation { cancelled, .. } => (
                 None,
                 json!({"kind":"audio_cancellation", "cancelled":cancelled}),
             ),
@@ -412,7 +822,7 @@ impl SessionTurnEvidence {
         json!({"audio_input":self.audio_input, "expected":expected, "expectation":expectation,
             "model_exact_copy":copy_grade,"function_result_checkpoint":checkpoint,
             "function_calls":usize::from(self.function_call.is_some()), "output_audio_bytes":self.audio_bytes,
-            "output_transcript":self.output_transcript, "input_transcript":self.input_transcript,
+            "output_transcript":self.output_transcript, "input_transcript":self.input_transcript.text(),
             "completed":self.completed, "events":self.events, "event_bytes":self.event_bytes,
             "capture_failure":self.capture_failure, "outcome":self.outcome})
     }

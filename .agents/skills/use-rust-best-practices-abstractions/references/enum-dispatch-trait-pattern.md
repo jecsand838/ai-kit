@@ -62,11 +62,15 @@ RPITIT trait as the behavioral contract, and add exactly one private erased
 duplicate private behavioral trait or store a bare erased trait object as the
 handle's only representation.
 
-For Provider, Model, Session, Database, StateStore, StateTransaction, Agent,
-Workspace, and Conversation, keep the supplied handle's private dispatcher
-closed over built-ins. Their public RPITIT traits are direct static
+For Provider, Model, Session, its borrowed command/event halves, Database,
+StateStore, StateTransaction, Agent, Workspace, and Conversation, keep the
+supplied handle's private dispatcher closed over built-ins. Their public RPITIT
+traits are direct static
 implementation contracts. Callers retain a concrete implementation hierarchy
 or define their own exhaustive enums; the Kit must not erase or normalize it.
+Session's associated halves borrow the owner and never acquire another close
+authority. Their two explicitly approved traits belong in the public `session`
+module; no additional extension seam follows from the split.
 
 App's five `workflow` traits are additional static behavior seams, not new
 lower-backend dispatchers. Its `ChildExecutor` alone uses the exact generic

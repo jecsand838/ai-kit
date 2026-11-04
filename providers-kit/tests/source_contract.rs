@@ -155,6 +155,10 @@ fn provider_hierarchy_has_no_identity_erasure_or_normalization_route() {
         "dyn ProviderBackend",
         "dyn ModelBackend",
         "dyn SessionBackend",
+        "dyn SessionCommands",
+        "dyn SessionEvents",
+        "ErasedSessionCommands",
+        "ErasedSessionEvents",
     ] {
         assert!(
             !source.contains(forbidden),
@@ -188,6 +192,7 @@ fn deleted_product_surfaces_and_dependency_edges_stay_deleted() {
         "pub enum RuntimeResponse",
         "pub struct RuntimeInventoryResponse",
         "pub enum SessionKind",
+        "pub enum SessionInput",
         "pub enum SessionState",
         "pub struct SessionConfigParts",
         "pub enum Attachment",

@@ -129,7 +129,7 @@ mod tests {
 ## 3. Built-in/infrastructure integration claims use public APIs and real dependencies
 
 Ai-kit's primary deterministic lane uses crate-local structs and exhaustive
-enums implementing all 16 approved public behavioral traits directly. It tests
+enums implementing all 18 approved public behavioral traits directly. It tests
 their public semantics and the real Custom Agent/App with caller-owned Provider,
 Toolset, StateStore, Database, and Agent hierarchies. Keep exact associated
 children and continuations, consuming non-Clone owners, and App's five concrete
@@ -418,11 +418,18 @@ associated types preserve the exact child contract, and non-Clone caller
 hierarchies work directly. Behavioral tests prove supplied built-in dispatch.
 
 At the open Tool seam, narrow source guards may require the sole root ingress
-and reject public erasure or a bare trait-object handle. For the nine closed
-Provider, Storage, and Agent dispatchers, narrow guards reject erased adapters,
+and reject public erasure or a bare trait-object handle. For closed Provider,
+Storage, and Agent resource and borrowed Session-half dispatchers, narrow guards
+reject erased adapters,
 `Extension` arms, normalization constructors, backend trait objects,
 macro-generated dispatch, `async_trait`, compatibility shims, and stale
 restoration TODO markers.
+
+Session compile proofs also reject halves escaping their owner and independent
+close authorities. Direct-trait fixtures construct all tokens and outcomes
+publicly, and exercise pending receive alongside submission and cancellation.
+Runtime tests establish acceptance, late-event correlation, bounded progress and
+cleanup; merely compiling the replacement API is not behavioral evidence.
 
 Do not freeze private enum or helper names, exact files, variant payloads, impl
 placement, or match-arm spelling. Those details are implementation

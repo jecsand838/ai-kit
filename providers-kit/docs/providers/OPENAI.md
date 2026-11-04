@@ -1,5 +1,9 @@
 # OpenAI Provider Notes
 
+Session behavior follows the current [portable API contract](../PORTABLE_API.md).
+Native qualification is recorded separately for the tested source and configuration.
+Other provider behavior retains its existing scope.
+
 OpenAI construction uses provider-owned config and credential types. Model
 selection uses the exact OpenAI model id through `Provider::model(ModelId)`.
 
@@ -9,12 +13,32 @@ The concrete OpenAI Model owns selected-protocol generation, streaming, model-bo
 batch submission, and supported session behavior. Provider-level resources
 own file and batch lifecycle operations.
 
+Conversation Sessions compose the existing selected-model Responses generation
+and continuation path. Retain the complete authoritative assistant message,
+including output-item linkage, before exposing executable calls or completion.
+Accepted user input/results survive cancellation and are replayed once; visible
+deltas are never substituted for native replay state. Conversation and native
+Realtime profiles are explicit and never substitute for one another.
+
 Opening OpenAI Realtime is authoritative only after the server acknowledges
 the submitted configuration with `session.updated`; an optional preceding
 `session.created` is accepted. The OpenAI Realtime path supports text,
 configured raw audio, input and output transcription, function calls/results,
-response cancellation, manual or automatic turn detection, and consuming
-close.
+targeted response cancellation, manual or automatic turn detection, distinct
+input-buffer discard, output-segment playback reconciliation and consuming close.
+The borrowed halves permit input and controls while output is pending.
+
+Realtime response completion validates the response identity and explicit native
+status. Missing/unknown status and EOF cannot become success; incomplete output
+is distinct from failure. Capture terminal usage from the authoritative response
+and preserve optional counts. Store in-flight state before item creation, audio
+commit or result writes, and reconcile partial writes or report uncertain
+continuity. Known-cancelled queued calls cannot remain executable; delivered calls
+receive invalidation. Response cancellation does not clear the input buffer or
+truncate unplayed audio from context. See the independent native operations in
+[client events](https://developers.openai.com/api/reference/resources/realtime/client-events)
+and terminal evidence in
+[server events](https://developers.openai.com/api/reference/resources/realtime/server-events).
 
 Realtime function declarations render their own native `type`, `name`,
 `description`, and `parameters` fields. The Responses-only `strict` parameter
@@ -76,7 +100,9 @@ withdrawal neither fixes nor relabels them.
 Public `ContentPart::Audio`, Model methods and opaque continuation APIs remain
 available. Ordinary OpenAI generation continues through Responses, whose audio
 input remains explicitly unsupported. OpenAI Realtime Session audio, tools,
-transcription, interruption and consuming close remain supported and unchanged.
+transcription, interruption and consuming close remain required behavior
+through the new borrowed-half contract; the Session refactor does not restore
+stateless Chat Completions audio.
 
 ## Hosted Tools
 
@@ -248,7 +274,9 @@ See the [current model settings](https://developers.openai.com/api/docs/guides/l
 Realtime qualification selects `gpt-realtime-2.1`. Committed input audio uses
 `gpt-transcribe`, the documented [WebSocket transcription path](https://developers.openai.com/api/docs/guides/realtime-transcription),
 while preserving manual/VAD boundaries and existing transcription events.
-No advanced voice/VAD or additional public session settings are introduced.
+The Session refactor adds explicit profile and duplex ownership while retaining
+these media requirements; it adds no unrelated advanced voice/VAD controls or
+model capability catalog.
 
 New defaults avoid deprecated/retiring GPT-4.1 Nano, GPT-5.4 Nano and old
 Realtime selections. Exact older IDs are not silently replaced; service errors

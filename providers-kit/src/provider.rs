@@ -62,30 +62,28 @@ use crate::runtime::HealthStatus;
 ///
 /// This runnable caller implementation is a deliberately limited, in-process text
 /// echo service, **not** a language model or proof of any supplied provider. It
-/// supports one text message with default settings and text-only Sessions. Optional
+/// supports one text message with default settings. This caller chooses no Session. Optional
 /// operations retain their Unsupported defaults. Its work is synchronous and finite:
 /// there is no transport, spawned task or asynchronous resource to drain. A real
 /// network implementation must additionally own admitted work and shutdown cleanup.
 ///
 /// The continuation is caller-owned, cloneable, and deliberately has no serialization
 /// contract. Finite streams yield on demand without a forwarding task. Shared closure
-/// seals the root and existing children; consuming Session close releases its local queue.
+/// seals the root and existing children. See [`crate::session`] for borrowed Session halves.
 ///
 /// ```
-/// use std::{collections::VecDeque, sync::{Arc, atomic::{AtomicBool, Ordering}}};
+/// use std::{convert::Infallible, sync::{Arc, atomic::{AtomicBool, Ordering}}};
 /// use futures_util::{stream, StreamExt};
-/// use providers_kit::{ProviderBackend, ModelBackend, SessionBackend, ModelId, KitError};
+/// use providers_kit::{ProviderBackend, ModelBackend, ModelId, KitError};
 /// use providers_kit::error::{ErrorKind, ErrorPhase, Operation};
 /// use providers_kit::generation::{ContentPart, FinishReason, GenerateEvent,
 ///     GenerateEventStream, GenerateRequest, GenerateResponse, GenerationConfig, Message, Role, Usage};
-/// use providers_kit::session::{SessionConfig, SessionEvent, SessionInput};
 ///
 /// #[derive(Clone, Default)]
 /// struct EchoProvider { closed: Arc<AtomicBool> }
 /// #[derive(Clone)]
 /// struct EchoContinuation(Arc<()>);
 /// struct EchoModel { id: ModelId, root: EchoProvider, replay: EchoContinuation }
-/// struct EchoSession { model: ModelId, root: EchoProvider, events: VecDeque<SessionEvent> }
 ///
 /// impl EchoProvider {
 ///     fn check(&self, operation: Operation) -> Result<(), KitError> {
@@ -142,7 +140,7 @@ use crate::runtime::HealthStatus;
 /// }
 /// impl ModelBackend for EchoModel {
 ///     type Continuation = EchoContinuation;
-///     type Session = EchoSession;
+///     type Session = Infallible;
 ///     fn model_id(&self) -> &ModelId { &self.id }
 ///     async fn generate(&self, request: &GenerateRequest<EchoContinuation>)
 ///         -> Result<GenerateResponse<EchoContinuation>, KitError> { self.response(request) }
@@ -159,40 +157,6 @@ use crate::runtime::HealthStatus;
 ///             Ok(GenerateEvent::Completed(Box::new(response))),
 ///         ])))
 ///     }
-///     async fn open_session(&self, config: SessionConfig) -> Result<EchoSession, KitError> {
-///         self.root.check(Operation::OpenSession)?;
-///         if config != SessionConfig::default() {
-///             return Err(KitError::new(ErrorKind::Unsupported, Operation::OpenSession,
-///                 ErrorPhase::InputValidation));
-///         }
-///         Ok(EchoSession { model: self.id.clone(), root: self.root.clone(), events: VecDeque::new() })
-///     }
-/// }
-/// impl SessionBackend for EchoSession {
-///     fn id(&self) -> &str { "local-echo-session" }
-///     fn model_id(&self) -> &ModelId { &self.model }
-///     async fn send(&mut self, input: SessionInput) -> Result<(), KitError> {
-///         self.root.check(Operation::SessionSend)?;
-///         if !self.events.is_empty() {
-///             return Err(KitError::new(ErrorKind::InvalidState, Operation::SessionSend,
-///                 ErrorPhase::Lifecycle));
-///         }
-///         match input {
-///             SessionInput::Text { text } if !text.trim().is_empty() && text.len() <= 64 * 1024 => {
-///                 self.events.push_back(SessionEvent::TextDelta { delta: text });
-///                 self.events.push_back(SessionEvent::Completed);
-///                 Ok(())
-///             }
-///             _ => Err(KitError::new(ErrorKind::Unsupported, Operation::SessionSend,
-///                 ErrorPhase::InputValidation)),
-///         }
-///     }
-///     async fn recv(&mut self) -> Result<SessionEvent, KitError> {
-///         self.root.check(Operation::SessionReceive)?;
-///         self.events.pop_front().ok_or_else(|| KitError::new(ErrorKind::InvalidState,
-///             Operation::SessionReceive, ErrorPhase::Lifecycle))
-///     }
-///     async fn close(self) -> Result<(), KitError> { Ok(()) }
 /// }
 ///
 /// # #[tokio::main(flavor = "current_thread")]
@@ -210,13 +174,6 @@ use crate::runtime::HealthStatus;
 /// );
 /// assert!(matches!(events.next().await.transpose()?, Some(GenerateEvent::Completed(_))));
 /// assert!(events.next().await.is_none());
-/// let mut session = model.open_session(SessionConfig::default()).await?;
-/// session.send(SessionInput::Text { text: "hello again".into() }).await?;
-/// assert!(
-///     matches!(session.recv().await?, SessionEvent::TextDelta { delta } if delta == "hello again")
-/// );
-/// assert_eq!(session.recv().await?, SessionEvent::Completed);
-/// session.close().await?;
 /// provider.shutdown().await?;
 /// assert_eq!(model.generate(&request).await.err().unwrap().kind(), ErrorKind::Closed);
 /// provider.shutdown().await?; // Replays the same resource-free terminal result.
@@ -1095,6 +1052,7 @@ pub(crate) struct ProviderRuntime {
     backend: ProviderInner,
     state: Mutex<ProviderLifecycleState>,
     batches: Mutex<BatchRegistry>,
+    sessions: Mutex<(Vec<Arc<crate::core::SessionControl>>, Option<KitError>)>,
     changed: Notify,
 }
 
@@ -1132,6 +1090,7 @@ impl ProviderRuntime {
             backend,
             state: Mutex::new(ProviderLifecycleState::Open { admitted: 0 }),
             batches: Mutex::new(BatchRegistry::new()),
+            sessions: Mutex::default(),
             changed: Notify::new(),
         }
     }
@@ -1156,6 +1115,40 @@ impl ProviderRuntime {
                 Err(KitError::closed("provider admission closed").at_operation(operation))
             }
         }
+    }
+
+    pub(crate) fn register_session(
+        &self,
+        session: Arc<crate::core::SessionControl>,
+    ) -> Result<(), KitError> {
+        // Registration and sealing share the original admission authority. An
+        // opening already admitted before sealing must still be tracked.
+        let lifecycle = self.state();
+        let sealed = !matches!(&*lifecycle, ProviderLifecycleState::Open { .. });
+        let mut registry = self
+            .sessions
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (sessions, failure) = &mut *registry;
+        sessions.retain(|session| match session.reap() {
+            Some(Err(error)) => {
+                error.accumulate(failure);
+                false
+            }
+            result => result.is_none(),
+        });
+        if sessions.len() >= 1024 {
+            return Err(KitError::invalid_state(
+                "provider session resource limit reached",
+            ));
+        }
+        sessions.push(Arc::clone(&session));
+        drop(registry);
+        drop(lifecycle);
+        if sealed {
+            session.seal();
+        }
+        Ok(())
     }
 
     pub(crate) async fn run_owned_batch(
@@ -1213,14 +1206,40 @@ impl ProviderRuntime {
     }
 
     async fn finish_shutdown(self: Arc<Self>) -> Result<(), KitError> {
+        let sessions = self
+            .sessions
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .0
+            .clone();
+        for session in sessions {
+            session.seal();
+        }
         self.drain().await;
+        // No admitted opener can register after draining. Keep concrete session
+        // owners alive through bounded cleanup even when the public handle drops.
+        let (sessions, mut session_failure) = std::mem::take(
+            &mut *self
+                .sessions
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
+        for session in sessions {
+            if let Err(error) = session.close().await {
+                error.accumulate(&mut session_failure);
+            }
+        }
         // Admissions cover preparation, registration, execution and cleanup.
         // Only after draining can no previously admitted call add another task.
         let mut tasks = self.batches().take_tasks();
         while let Some(result) = tasks.join_next().await {
             self.batches().joined(result);
         }
-        let ownership = self.batches().terminal();
+        let ownership = match (session_failure, self.batches().terminal()) {
+            (None, result) => result,
+            (Some(error), Ok(())) => Err(error),
+            (Some(error), Err(batch)) => Err(error.with_supplementary(batch)),
+        };
         let backend = self.backend.shutdown().await;
         match (ownership, backend) {
             (Ok(()), result) => result,

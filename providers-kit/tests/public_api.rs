@@ -14,7 +14,9 @@ use providers_kit::hosted::{HostedTool, HostedToolOutput, HostedToolStatus};
 use providers_kit::models::{
     Model, ModelBackend, ModelId, ModelListRequest, ModelPage, ModelSummary,
 };
-use providers_kit::session::{Session, SessionBackend, SessionConfig, SessionTurnDetection};
+use providers_kit::session::{
+    Session, SessionBackend, SessionConfig, SessionProfile, SessionTurnDetection,
+};
 use providers_kit::{KitError, Provider, ProviderBackend, ProviderConfig};
 use serde_json::json;
 use url::Url;
@@ -61,7 +63,8 @@ fn root_and_functional_modules_support_the_primary_workflow() {
     assert_eq!(request.tools().len(), 1);
     assert_eq!(request.generation().tool_choice(), Some(&ToolChoice::Auto));
 
-    let session = SessionConfig::default().with_turn_detection(SessionTurnDetection::Automatic);
+    let session = SessionConfig::new(SessionProfile::Realtime)
+        .with_turn_detection(SessionTurnDetection::Automatic);
     assert_eq!(session.turn_detection(), SessionTurnDetection::Automatic);
 }
 

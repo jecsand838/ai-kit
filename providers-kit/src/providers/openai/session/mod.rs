@@ -29,7 +29,7 @@ use crate::transport::CheckedRequestSpec;
 
 use super::api::OPENAI_REQUESTS;
 use super::models::OpenAiModel;
-use super::responses::usage_from_openai;
+use super::responses::{tool_result_to_function_call_output, usage_from_openai};
 use super::wire::OpenAiErrorObject;
 
 /// Exact selected OpenAI model's stateful child.
@@ -355,7 +355,9 @@ impl SessionBackend for OpenAiSession {
     fn split(&mut self) -> (Self::Commands<'_>, Self::Events<'_>) {
         match &mut self.mode {
             OpenAiMode::Conversation(owner) => {
-                let (commands, events) = owner.split();
+                let (commands, events) = owner.split(|model, result| {
+                    tool_result_to_function_call_output(model, result).map(drop)
+                });
                 (
                     OpenAiCommands {
                         mode: OpenAiCommandMode::Conversation(commands),
@@ -627,7 +629,7 @@ impl OpenAiDriver {
         tokio::select! { biased; ()=control.stopped()=>Err(KitError::closed("OpenAI write interrupted by close")), result=self.socket.send(payload,deadline)=>result }
     }
 
-    async fn create_response(&mut self, command: CommandId) -> Result<(), KitError> {
+    fn admit_response(&mut self, command: &CommandId) -> Result<(), KitError> {
         let admission = self.control.generation_admission()?;
         self.pending.insert(
             command.clone(),
@@ -637,6 +639,10 @@ impl OpenAiDriver {
                 cancellations: Vec::new(),
             },
         );
+        Ok(())
+    }
+
+    async fn create_response(&mut self, command: CommandId) -> Result<(), KitError> {
         self.write(json!({"type":"response.create","event_id":format!("command-{}",command.sequence()),"response":{"metadata":{"ai_kit_command":command.sequence().to_string()}}})).await
     }
 
@@ -644,15 +650,7 @@ impl OpenAiDriver {
         match command {
             SessionCommand::Input(message) => {
                 // Acquire admission before the first external mutation and record identity before writing.
-                let admission = self.control.generation_admission()?;
-                self.pending.insert(
-                    id.clone(),
-                    OpenAiPending {
-                        admission,
-                        deadline: self.socket.operation_deadline()?,
-                        cancellations: Vec::new(),
-                    },
-                );
+                self.admit_response(&id)?;
                 let content = message
                     .content()
                     .iter()
@@ -664,10 +662,10 @@ impl OpenAiDriver {
                     })
                     .collect::<Vec<_>>();
                 self.write(json!({"type":"conversation.item.create","item":{"type":"message","role":"user","content":content}})).await?;
-                self.write(json!({"type":"response.create","event_id":format!("command-{}",id.sequence()),"response":{"metadata":{"ai_kit_command":id.sequence().to_string()}}})).await?;
+                self.create_response(id).await?;
             }
             SessionCommand::ToolResults(results) => {
-                let admission = self.control.generation_admission()?;
+                self.admit_response(&id)?;
                 for result in results {
                     let call = self.calls.get_mut(result.request()).ok_or_else(|| {
                         KitError::invalid_state("OpenAI result references unknown native tool")
@@ -687,10 +685,10 @@ impl OpenAiDriver {
                         self.create_response(id).await?;
                     }
                 } else {
+                    self.pending.remove(&id);
                     self.control
                         .publish(SessionEvent::ControlApplied { command: id })?;
                 }
-                drop(admission);
             }
             SessionCommand::Cancel(target) => self.cancel(id, target).await?,
             SessionCommand::StartInput => {
@@ -723,18 +721,16 @@ impl OpenAiDriver {
                     .publish(SessionEvent::ControlApplied { command: id })?;
             }
             SessionCommand::EndInput => {
-                let admission = self.control.generation_admission()?;
-                self.pending.insert(
-                    id.clone(),
-                    OpenAiPending {
-                        admission,
-                        deadline: self.socket.operation_deadline()?,
-                        cancellations: Vec::new(),
-                    },
-                );
+                self.admit_response(&id)?;
+                if let Some(capture) = self.capture.take() {
+                    self.acknowledgements
+                        .entry("input_audio_buffer.committed".into())
+                        .or_default()
+                        .push_back((capture, self.socket.operation_deadline()?));
+                }
                 self.write(json!({"type":"input_audio_buffer.commit"}))
                     .await?;
-                self.write(json!({"type":"response.create","response":{"metadata":{"ai_kit_command":id.sequence().to_string()}}})).await?;
+                self.create_response(id).await?;
             }
             SessionCommand::DiscardInput => {
                 self.capture = None;
@@ -851,6 +847,10 @@ impl OpenAiDriver {
             },
         );
         Ok(id)
+    }
+
+    fn acknowledged(&mut self, key: &str) -> Option<CommandId> {
+        Some(self.acknowledgements.get_mut(key)?.pop_front()?.0)
     }
 
     async fn observe(&mut self, payload: &Value) -> Result<(), KitError> {
@@ -1005,7 +1005,11 @@ impl OpenAiDriver {
             "response.done" => self.response_done(payload).await?,
             "input_audio_buffer.committed" => {
                 let item = Self::required_text(payload, "item_id")?;
-                if let Some(command) = self.capture.take() {
+                let capture = match self.control.config().turn_detection() {
+                    SessionTurnDetection::Automatic => self.capture.take(),
+                    SessionTurnDetection::Manual => self.acknowledged(&event),
+                };
+                if let Some(command) = capture {
                     self.control
                         .reserve_history(item.len() + std::mem::size_of::<CommandId>())?;
                     self.input_commands.insert(item, command);
@@ -1013,11 +1017,7 @@ impl OpenAiDriver {
             }
             "input_audio_buffer.cleared" => {
                 self.capture_work.take();
-                if let Some((command, _)) = self
-                    .acknowledgements
-                    .get_mut(&event)
-                    .and_then(VecDeque::pop_front)
-                {
+                if let Some(command) = self.acknowledged(&event) {
                     self.control
                         .publish(SessionEvent::ControlApplied { command })?;
                 }
@@ -1030,10 +1030,8 @@ impl OpenAiDriver {
                     .ok_or_else(|| {
                         Self::protocol("truncate_content_index", "truncation omitted content index")
                     })?;
-                if let Some((command, _)) = self
-                    .acknowledgements
-                    .get_mut(&format!("truncate:{item}:{content_index}"))
-                    .and_then(VecDeque::pop_front)
+                if let Some(command) =
+                    self.acknowledged(&format!("truncate:{item}:{content_index}"))
                 {
                     self.control
                         .publish(SessionEvent::ControlApplied { command })?;

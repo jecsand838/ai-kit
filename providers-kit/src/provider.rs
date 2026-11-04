@@ -1052,7 +1052,7 @@ pub(crate) struct ProviderRuntime {
     backend: ProviderInner,
     state: Mutex<ProviderLifecycleState>,
     batches: Mutex<BatchRegistry>,
-    sessions: Mutex<Vec<Arc<crate::core::SessionControl>>>,
+    sessions: Mutex<(Vec<Arc<crate::core::SessionControl>>, Option<KitError>)>,
     changed: Notify,
 }
 
@@ -1090,7 +1090,7 @@ impl ProviderRuntime {
             backend,
             state: Mutex::new(ProviderLifecycleState::Open { admitted: 0 }),
             batches: Mutex::new(BatchRegistry::new()),
-            sessions: Mutex::new(Vec::new()),
+            sessions: Mutex::default(),
             changed: Notify::new(),
         }
     }
@@ -1125,18 +1125,25 @@ impl ProviderRuntime {
         // opening already admitted before sealing must still be tracked.
         let lifecycle = self.state();
         let sealed = !matches!(&*lifecycle, ProviderLifecycleState::Open { .. });
-        let mut sessions = self
+        let mut registry = self
             .sessions
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        sessions.retain(|session| !session.resource_settled());
+        let (sessions, failure) = &mut *registry;
+        sessions.retain(|session| match session.reap() {
+            Some(Err(error)) => {
+                error.accumulate(failure);
+                false
+            }
+            result => result.is_none(),
+        });
         if sessions.len() >= 1024 {
             return Err(KitError::invalid_state(
                 "provider session resource limit reached",
             ));
         }
         sessions.push(Arc::clone(&session));
-        drop(sessions);
+        drop(registry);
         drop(lifecycle);
         if sealed {
             session.seal();
@@ -1203,6 +1210,7 @@ impl ProviderRuntime {
             .sessions
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .0
             .clone();
         for session in sessions {
             session.seal();
@@ -1210,19 +1218,15 @@ impl ProviderRuntime {
         self.drain().await;
         // No admitted opener can register after draining. Keep concrete session
         // owners alive through bounded cleanup even when the public handle drops.
-        let sessions = std::mem::take(
+        let (sessions, mut session_failure) = std::mem::take(
             &mut *self
                 .sessions
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner),
         );
-        let mut session_failure: Option<KitError> = None;
         for session in sessions {
             if let Err(error) = session.close().await {
-                session_failure = Some(match session_failure {
-                    Some(primary) => primary.with_supplementary(error),
-                    None => error,
-                });
+                error.accumulate(&mut session_failure);
             }
         }
         // Admissions cover preparation, registration, execution and cleanup.

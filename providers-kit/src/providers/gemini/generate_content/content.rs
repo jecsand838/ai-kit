@@ -65,7 +65,7 @@ fn message_to_content(
         };
     }
     match message.role() {
-        Role::Tool => tool_result_content(model, message),
+        Role::Tool => tool_result_content(model, message.function_results()),
         Role::Assistant => assistant_content(message),
         Role::User => Ok(json!({
             "role": "user",
@@ -91,9 +91,9 @@ fn assistant_content(message: &Message<GenerationContinuation>) -> Result<Value,
     Ok(json!({"role": "model", "parts": parts}))
 }
 
-fn tool_result_content(
+pub(in crate::providers::gemini) fn tool_result_content<'a>(
     model: &ModelId,
-    message: &Message<GenerationContinuation>,
+    results: impl IntoIterator<Item = &'a crate::generation::FunctionResult>,
 ) -> Result<Value, KitError> {
     let supports_multimodal = matches!(
         model.as_str(),
@@ -103,7 +103,7 @@ fn tool_result_content(
             | "models/gemini-3-flash-preview"
     );
     let mut parts = Vec::new();
-    for result in message.function_results() {
+    for result in results {
         let mut content = Vec::new();
         let mut media = Vec::new();
         for part in result.content() {

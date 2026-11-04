@@ -13,6 +13,13 @@ guidance was committed first as `eca58db`. The following defects were reproduced
 through production wire paths before replacing the implementation. These are
 wire regressions, distinct from the direct-trait mock lane. All remain enabled.
 
+At PR #45 revision `1c537ae`, the following enabled session regressions failed before the fixes. Raw receipts are under `target/pr45-session-review-fixes/`.
+
+- `red-managed.log` — unrenderable Ollama and mixed OpenAI tool results received receipts, and 1,024 dropped idle owners exhausted registration.
+- The initial reaper panicked outside Tokio and retained failed cleanup slots. `red-reap-off-runtime.log` and `red-reap-cleanup.log` preserve those separate failures.
+- `red-openai.log` — a later capture stole an earlier acknowledgement, a final result admitted a competing input, sealing lost an admitted continuation, and queued receipts lacked individual unstarted failures.
+- `red-gemini.log` — a detached output transcript survived its generation boundary, and shutdown left queued commands unfinished.
+
 | Defect | Required regression | Recorded red behavior |
 | --- | --- | --- |
 | Missing/unknown Realtime terminal status became success | `session_lifecycle::session_refactor_rejects_missing_or_invalid_terminal_status` | `Completed` without affirmative status |

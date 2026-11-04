@@ -256,7 +256,9 @@ fn tool_result_message_to_value(
     }))
 }
 
-fn tool_result_content_value(content: &[ContentPart]) -> Result<Value, KitError> {
+pub(in crate::providers::anthropic) fn tool_result_content_value(
+    content: &[ContentPart],
+) -> Result<Value, KitError> {
     if let [ContentPart::Text { text }] = content {
         return Ok(Value::String(text.clone()));
     }

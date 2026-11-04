@@ -37,7 +37,8 @@ impl SessionBackend for OllamaSession {
         self.conversation.model_id()
     }
     fn split(&mut self) -> (Self::Commands<'_>, Self::Events<'_>) {
-        self.conversation.split()
+        self.conversation
+            .split(|_, result| crate::core::tool_result_text(result.content()).map(drop))
     }
     async fn close(self) -> Result<(), KitError> {
         self.conversation.close().await

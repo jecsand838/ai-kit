@@ -1831,6 +1831,13 @@ impl KitError {
         self
     }
 
+    pub(crate) fn accumulate(self, primary: &mut Option<Self>) {
+        *primary = Some(match primary.take() {
+            Some(primary) => primary.with_supplementary(self),
+            None => self,
+        });
+    }
+
     pub(crate) fn at_operation(mut self, operation: Operation) -> Self {
         self.context.operation = operation;
         if let Some(cause) = self.data.cause.take() {

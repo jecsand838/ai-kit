@@ -7,7 +7,7 @@ use futures_util::StreamExt;
 use crate::KitError;
 use crate::error::{ErrorKind, ErrorPhase, Operation, ValidationViolation};
 use crate::generation::{
-    ContentPart, FinishReason, GenerateEvent, GenerateRequest, GenerateResponse,
+    ContentPart, FinishReason, FunctionResult, GenerateEvent, GenerateRequest, GenerateResponse,
     GenerationContinuation, Message, RetainedSize, Role,
 };
 use crate::models::ModelBackend;
@@ -34,6 +34,7 @@ struct ManagedState {
 
 pub(crate) struct ManagedCommands<'a, M: ModelBackend<Continuation = GenerationContinuation>> {
     owner: &'a ManagedConversation<M>,
+    check: fn(&crate::ModelId, &FunctionResult) -> Result<(), KitError>,
 }
 
 impl<M: ModelBackend<Continuation = GenerationContinuation>> ManagedConversation<M> {
@@ -79,9 +80,12 @@ impl<M: ModelBackend<Continuation = GenerationContinuation>> ManagedConversation
     pub(crate) fn model_id(&self) -> &crate::ModelId {
         self.model.model_id()
     }
-    pub(crate) fn split(&mut self) -> (ManagedCommands<'_, M>, SessionEventPort<'_>) {
+    pub(crate) fn split(
+        &mut self,
+        check: fn(&crate::ModelId, &FunctionResult) -> Result<(), KitError>,
+    ) -> (ManagedCommands<'_, M>, SessionEventPort<'_>) {
         (
-            ManagedCommands { owner: self },
+            ManagedCommands { owner: self, check },
             SessionEventPort::new(&self.control),
         )
     }
@@ -384,7 +388,12 @@ impl<M: ModelBackend<Continuation = GenerationContinuation>> SessionCommands
                     ));
                 }
             }
-            SessionCommand::ToolResults(_) => {}
+            SessionCommand::ToolResults(results) => {
+                self.owner.control.validate_admission(&command)?;
+                for result in results {
+                    (self.check)(self.owner.model_id(), result.result())?;
+                }
+            }
             _ => {
                 return Err(KitError::unsupported(
                     ValidationViolation::Unsupported {

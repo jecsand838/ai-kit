@@ -354,16 +354,7 @@ impl GeminiProtocol {
             tokio::select! {
                 biased;
                 () = control.stopped() => return Ok(()),
-                () = control.sealed(), if deadline.is_none() => {
-                    while let Some((command, _)) = control.take_command() {
-                        control.publish(SessionEvent::CommandFailed {
-                            command,
-                            error: KitError::closed("Gemini Live provider sealed before command started"),
-                            not_started: true,
-                        })?;
-                    }
-                    return Ok(());
-                },
+                () = control.sealed(), if deadline.is_none() => return Ok(()),
                 command = control.next_command() => {
                     let Some((id, command)) = command else { return Ok(()); };
                     if control.is_sealed() {
@@ -563,7 +554,6 @@ impl GeminiProtocol {
                 }
             }
         };
-        self.output_transcript.clear(control)?;
         let response = control.next_response()?;
         let segment = control.next_segment()?;
         control.publish(SessionEvent::ResponseStarted {
@@ -859,25 +849,8 @@ impl GeminiProtocol {
         if let Some(transcription) = content.get("outputTranscription")
             && let Some((text, finished)) = GeminiTranscript::observation(transcription)?
         {
-            if !matches!(self.generation, GeminiGeneration::Active { .. })
-                && !matches!(self.capture, GeminiCapture::Idle)
-            {
-                self.start(control, None)?;
-            }
-            let (response, segment) = match &self.generation {
-                GeminiGeneration::Active {
-                    response, segment, ..
-                }
-                | GeminiGeneration::Settled { response, segment } => {
-                    (response.clone(), segment.clone())
-                }
-                GeminiGeneration::Idle => {
-                    return Err(Self::protocol_error(
-                        "Gemini Live output transcription has no response",
-                        transcription,
-                    ));
-                }
-            };
+            let response = self.start(control, None)?;
+            let segment = self.segment()?.clone();
             self.output_transcript.publish(
                 control,
                 TranscriptionSource::Output { response, segment },
@@ -956,6 +929,7 @@ impl GeminiProtocol {
                             KitError::invalid_state("Gemini Live boundary identity size overflow")
                         })?,
                 )?;
+                self.output_transcript.clear(control)?;
                 control.publish(SessionEvent::ResponseFinished {
                     response: response.clone(),
                     outcome,

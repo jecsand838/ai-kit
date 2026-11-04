@@ -594,6 +594,7 @@ async fn live_sealing_after_acceptance_reports_unstarted_work_explicitly() {
                 ))
                 .await
                 .unwrap();
+            let end = commands.submit(SessionCommand::EndAudioStream).await.unwrap();
             let shutdown = provider.shutdown();
             tokio::pin!(shutdown);
             poll_fn(|cx| {
@@ -601,32 +602,11 @@ async fn live_sealing_after_acceptance_reports_unstarted_work_explicitly() {
                 Poll::Ready(())
             })
             .await;
-            let mut failed = false;
-            while let Some(event) = events.recv().await {
-                match event {
-                    SessionEvent::CommandFailed {
-                        command,
-                        not_started: true,
-                        ..
-                    } => {
-                        assert_eq!(command, receipt);
-                        failed = true;
-                    }
-                    SessionEvent::Terminated {
-                        unfinished_commands,
-                        ..
-                    } => {
-                        assert!(!unfinished_commands.contains(&receipt));
-                    }
-                    unexpected => panic!(
-                        "sealed accepted work must fail without network mutation: {unexpected:?}"
-                    ),
-                }
+            for expected in [receipt, end] {
+                assert!(matches!(events.recv().await, Some(SessionEvent::CommandFailed { command, not_started: true, .. }) if command == expected));
             }
-            assert!(
-                failed,
-                "accepted unstarted operation must have an explicit failure"
-            );
+            assert!(matches!(events.recv().await, Some(SessionEvent::Terminated { unfinished_commands, .. }) if unfinished_commands.is_empty()));
+            assert!(events.recv().await.is_none());
             shutdown.await.unwrap();
         }
         session.close().await.unwrap();
@@ -645,6 +625,8 @@ async fn live_automatic_output_transcription_can_precede_audio_parts() {
             GeminiLiveServer::send(&mut socket,json!({"serverContent":{"outputTranscription":{"text":"first transcription"}}})).await;
             GeminiLiveServer::send(&mut socket,json!({"serverContent":{"modelTurn":{"parts":[{"inlineData":{"mimeType":"audio/pcm;rate=24000","data":"AQIDBA=="}}]}}})).await;
             GeminiLiveServer::send(&mut socket,json!({"serverContent":{"generationComplete":true}})).await;
+            // Deliberately invalid: all output transcription must precede generationComplete.
+            GeminiLiveServer::send(&mut socket,json!({"serverContent":{"outputTranscription":{"finished":true}}})).await;
             GeminiLiveServer::expect_close(&mut socket).await;
         }).await;
         let (provider, model) = server.model();
@@ -662,6 +644,8 @@ async fn live_automatic_output_transcription_can_precede_audio_parts() {
                     unexpected => panic!("independent output transcription must start its generation: {unexpected:?}"),
                 }
             }
+            assert!(matches!(events.recv().await, Some(SessionEvent::Terminated { reason, .. }) if matches!(reason.kind(), ErrorKind::InvalidResponse(_))));
+            assert!(events.recv().await.is_none());
         }
         session.close().await.unwrap();
         provider.shutdown().await.unwrap();
@@ -1240,6 +1224,7 @@ async fn live_cancelled_tool_can_be_reissued_as_a_distinct_recovery_obligation()
             assert_eq!(GeminiLiveServer::receive(&mut socket).await["realtimeInput"]["audio"]["data"], "AQIDBA==");
             assert_eq!(GeminiLiveServer::receive(&mut socket).await, json!({"realtimeInput":{"activityEnd":{}}}));
             GeminiLiveServer::send(&mut socket, json!({"toolCallCancellation":{"ids":["cancelled-call"]}})).await;
+            GeminiLiveServer::send(&mut socket, json!({"serverContent":{"outputTranscription":{"text":"unfinished"}}})).await;
             GeminiLiveServer::send(&mut socket, json!({"serverContent":{"interrupted":true}})).await;
             GeminiLiveServer::send(&mut socket, json!({"serverContent":{"turnComplete":true}})).await;
             GeminiLiveServer::send(&mut socket, json!({"serverContent":{"inputTranscription":{"text":"Please say audio input received."}}})).await;
@@ -1251,7 +1236,7 @@ async fn live_cancelled_tool_can_be_reissued_as_a_distinct_recovery_obligation()
             }]}}), "only the fresh obligation may reach the native socket");
             GeminiLiveServer::send(&mut socket, json!({"serverContent":{
                 "modelTurn":{"parts":[{"inlineData":{"mimeType":"audio/pcm;rate=24000","data":"AQIDBA=="}}]},
-                "outputTranscription":{"text":"audio input received"}
+                "outputTranscription":{"text":"audio input received","finished":true}
             }})).await;
             GeminiLiveServer::send(&mut socket, json!({"serverContent":{"generationComplete":true}})).await;
             GeminiLiveServer::send(&mut socket, json!({"serverContent":{"turnComplete":true}})).await;
@@ -1273,6 +1258,7 @@ async fn live_cancelled_tool_can_be_reissued_as_a_distinct_recovery_obligation()
             commands.submit(SessionCommand::Audio { media_type:"audio/pcm;rate=16000".into(), data:vec![1,2,3,4] }).await.unwrap();
             let activity = commands.submit(SessionCommand::EndInput).await.unwrap();
             let mut recovery = None;
+            let mut original_segment = None;
             let mut invalidated = false;
             let mut interrupted = false;
             let mut old_finished = false;
@@ -1327,7 +1313,12 @@ async fn live_cancelled_tool_can_be_reissued_as_a_distinct_recovery_obligation()
                         assert_eq!(text, "Please say audio input received.");
                         input_observed = true;
                     }
-                    SessionEvent::Transcription { source:TranscriptionSource::Output { response, .. }, text, .. } => {
+                    SessionEvent::Transcription { source:TranscriptionSource::Output { response, segment }, text, finalized:false } if response == original => {
+                        assert_eq!(text, "unfinished");
+                        assert!(original_segment.replace(segment).is_none());
+                    }
+                    SessionEvent::Transcription { source:TranscriptionSource::Output { response, segment }, text, finalized:true } => {
+                        assert_ne!(original_segment.as_ref().expect("original transcript segment"), &segment);
                         assert!(submitted);
                         assert_eq!(recovery.as_ref(), Some(&response));
                         assert_eq!(text, "audio input received");

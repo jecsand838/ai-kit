@@ -14,6 +14,7 @@ use crate::session::{
     SessionTurnDetection,
 };
 
+use super::generate_content::tool_result_content;
 use super::models::GeminiModel;
 use protocol::GeminiProtocol;
 
@@ -106,7 +107,8 @@ impl SessionBackend for GeminiSession {
     fn split(&mut self) -> (Self::Commands<'_>, Self::Events<'_>) {
         match &mut self.mode {
             GeminiMode::Conversation(session) => {
-                let (commands, events) = session.split();
+                let (commands, events) =
+                    session.split(|model, result| tool_result_content(model, [result]).map(drop));
                 (GeminiCommands::Conversation(commands), events)
             }
             GeminiMode::Realtime(session) => {

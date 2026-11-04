@@ -7,6 +7,7 @@ mod request;
 mod tools;
 
 pub(crate) use body::build_message_body;
+pub(super) use body::tool_result_content_value;
 pub(crate) use normalize::{
     blocks_to_portable, normalize_generate_response, stop_reason_to_finish_reason,
     usage_from_anthropic,

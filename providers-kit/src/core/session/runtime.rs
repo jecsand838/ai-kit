@@ -40,6 +40,7 @@ struct SessionState {
     sequence: u64,
     commands: VecDeque<(CommandId, SessionCommand, usize)>,
     events: VecDeque<(SessionEvent, usize)>,
+    unstarted: VecDeque<CommandId>,
     terminal: Option<SessionEvent>,
     terminated: bool,
     stopped: bool,
@@ -95,6 +96,7 @@ impl SessionControl {
                 sequence: 0,
                 commands: VecDeque::new(),
                 events: VecDeque::new(),
+                unstarted: VecDeque::new(),
                 terminal: None,
                 terminated: false,
                 stopped: false,
@@ -168,9 +170,12 @@ impl SessionControl {
         Ok(())
     }
 
-    pub(crate) fn accept(&self, command: SessionCommand) -> Result<CommandId, KitError> {
-        let bytes = Self::command_bytes(&command)?;
-        let mut state = self.state();
+    fn admission(
+        &self,
+        command: &SessionCommand,
+    ) -> Result<(MutexGuard<'_, SessionState>, usize), KitError> {
+        let bytes = Self::command_bytes(command)?;
+        let state = self.state();
         let control = matches!(
             command,
             SessionCommand::Cancel(_)
@@ -214,7 +219,7 @@ impl SessionControl {
                 "one generation or required tool result set is already active",
             ));
         }
-        if let SessionCommand::ToolResults(results) = &command {
+        if let SessionCommand::ToolResults(results) = command {
             if results.is_empty() {
                 return Err(KitError::invalid_state(
                     "tool result batch must not be empty",
@@ -254,6 +259,15 @@ impl SessionControl {
         if retained > byte_limit || state.records >= record_limit {
             return Err(Self::limit("session.retained", BYTE_LIMIT));
         }
+        Ok((state, bytes))
+    }
+
+    pub(crate) fn validate_admission(&self, command: &SessionCommand) -> Result<(), KitError> {
+        self.admission(command).map(drop)
+    }
+
+    pub(crate) fn accept(&self, command: SessionCommand) -> Result<CommandId, KitError> {
+        let (mut state, bytes) = self.admission(&command)?;
         let id = CommandId::new(self.id.clone(), Self::sequence(&mut state)?)?;
         if let SessionCommand::ToolResults(results) = &command {
             for result in results {
@@ -280,7 +294,10 @@ impl SessionControl {
         state.records += 1;
         state.unfinished.insert(id.clone());
         state.known_commands.insert(id.clone());
-        if matches!(command, SessionCommand::Input(_)) {
+        if matches!(
+            command,
+            SessionCommand::Input(_) | SessionCommand::ToolResults(_)
+        ) {
             state.generation_commands.insert(id.clone());
         }
         state.commands.push_back((id.clone(), command, bytes));
@@ -731,6 +748,15 @@ impl SessionControl {
         }
         state.terminated = true;
         state.continuity = continuity;
+        if self.config.profile() == crate::session::SessionProfile::Realtime {
+            // Transfer only queued receipts to the terminal drain. The driver owns popped work.
+            while let Some((id, _, bytes)) = state.commands.pop_front() {
+                state.retained -= bytes;
+                state.unfinished.remove(&id);
+                state.generation_commands.remove(&id);
+                state.unstarted.push_back(id);
+            }
+        }
         state.terminal = Some(SessionEvent::Terminated {
             reason,
             continuity,
@@ -798,7 +824,12 @@ impl SessionControl {
                 .task
                 .as_mut()
                 .ok_or_else(|| KitError::invalid_state("session task lease missing"))?;
-            let result = match tokio::time::timeout(self.timeout, &mut *task).await {
+            let joined = if task.is_finished() {
+                Ok((&mut *task).await)
+            } else {
+                tokio::time::timeout(self.timeout, &mut *task).await
+            };
+            let result = match joined {
                 Ok(Ok(result)) => result,
                 Ok(Err(error)) if error.is_cancelled() && self.is_stopped() => Ok(()),
                 Ok(Err(_)) => Err(KitError::invalid_state(
@@ -832,9 +863,14 @@ impl SessionControl {
         result
     }
 
-    pub(crate) fn resource_settled(&self) -> bool {
+    pub(crate) fn reap(&self) -> Option<Result<(), KitError>> {
+        use futures_util::FutureExt;
         let state = self.state();
-        state.terminated && state.task.is_none() && !state.joining
+        let reclaim = (state.terminated || state.stopped)
+            && !state.joining
+            && state.task.as_ref().is_none_or(JoinHandle::is_finished);
+        drop(state);
+        reclaim.then(|| self.join().now_or_never()).flatten()
     }
 
     fn state(&self) -> MutexGuard<'_, SessionState> {
@@ -935,6 +971,14 @@ impl SessionEvents for SessionEventPort<'_> {
                         tool.delivered = true;
                     }
                     return Some(event);
+                }
+                if let Some(command) = state.unstarted.pop_front() {
+                    return Some(SessionEvent::CommandFailed {
+                        command,
+                        error: KitError::closed("session ended before command dispatch")
+                            .at_operation(Operation::SessionSend),
+                        not_started: true,
+                    });
                 }
                 if let Some(terminal) = state.terminal.take() {
                     return Some(terminal);

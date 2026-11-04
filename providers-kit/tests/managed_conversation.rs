@@ -248,6 +248,16 @@ async fn all_conversation_providers_retain_two_exchanges_and_exact_tool_replay()
                 .unwrap();
             let observed = Observation::completed(&mut events, "").await;
             let (request, call) = observed.tool.expect("tool-only response is executable");
+            if matches!(fixture, FixtureProvider::Ollama) {
+                let url = server.base_url();
+                let image = ContentPart::ImageUrl { url };
+                let image = FunctionResult::new(None, call.name(), vec![image], false).unwrap();
+                let image = SessionToolResult::new(request.clone(), image);
+                let batch = SessionCommand::ToolResults(vec![image]);
+                let error = commands.submit(batch).await.unwrap_err();
+                assert_eq!(error.kind(), providers_kit::error::ErrorKind::Unsupported);
+                assert_eq!(server.requests().len(), 2);
+            }
             let invalid = FunctionResult::new(
                 call.id().map(str::to_owned),
                 "wrong_name",
@@ -402,10 +412,11 @@ async fn idle_conversation_has_no_generation_admission_and_seal_drains_permanent
     let model = provider
         .model(ModelId::new("claude-session").unwrap())
         .unwrap();
-    let mut session = model
-        .open_session(SessionConfig::new(SessionProfile::Conversation))
-        .await
-        .unwrap();
+    let config = SessionConfig::new(SessionProfile::Conversation);
+    for _ in 0..1024 {
+        drop(model.open_session(config.clone()).await.unwrap());
+    }
+    let mut session = model.open_session(config).await.unwrap();
     tokio::time::timeout(Duration::from_secs(2), provider.shutdown())
         .await
         .expect("idle session must not retain generation admission")
@@ -726,6 +737,7 @@ async fn full_observation_queue_never_accepts_an_unreported_command() {
 
 #[tokio::test]
 async fn active_owner_drop_without_event_consumption_releases_transport_before_shutdown() {
+    use futures_util::FutureExt;
     use std::sync::Arc;
     use support::scripted_http::RecordedRequest;
     use tokio::io::AsyncReadExt;
@@ -782,7 +794,7 @@ async fn active_owner_drop_without_event_consumption_releases_transport_before_s
                 drop(provider);
                 None
             } else {
-                Some(provider)
+                Some((provider, model))
             };
             assert_eq!(
                 tokio::time::timeout(Duration::from_secs(3), tasks.join_next())
@@ -793,7 +805,11 @@ async fn active_owner_drop_without_event_consumption_releases_transport_before_s
                 0,
                 "drop cancels the actual opening transport"
             );
-            if let Some(provider) = remaining_provider {
+            if let Some((provider, model)) = remaining_provider {
+                let config = SessionConfig::new(SessionProfile::Conversation);
+                let reopen = move || model.open_session(config).now_or_never().unwrap();
+                let idle = std::thread::spawn(reopen).join().unwrap().unwrap();
+                idle.close().await.unwrap();
                 tokio::time::timeout(Duration::from_secs(3), provider.shutdown())
                     .await
                     .unwrap()
@@ -867,6 +883,17 @@ async fn multi_tool_batches_are_atomic_and_continue_only_after_the_required_set(
         )
         .unwrap();
         let a = SessionToolResult::new(calls[0].0.clone(), result_a.clone());
+        let audio = ContentPart::Audio {
+            media_type: "audio/wav".into(),
+            data: vec![0],
+        };
+        let call_id = result_b.call_id().map(str::to_owned);
+        let result = FunctionResult::new(call_id, "lookup", vec![audio], false).unwrap();
+        let bad_b = SessionToolResult::new(calls[1].0.clone(), result);
+        let mixed = SessionCommand::ToolResults(vec![a.clone(), bad_b]);
+        let error = commands.submit(mixed).await.unwrap_err();
+        assert_eq!(error.kind(), providers_kit::error::ErrorKind::Unsupported);
+        assert_eq!(server.requests().len(), 1);
         let foreign = SessionToolResult::new(
             ToolRequestId::new("other-session", NonZeroU64::new(1).unwrap()).unwrap(),
             result_b.clone(),

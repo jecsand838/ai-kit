@@ -81,8 +81,7 @@ accumulated within their input transcript or output response/segment; a finished
 marker publishes the full accumulated snapshot, including when that marker has
 no text. The next input observation after a finished unattributed transcript,
 including a final-only observation, starts a new transcript with `command: None`.
-Buffer ownership transfers into the final
-observation under the shared retention budget without copying the full text.
+An explicit final marker transfers the buffer into the observation. An unfinished output buffer is released at generation completion or interruption, after that turn's last output transcript. [Gemini Live server content](https://ai.google.dev/api/live#BidiGenerateContentServerContent)
 
 This approved replacement supersedes the earlier active Gemini-session
 withdrawal. The previous manual/automatic audio, transcription, function,

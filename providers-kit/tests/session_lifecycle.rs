@@ -513,8 +513,9 @@ impl InteractiveServer {
             ] {Self::send_json(&mut socket,payload).await;}
             assert_eq!(Self::receive_json(&mut socket).await,serde_json::json!({"type":"input_audio_buffer.append","audio":"BAUG"}));
             Self::expect_type(&mut socket,"input_audio_buffer.commit").await;
-            Self::send_json(&mut socket,serde_json::json!({"type":"input_audio_buffer.committed","item_id":"input1"})).await;
             Self::start_response(&mut socket,"r2").await;
+            Self::expect_type(&mut socket,"input_audio_buffer.append").await; // B has started before A's commit acknowledgement.
+            Self::send_json(&mut socket,serde_json::json!({"type":"input_audio_buffer.committed","item_id":"input1"})).await;
             Self::send_json(&mut socket,serde_json::json!({"type":"response.function_call_arguments.done","response_id":"r2","item_id":"tool1","call_id":"call_1","name":"lookup","arguments":"{\"key\":\"value\"}"})).await;
             Self::send_json(&mut socket,serde_json::json!({"type":"response.done","response":{"id":"r2","status":"completed"}})).await;
             let result=Self::receive_json(&mut socket).await;
@@ -689,7 +690,11 @@ impl InteractiveServer {
         SessionCommand::Input(Message::user_text(text).unwrap())
     }
 
-    async fn answer_function(session: &mut Session, request: ToolRequestId, call: &FunctionCall) {
+    async fn answer_function(
+        session: &mut Session,
+        request: ToolRequestId,
+        call: &FunctionCall,
+    ) -> providers_kit::session::CommandId {
         let wrong = FunctionResult::new(
             call.id().map(str::to_owned),
             "other",
@@ -724,7 +729,7 @@ impl InteractiveServer {
                 request, result,
             )]))
             .await
-            .unwrap();
+            .unwrap()
     }
 
     async fn send_input(session: &mut Session, input: SessionCommand) {
@@ -1352,8 +1357,11 @@ async fn openai_audio_transcription_functions_and_cancellation_are_normalized() 
         let capture=session.split().0.submit(SessionCommand::StartInput).await.unwrap();
         InteractiveServer::send_input(&mut session,InteractiveServer::audio("audio/pcm;rate=24000",vec![4,5,6])).await;
         InteractiveServer::send_input(&mut session,SessionCommand::EndInput).await;
+        InteractiveServer::send_input(&mut session,SessionCommand::StartInput).await;
+        InteractiveServer::send_input(&mut session,InteractiveServer::audio("audio/pcm;rate=24000",vec![1,2])).await;
         let (request,call)=match InteractiveServer::next_event(&mut session).await {SessionEvent::ToolRequested{request,call,..}=>(request,call),event=>panic!("expected tool: {event:?}")};
         InteractiveServer::answer_function(&mut session,request,&call).await;
+        assert_eq!(session.split().0.submit(InteractiveServer::text("overlapping continuation")).await.unwrap_err().kind(), ErrorKind::InvalidState);
         assert!(matches!(InteractiveServer::next_event(&mut session).await,SessionEvent::ResponseFinished{outcome:ResponseOutcome::Completed,..}));
         assert!(matches!(InteractiveServer::next_event(&mut session).await,SessionEvent::ResponseFinished{outcome:ResponseOutcome::Completed,..}));
         assert!(matches!(InteractiveServer::next_event(&mut session).await,SessionEvent::Transcription{source:providers_kit::session::TranscriptionSource::Input{command:Some(actual)},text,..} if actual==capture && text=="caller"));
@@ -1364,7 +1372,6 @@ async fn openai_audio_transcription_functions_and_cancellation_are_normalized() 
         session.split().0.submit(SessionCommand::Cancel(CancelTarget::Command(command))).await.unwrap();
         assert!(matches!(InteractiveServer::next_event(&mut session).await,SessionEvent::ResponseFinished{outcome:ResponseOutcome::Cancelled,..}));
         assert!(matches!(InteractiveServer::next_event(&mut session).await,SessionEvent::Cancellation{resolution:CancellationResolution::Stopped,..}));
-        InteractiveServer::send_input(&mut session,SessionCommand::StartInput).await;
         assert!(session.split().0.submit(InteractiveServer::audio("audio/pcm;rate=24000",vec![0;6*1024*1024])).await.is_err());
         server.finish_session(session,provider).await;
     }).await.expect("OpenAI lifecycle remains bounded");
@@ -1563,6 +1570,7 @@ async fn openai_repeated_input_discard_preserves_each_acknowledgement() {
 #[tokio::test]
 async fn openai_completed_response_winning_cancellation_keeps_tools_valid() {
     tokio::time::timeout(Duration::from_secs(10),async {
+        let (runtime, seal) = oneshot::channel::<Provider>();
         let server=InteractiveServer::start(|mut socket|async move {
             InteractiveServer::receive_setup(&mut socket).await;
             InteractiveServer::acknowledge_setup(&mut socket).await;
@@ -1571,16 +1579,29 @@ async fn openai_completed_response_winning_cancellation_keeps_tools_valid() {
             InteractiveServer::expect_type(&mut socket,"response.cancel").await;
             InteractiveServer::send_json(&mut socket,serde_json::json!({"type":"response.function_call_arguments.done","response_id":"race-completed","item_id":"race-tool","call_id":"race-call","name":"lookup","arguments":"{\"key\":\"race\"}"})).await;
             InteractiveServer::send_json(&mut socket,serde_json::json!({"type":"response.done","response":{"id":"race-completed","status":"completed"}})).await;
+            InteractiveServer::expect_type(&mut socket,"input_audio_buffer.append").await;
+            InteractiveServer::send_json(&mut socket,serde_json::json!({"type":"response.created","response":{"id":"vad","status":"in_progress"}})).await;
+            assert_eq!(InteractiveServer::receive_json(&mut socket).await["item"]["type"], "function_call_output");
+            assert!(seal.await.unwrap().shutdown().now_or_never().is_none());
+            InteractiveServer::send_json(&mut socket,serde_json::json!({"type":"response.done","response":{"id":"vad","status":"completed"}})).await;
+            InteractiveServer::start_response(&mut socket,"continuation").await;
+            InteractiveServer::send_json(&mut socket,serde_json::json!({"type":"response.done","response":{"id":"continuation","status":"completed"}})).await;
             InteractiveServer::expect_close(&mut socket).await;
         }).await;
         let (provider,model)=server.openai_model();
-        let mut session=model.open_session(InteractiveServer::function_config(vec![InteractiveServer::lookup_function()],None).unwrap()).await.unwrap();
+        assert!(runtime.send(provider.clone()).is_ok());
+        let mut session=model.open_session(InteractiveServer::function_config(vec![InteractiveServer::lookup_function()],None).unwrap().with_input_audio("audio/pcm;rate=24000",false).unwrap()).await.unwrap();
         session.split().0.submit(InteractiveServer::text("cancel race")).await.unwrap();
         let response=match session.split().1.recv().await.unwrap(){SessionEvent::ResponseStarted{response,..}=>response,event=>panic!("{event:?}")};
         session.split().0.submit(SessionCommand::Cancel(CancelTarget::Response(response))).await.unwrap();
-        let observed=session.split().1.recv().await;
+        let Some(SessionEvent::ToolRequested {request, call, ..}) = session.split().1.recv().await else { panic!("completed tool must survive cancellation") };
+        InteractiveServer::send_input(&mut session, InteractiveServer::audio("audio/pcm;rate=24000", vec![1,2])).await;
+        while !matches!(session.split().1.recv().await.unwrap(), SessionEvent::ResponseStarted { command: None, .. }) {}
+        let result = InteractiveServer::answer_function(&mut session, request, &call).await;
+        assert!(matches!(InteractiveServer::next_event(&mut session).await, SessionEvent::ResponseFinished {outcome:ResponseOutcome::Completed,..}));
+        assert!(matches!(session.split().1.recv().await,Some(SessionEvent::ResponseStarted{command:Some(id),..}) if id==result));
+        assert!(matches!(InteractiveServer::next_event(&mut session).await, SessionEvent::ResponseFinished {outcome:ResponseOutcome::Completed,..}));
         server.finish_session(session,provider).await;
-        assert!(matches!(observed,Some(SessionEvent::ToolRequested{..})),"completion won cancellation; its executable tool cannot be suppressed: {observed:?}");
     }).await.expect("cancel/completion race is bounded");
 }
 
@@ -1628,7 +1649,8 @@ async fn openai_unacknowledged_control_has_a_bounded_timeout() {
             InteractiveServer::acknowledge_setup(&mut socket).await;
             InteractiveServer::expect_type(&mut socket,"input_audio_buffer.clear").await;
             // Native control never acknowledges; the owner must bound this wait.
-            InteractiveServer::expect_close(&mut socket).await;
+            assert!(socket.next().await.unwrap().unwrap().is_close());
+            socket.get_mut().write_all(&[0xff, 0]).await.unwrap(); // Invalid peer close reply.
         }).await;
         let timeout=Duration::from_millis(200);
         let provider=Provider::from_config(ProviderConfig::new(ProviderKind::OpenAi(OpenAiConfig::new(ApiKey::new("fixture-key").unwrap()).with_base_url(server.base_url.clone())),TransportConfig::new(timeout,timeout,timeout,providers_kit::config::RetryPolicy::default()).unwrap())).unwrap();
@@ -1636,7 +1658,15 @@ async fn openai_unacknowledged_control_has_a_bounded_timeout() {
         let mut session=model.open_session(SessionConfig::new(SessionProfile::Realtime).with_input_audio("audio/pcm;rate=24000",false).unwrap()).await.unwrap();
         let command=session.split().0.submit(SessionCommand::DiscardInput).await.unwrap();
         let observed=tokio::time::timeout(Duration::from_secs(1),session.split().1.recv()).await;
-        server.finish_session(session,provider).await;
+        let cleanup = session.close().await.unwrap_err();
+        server.finish().await;
+        assert_eq!(cleanup.context().operation, Operation::SessionClose);
+        let mut held = Vec::new();
+        for _ in 0..1024 {
+            held.push(model.open_session(SessionConfig::new(SessionProfile::Conversation)).await.unwrap());
+        }
+        let shutdown = provider.shutdown().await.unwrap_err();
+        assert_eq!((shutdown.context().operation, shutdown.context().phase, shutdown.kind()), (Operation::Shutdown, cleanup.context().phase, cleanup.kind()));
         assert!(matches!(observed,Ok(Some(SessionEvent::Terminated{reason,unfinished_commands,..})) if reason.kind()==ErrorKind::Timeout && unfinished_commands.contains(&command)),"unacknowledged accepted control must time out with its unfinished receipt");
     }).await.expect("control acknowledgement proof is bounded");
 }
@@ -1654,10 +1684,14 @@ async fn openai_sealing_settles_accepted_input_that_never_started() {
         let (provider,model)=server.openai_model();
         let mut session=model.open_session(SessionConfig::new(SessionProfile::Realtime)).await.unwrap();
         let accepted=session.split().0.submit(InteractiveServer::text("accepted before seal")).await.unwrap();
+        let cancel=session.split().0.submit(SessionCommand::Cancel(CancelTarget::Command(accepted.clone()))).await.unwrap();
         provider.shutdown().await.unwrap();
-        let first=session.split().1.recv().await;
+        for expected in [accepted, cancel] {
+            assert!(matches!(session.split().1.recv().await,Some(SessionEvent::CommandFailed{command,not_started:true,..}) if command==expected));
+        }
+        assert!(matches!(session.split().1.recv().await,Some(SessionEvent::Terminated{unfinished_commands,..}) if unfinished_commands.is_empty()));
+        assert!(session.split().1.recv().await.is_none());
         session.close().await.unwrap();server.finish().await;
-        assert!(matches!(first,Some(SessionEvent::CommandFailed{command,not_started:true,..}) if command==accepted),"accepted work that never started needs explicit failure before terminal");
     }).await.expect("seal-before-start settlement is bounded");
 }
 

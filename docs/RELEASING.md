@@ -9,12 +9,16 @@ default branch.
 
 All five crates are published at **0.0.2**; the
 [v0.0.2 release](https://github.com/jecsand838/ai-kit/releases/tag/v0.0.2) records
-its source revision and qualification declaration. The procedure below applies
-to subsequent releases. Preparing or merging a release change does not publish
-packages or establish release qualification. After merge, complete normal
-qualification for the exact selected `main` revision before manually dispatching
-the prepared version with **initial_release_override disabled** and the required
-qualification evidence.
+its source revision and qualification declaration. The five manifests and
+manual workflow default are prepared for **0.0.3**. After the preparation PR
+merges, qualify the exact selected `main` revision, record its evidence URL,
+and dispatch `0.0.3` with **initial_release_override disabled**.
+
+The breaking change in this candidate is the Provider Session API. Existing
+Realtime callers must select a profile and split the Session to submit commands
+and receive events. Follow the [Session migration guide](../providers-kit/README.md#breaking-session-migration).
+The scoped Session results on [PR #45](https://github.com/jecsand838/ai-kit/pull/45)
+apply to the revisions recorded there. The release requires its own qualification.
 
 ## Historical one-time initial 0.0.1 release
 

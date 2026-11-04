@@ -88,9 +88,10 @@ Tokio and serde_json; add those dependencies when copying it into your applicati
 
 ## Choose features and backends
 
-- Provider operations depend on the selected provider and model. Supplied
-  Sessions currently support OpenAI only; see the
-  [Provider guide](providers-kit/README.md) for support boundaries.
+- In the 0.0.3 candidate, OpenAI, Anthropic, Gemini, and Ollama support managed
+  Conversation sessions. OpenAI and Gemini also support native Realtime sessions
+  on compatible models. The [Provider migration guide](providers-kit/README.md#breaking-session-migration)
+  shows how to select a profile and use the borrowed command and event halves.
 - MCP serving requires tools-kit's optional `mcp-server` feature. The
   [Tool guide](tools-kit/README.md) explains client and server ownership.
 - Storage includes LanceDB and embedded Lance in its base build. Additional
@@ -127,8 +128,8 @@ links above identify available versions and their released API documentation.
 All five crates are published at `0.0.2`; see the
 [v0.0.2 release](https://github.com/jecsand838/ai-kit/releases/tag/v0.0.2) for its
 source revision and recorded qualification scope. The installation example
-above pins that release. The repository examples follow `main`, including
-changes made after publication. Maintainers publish selected revisions through
+above pins that release. The repository examples target the upcoming `0.0.3`.
+Maintainers publish selected revisions through
 the manual [release process](docs/RELEASING.md) after normal qualification;
 preparing a release does not publish packages or establish qualification.
 

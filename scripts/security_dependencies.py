@@ -19,10 +19,10 @@ POLICY = "scripts/security_exceptions.toml"
 ADVISORY = re.compile(r"RUSTSEC-[0-9]{4}-[0-9]{4}")
 WORKSPACE_PACKAGES = ("providers-kit", "storage-kit", "tools-kit", "agents-kit", "app-kit")
 WORKSPACE_PATHS = {
-    "agents-kit": {"path": "agents-kit", "version": "=0.0.2"},
-    "providers-kit": {"path": "providers-kit", "version": "0.0.2"},
-    "storage-kit": {"path": "storage-kit", "version": "0.0.2", "default-features": False},
-    "tools-kit": {"path": "tools-kit", "version": "0.0.2"},
+    "agents-kit": {"path": "agents-kit", "version": "=0.0.3"},
+    "providers-kit": {"path": "providers-kit", "version": "0.0.3"},
+    "storage-kit": {"path": "storage-kit", "version": "0.0.3", "default-features": False},
+    "tools-kit": {"path": "tools-kit", "version": "0.0.3"},
 }
 
 

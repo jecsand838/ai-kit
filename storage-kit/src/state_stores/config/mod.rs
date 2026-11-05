@@ -18,9 +18,11 @@ pub use sqlite::{SqliteStateStoreConfig, SqliteStateStoreLocation};
 
 /// Selects and configures one built-in state-store implementation.
 ///
-/// Lance is always compiled. Redb, PostgreSQL, and SQLite/Turso require
-/// `redb`, `postgres`, and `sqlite`. These values contain configuration only; pass
-/// one to [`crate::StateStore::connect`] to obtain a shared store.
+/// Lance is always compiled. Redb and PostgreSQL configuration remains available
+/// without `redb` or `postgres`, but opening those implementations requires the
+/// corresponding feature. The SQLite/Turso variant and its configuration require
+/// `sqlite`. These values contain configuration only; pass one to
+/// [`crate::StateStore::connect`] to obtain a shared store.
 ///
 /// # Examples
 ///

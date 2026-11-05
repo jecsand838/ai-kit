@@ -212,10 +212,12 @@ impl RedbStateStoreConfig {
 
     /// Replaces the operation timeout.
     ///
+    /// Stores whole milliseconds, discarding any fractional millisecond.
+    ///
     /// # Errors
     ///
-    /// Returns an invalid-config error when the timeout is zero or cannot be
-    /// represented as milliseconds.
+    /// Returns [`StateStoreError::InvalidConfig`] for zero, sub-millisecond
+    /// durations, or whole-millisecond values exceeding `u64::MAX`.
     ///
     /// # Examples
     ///

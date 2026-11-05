@@ -7,9 +7,9 @@ use crate::{Password, StateStoreError};
 const DEFAULT_POSTGRES_PORT: u16 = 5432;
 const DEFAULT_OPERATION_TIMEOUT_MS: u64 = 5_000;
 
-/// TLS behavior for the initial PostgreSQL StateStore backend.
+/// TLS behavior for the supplied PostgreSQL StateStore backend.
 ///
-/// The first Postgres backend intentionally supports only `NoTls`.
+/// The supplied backend supports only unencrypted connections with `NoTls`.
 ///
 /// # Examples
 ///
@@ -78,8 +78,9 @@ impl<'de> Deserialize<'de> for PostgresStateStoreTlsMode {
 /// for remote durable control-plane state. This always-available config stays
 /// pure data until it is passed
 /// to [`crate::state::config::StateStoreConfig::postgres`] and opened through
-/// [`crate::StateStore::connect`]. Password bytes are only exposed at the
-/// final authentication boundary inside the private PostgreSQL backend.
+/// [`crate::StateStore::connect`]. `Debug` redacts the password. Serde
+/// serialization includes its exact secret value, so handle serialized
+/// configuration as credentials. See [`Password`](crate::state::config::Password).
 ///
 /// # Examples
 ///
@@ -222,10 +223,14 @@ impl PostgresStateStoreConfig {
 
     /// Replaces the per-operation timeout.
     ///
+    /// Stores whole milliseconds, discarding any fractional millisecond. Zero
+    /// and sub-millisecond durations are accepted here but rejected by
+    /// [`Self::validate`] and [`crate::StateStore::connect`].
+    ///
     /// # Errors
     ///
-    /// Returns an invalid-config error when the timeout cannot be represented
-    /// as milliseconds.
+    /// Returns [`StateStoreError::InvalidConfig`] when the whole-millisecond
+    /// value exceeds `u64::MAX`.
     ///
     /// # Examples
     ///

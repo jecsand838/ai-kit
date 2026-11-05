@@ -21,8 +21,11 @@
 //! work: dropping an observer neither cancels that work nor releases its slot.
 //! Use abort or consuming lifecycle operations and keep the runtime alive through
 //! cleanup. Native builders retain no provider value; Custom receives one through
-//! [`AgentBuilder::with_provider`]. Exact Model continuations live only within an
-//! active prompt loop; durable history contains provider-neutral text.
+//! [`AgentBuilder::with_provider`]. Custom runs its prompt loop through
+//! [`providers_kit::ModelBackend::generate`] and
+//! [`providers_kit::ModelBackend::generate_stream`]. Exact Model continuations
+//! live only within that active loop. Durable
+//! history contains provider-neutral caller and final-assistant text.
 //!
 //! # Construct and shut down a Custom agent
 //!

@@ -30,7 +30,7 @@
 //! let work = async {
 //!     let name = ToolName::new("echo")?;
 //!     let inventory = tools.list_tools().await?;
-//!     assert!(inventory.iter().any(|info| info.name == name));
+//!     let declared = inventory.iter().any(|info| info.name == name);
 //!     let mut handler = tools.tool_handler(name).await?;
 //!     let output = handler.step(ToolHandlerInput::Invoke(ToolInvocation {
 //!         call_id: Some("owned-call".into()), arguments: serde_json::json!({"text":"hello"}),
@@ -38,16 +38,17 @@
 //!     let ToolHandlerOutput::Completed(result) = output else {
 //!         return Err(ToolError::Protocol { message: "configured echo unexpectedly interacted".into() });
 //!     };
-//!     assert!(!result.is_error);
-//!     assert!(matches!(result.content.as_slice(), [ToolContent::Text { text, .. }] if text == "hello"));
-//!     Ok::<(), ToolError>(())
+//!     Ok::<_, ToolError>((declared, result))
 //! }.await;
 //! let cleanup = tools.shutdown().await;
 //! if let Err(error) = &cleanup {
 //!     eprintln!("Cleanup failed: {error}");
 //! }
-//! work?;
+//! let (declared, result) = work?;
 //! cleanup?;
+//! assert!(declared);
+//! assert!(!result.is_error);
+//! assert!(matches!(result.content.as_slice(), [ToolContent::Text { text, .. }] if text == "hello"));
 //! # Ok(())
 //! # }
 //! ```
@@ -119,7 +120,7 @@ impl fmt::Debug for McpConnectionConfig {
     }
 }
 
-/// Validated MCP client Toolset configuration.
+/// MCP client Toolset configuration.
 /// Configuration construction does not connect or spawn a process; [`crate::Toolset::mcp`]
 /// performs that work. Discovered names may be namespaced without exposing native routing.
 ///
@@ -164,6 +165,9 @@ impl McpClientConfig {
     }
 
     /// Applies a caller-visible namespace to discovered names.
+    ///
+    /// Connecting also checks that the namespace leaves room for rendered tool
+    /// names; this setter validates the namespace as a [`ToolName`] only.
     ///
     /// # Errors
     ///

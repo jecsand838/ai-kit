@@ -109,8 +109,10 @@
 
 /// Built-in state-store construction data.
 ///
-/// Lance is always available. Redb, PostgreSQL, and SQLite/Turso require
-/// explicit `redb`, `postgres`, and `sqlite` features. Constructors and validation perform no connection I/O;
+/// Lance is always available. Opening Redb or PostgreSQL requires `redb` or
+/// `postgres`; their configuration types remain available without those features.
+/// SQLite/Turso configuration and implementation both require `sqlite`.
+/// Constructors and validation perform no connection I/O;
 /// [`crate::StateStore::connect`] opens the selected store.
 pub mod config {
     pub use crate::credentials::Password;

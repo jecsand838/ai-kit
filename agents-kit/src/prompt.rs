@@ -176,7 +176,9 @@ impl PromptRequest {
 
     /// Sets a validated path relative to the active workspace context.
     ///
-    /// This path is relative to the active workspace, not the caller process.
+    /// Codex resolves this against the workspace cwd on its host. Custom validates
+    /// the resolution while executable tools use their caller-configured cwd policy.
+    /// OpenCode rejects this per-prompt override with `Unsupported`.
     ///
     /// # Errors
     /// Absolute paths, parent traversal, and invalid portable components return InvalidInput.
@@ -318,6 +320,9 @@ impl PromptRequest {
     #[must_use]
     ///
     /// Selected backends may reject unsupported structured-output execution.
+    /// Custom additionally requires a schema whose root declares `"type": "object"`
+    /// at submission. [`StructuredOutputRequest::new`] accepts other valid roots
+    /// for backends that can represent them.
     ///
     /// ```
     /// use agents_kit::prompt::PromptRequest;
@@ -597,6 +602,12 @@ pub enum PromptEvent {
 /// Completion or error fuses the stream; premature EOF becomes one protocol
 /// error. A caller source owns bounded production and accepted-work cleanup.
 ///
+/// Drain supplied streams promptly. Overflowing their bounded output queue ends
+/// observation with [`crate::error::ErrorKind::Integration`] and
+/// [`crate::error::ErrorDetail::ResponseLimit`]. The prompt continues, so an
+/// observation error or subsequent `None` does not establish execution settlement.
+/// Use abort or consuming close/shutdown to settle accepted work.
+///
 /// ```
 /// use agents_kit::prompt::{PromptEvent, PromptResponse, PromptStream};
 /// let runtime = tokio::runtime::Builder::new_current_thread().build()?;
@@ -769,7 +780,8 @@ impl PromptStream {
     /// # Errors
     /// A source failure is yielded once with prompt/publication context. EOF
     /// before completion yields Protocol with IncompleteStream; terminal results
-    /// fuse subsequent reads to None.
+    /// fuse subsequent reads to None. Supplied streams also report bounded queue
+    /// overflow as Integration with ResponseLimit while the prompt continues.
     ///
     /// ```
     /// use agents_kit::{error::ErrorKind, prompt::PromptStream};

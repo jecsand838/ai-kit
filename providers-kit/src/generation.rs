@@ -1885,7 +1885,8 @@ impl GenerationConfig {
     ///
     /// # Errors
     ///
-    /// Returns an input error unless temperature is finite and between 0 and 2 inclusive.
+    /// Returns an input error unless temperature is finite and non-negative.
+    /// The selected model may impose a narrower supported range at execution.
     ///
     /// # Examples
     ///
@@ -1893,6 +1894,8 @@ impl GenerationConfig {
     /// use providers_kit::generation::GenerationConfig;
     /// let config = GenerationConfig::default().with_temperature(0.5)?;
     /// assert_eq!(config.temperature(), Some(0.5));
+    /// assert_eq!(GenerationConfig::default().with_temperature(3.0)?.temperature(), Some(3.0));
+    /// assert!(GenerationConfig::default().with_temperature(-0.1).is_err());
     ///
     /// # Ok::<(), providers_kit::KitError>(())
     /// ```
@@ -1915,7 +1918,8 @@ impl GenerationConfig {
     ///
     /// # Errors
     ///
-    /// Returns an input error unless top_p is finite and between 0 and 1 inclusive.
+    /// Returns an input error unless top_p is finite, greater than zero and at
+    /// most one.
     ///
     /// # Examples
     ///
@@ -1923,6 +1927,8 @@ impl GenerationConfig {
     /// use providers_kit::generation::GenerationConfig;
     /// let config = GenerationConfig::default().with_top_p(0.8)?;
     /// assert_eq!(config.top_p(), Some(0.8));
+    /// assert!(GenerationConfig::default().with_top_p(0.0).is_err());
+    /// assert_eq!(GenerationConfig::default().with_top_p(1.0)?.top_p(), Some(1.0));
     ///
     /// # Ok::<(), providers_kit::KitError>(())
     /// ```
@@ -2074,7 +2080,9 @@ impl GenerationConfig {
         }
     }
 
-    /// Sets a deterministic sampling seed.
+    /// Requests a sampling seed where the selected model supports it.
+    ///
+    /// A seed does not promise identical output across requests or model revisions.
     ///
     /// # Examples
     ///
@@ -2092,7 +2100,12 @@ impl GenerationConfig {
         self
     }
 
-    /// Sets a validated tool-selection policy.
+    /// Sets the requested tool-selection policy.
+    ///
+    /// [`GenerateRequest::with_generation`] and
+    /// [`SessionConfig::with_generation`](crate::session::SessionConfig::with_generation)
+    /// validate it against the configured tools. Selected-model support is checked
+    /// when the operation executes.
     ///
     /// # Examples
     ///

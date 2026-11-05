@@ -270,11 +270,12 @@ pub trait ProviderBackend: Send + Sync + 'static {
     ///     Provider, ProviderBackend, ProviderConfig,
     ///     config::{ApiKey, OpenAiConfig, ProviderKind, TransportConfig},
     /// };
+    /// let id = providers_kit::ModelId::new("your-exact-model-id")?;
     /// let provider = Provider::from_config(ProviderConfig::new(
     ///     ProviderKind::OpenAi(OpenAiConfig::new(ApiKey::new("replace-with-your-key")?)),
     ///     TransportConfig::default(),
     /// ))?;
-    /// let result = provider.model_info(providers_kit::ModelId::new("your-exact-model-id")?).await;
+    /// let result = provider.model_info(id).await;
     /// let cleanup = provider.shutdown().await;
     /// if let Err(error) = &cleanup {
     ///     eprintln!("Cleanup failed: {error}");
@@ -322,17 +323,14 @@ pub trait ProviderBackend: Send + Sync + 'static {
     ///     Provider, ProviderBackend, ProviderConfig,
     ///     config::{ApiKey, OpenAiConfig, ProviderKind, TransportConfig},
     /// };
+    /// let request = providers_kit::files::FileUploadRequest::new(
+    ///     "notes.txt", "text/plain", b"notes".to_vec(),
+    /// )?;
     /// let provider = Provider::from_config(ProviderConfig::new(
     ///     ProviderKind::OpenAi(OpenAiConfig::new(ApiKey::new("replace-with-your-key")?)),
     ///     TransportConfig::default(),
     /// ))?;
-    /// let result = provider
-    ///     .upload_file(providers_kit::files::FileUploadRequest::new(
-    ///         "notes.txt",
-    ///         "text/plain",
-    ///         b"notes".to_vec(),
-    ///     )?)
-    ///     .await;
+    /// let result = provider.upload_file(request).await;
     /// let deletion = match &result {
     ///     Ok(file) => provider.delete_file(file.id.clone()).await,
     ///     Err(_) => Ok(()),
@@ -858,6 +856,10 @@ pub trait ProviderBackend: Send + Sync + 'static {
     ///
     /// Retain cleanup independently of each borrowed waiter. Repeated and concurrent
     /// calls replay the same terminal result; last-handle drop is not an async cleanup API.
+    /// Supplied shutdown seals new work and wakes registered Sessions while their
+    /// observation, cancellation and consuming close remain available. Idle Sessions
+    /// hold no generation admission. Shutdown joins owned local work; it does not
+    /// claim remote cancellation or delete caller-owned files and batch jobs.
     ///
     /// # Errors
     ///

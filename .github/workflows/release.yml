@@ -46,6 +46,8 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'jecsand838/ai-kit'
     runs-on: ubuntu-24.04
     timeout-minutes: 120
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target/docs-site-build
     steps:
       - name: Check out the selected immutable main revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -55,6 +57,12 @@ jobs:
 
       - name: Check owner or designated maintainers, version and qualification declaration
         run: python3 scripts/release_publish.py preflight
+
+      - name: Reclaim unused SDK space on the disposable runner
+        run: |
+          df -h .
+          sudo rm -rf -- /usr/share/dotnet /usr/local/lib/android
+          df -h .
 
       - name: Install the pinned Rust toolchain
         run: |
@@ -116,6 +124,12 @@ jobs:
           retention-days: 30
           if-no-files-found: warn
 
+      - name: Report build disk usage
+        if: ${{ always() }}
+        run: |
+          df -h .
+          if [ -d target ]; then du -sh target; fi
+
   publish:
     name: Publish five crates and GitHub release
     needs: validate
@@ -132,6 +146,12 @@ jobs:
 
       - name: Recheck release admission before exposing publishing credentials
         run: python3 scripts/release_publish.py preflight
+
+      - name: Reclaim unused SDK space on the disposable runner
+        run: |
+          df -h .
+          sudo rm -rf -- /usr/share/dotnet /usr/local/lib/android
+          df -h .
 
       - name: Install the pinned Rust toolchain
         run: |
@@ -161,3 +181,9 @@ jobs:
             target/release-build/package/*.crate
           retention-days: 30
           if-no-files-found: warn
+
+      - name: Report build disk usage
+        if: ${{ always() }}
+        run: |
+          df -h .
+          if [ -d target ]; then du -sh target; fi

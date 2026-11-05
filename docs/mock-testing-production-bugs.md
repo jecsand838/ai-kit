@@ -6,6 +6,18 @@ cancellation follow-up started at `1de968b3c98015f7fc48255d6ac40ef4593ca44d`.
 Regressions remain enabled; fixture and validation-setup errors are distinguished
 from production defects. Manifests, lockfiles, features, and vendor sources are unchanged.
 
+## Release completion and version identities — 2026-11-05
+
+The v0.0.4 preparation reproduces the release helper creating a public GitHub
+release without hosted-doc readiness, before separating publication/finalization.
+Enabled release tests now require five exact-version docsites and the reviewed
+logo, immutable publication evidence and no upload during finalization retries.
+Red/green receipts remain under `target/v0.0.4-preparation/`. The workflow
+regression first failed because no separately retryable finalization job existed.
+The three existing wire-version tests also each failed with observed `0.0.3`
+against bumped `0.0.4` manifests, then passed after updating the identifiers.
+These are scoped release regressions, not fresh native qualification.
+
 ## Rustdoc logo paths — 2026-11-05
 
 At `fd92dfe`, the documentation-contract logo regression failed for all five

@@ -15,6 +15,21 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class ReleaseStageHooksTests(unittest.TestCase):
+    def test_docs_finalization_retries_without_building_or_publishing(self):
+        workflow = (ROOT / ".github/workflows/release.yml").read_text()
+        self.assertIn("  finalize:\n", workflow, "hosted docs need their own retryable gate")
+        publish, finalize = workflow.split("  publish:\n", 1)[1].split("  finalize:\n", 1)
+        self.assertIn("artifact_id: ${{ steps.publication_receipt.outputs.artifact-id }}", publish)
+        self.assertIn("id: publication_receipt", publish)
+        self.assertIn("needs: publish", finalize)
+        self.assertIn("artifact-ids: ${{ needs.publish.outputs.artifact_id }}", finalize)
+        self.assertIn("ref: ${{ github.sha }}", finalize)
+        self.assertIn("finalize --report target/release-input/release/report.json", finalize)
+        self.assertIn("release-finalization-${{ github.run_id }}-${{ github.run_attempt }}", finalize)
+        self.assertIn("if: ${{ always() }}", finalize)
+        for forbidden in ("CARGO_REGISTRY_TOKEN", "cargo ", "rustup ", "check_ci.sh", "check_docs_site.sh"):
+            self.assertNotIn(forbidden, finalize)
+
     CRATE_NAMES = {
         "agent": "agents-kit",
         "provider": "providers-kit",

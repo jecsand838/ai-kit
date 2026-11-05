@@ -13,10 +13,10 @@ lto = "off"
 codegen-units = 16
 
 [workspace.dependencies]
-agents-kit = { path = "agents-kit", version = "=0.0.3" }
-providers-kit = { path = "providers-kit", version = "0.0.3" }
-storage-kit = { path = "storage-kit", version = "0.0.3", default-features = false }
-tools-kit = { path = "tools-kit", version = "0.0.3" }
+agents-kit = { path = "agents-kit", version = "=0.0.4" }
+providers-kit = { path = "providers-kit", version = "0.0.4" }
+storage-kit = { path = "storage-kit", version = "0.0.4", default-features = false }
+tools-kit = { path = "tools-kit", version = "0.0.4" }
 base64 = "0.22"
 bytes = "1.11"
 futures-util = "0.3"

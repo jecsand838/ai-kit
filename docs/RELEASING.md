@@ -7,18 +7,56 @@ preparation PR into `main`, then run **Manual release** in
 The workflow is available in the normal Actions chooser after it reaches the
 default branch.
 
-All five crates are published at **0.0.2**; the
+All five crates remain available at **0.0.2**; the
 [v0.0.2 release](https://github.com/jecsand838/ai-kit/releases/tag/v0.0.2) records
 its source revision and qualification declaration. The five manifests and
-manual workflow default are prepared for **0.0.3**. After the preparation PR
-merges, qualify the exact selected `main` revision, record its evidence URL,
-and dispatch `0.0.3` with **initial_release_override disabled**.
+manual workflow default prepare **0.0.4**. The maintainer yanked all five
+**0.0.3** versions and deleted their GitHub release/tag after hosted documentation
+was not verified. Preserve the successful package/validation evidence and the
+missing-docs observations; neither establishes a docs.rs fault.
+After the preparation PR merges, bind the reviewed qualification declaration
+to the selected `main` revision and dispatch `0.0.4` with
+**initial_release_override disabled**. Preparation alone does not publish.
 
 The breaking change in this candidate is the Provider Session API. Existing
 Realtime callers must select a profile and split the Session to submit commands
 and receive events. Follow the [Session migration guide](../providers-kit/README.md#breaking-session-migration).
 The scoped Session results on [PR #45](https://github.com/jecsand838/ai-kit/pull/45)
 apply to the revisions recorded there. The release requires its own qualification.
+
+### v0.0.4 authorized qualification carry-forward
+
+The maintainer explicitly authorized carrying v0.0.3 validation and qualification
+forward for this release. Report **QUALIFIED coverage**, with historical runs
+attributed to their original sources; do not describe them as newly executed
+v0.0.4 tests or forge canonical `--resume` receipts across changed manifests.
+The reviewed delta must be confined to version/internal dependency metadata,
+three wire client-version identifiers, rustdoc logos, release tooling and its
+tests/documentation. External dependencies and features stay unchanged; library
+behavior changes only in those three wire-version identifiers. A broader change
+requires a new qualification assessment.
+
+| Carried evidence | Original source and scope |
+| --- | --- |
+| Local workspace, primary CI and Storage alternatives | `3803a58`: six Storage lanes, 16 feature combinations, 294 native case executions; the local wrapper explicitly skipped all five strict-live suites |
+| Reviewed native coverage | Provider's 145 named cases across `29c44a5`/`1c537ae`, plus ten final Session/Realtime cases at `c844e60`; Agent 29, App 19 and Tool 1 at `1c537ae` |
+| Refreshed rustdoc and clean build | `fa7f798`/identical-tree merge `cd3ae32`: 51 source/public/example cases, 903 doctests, 15 documentation contracts; fresh locked workspace/all-targets check at `cd3ae32` |
+| Final v0.0.3 release validation | `953edd6`, [run 41960912812](https://github.com/jecsand838/ai-kit/actions/runs/41960912812): 35 primary stages, eight compile proofs, 147 behavioral tests, seven rustdoc builds, 903 doctests and five verified package archives |
+
+[PR #49](https://github.com/jecsand838/ai-kit/pull/49) retains the evidence chain.
+Recheck the retained artifact hashes and independently review the final delta.
+Run the three existing wire-version regressions, logo checks, affected tooling
+tests, current prerequisite/prepare proofs, fresh doc output and an exact-final-
+commit clean-checkout proof. Normal CI/security and publication package checks
+remain required. Record fresh results separately in the preparation PR.
+
+Preserve the original native failures, interruptions, collector errors and
+[failed ENOSPC release](https://github.com/jecsand838/ai-kit/actions/runs/41944447644).
+The seven formerly deferred Provider batch cases have accepted historical passes;
+they are not new v0.0.4 executions. Retain the false OpenCode idle-waiter answer-copy
+grade under its documented exception, routine App capacity/calibration exclusions,
+17 advisory exceptions, four retained Gemini outputs with unverified expiry and
+four retained App fault datasets. Carry-forward does not resolve these limitations.
 
 ## Historical one-time initial 0.0.1 release
 
@@ -61,10 +99,10 @@ Never put it in a repository variable, source file, issue, PR or chat. The first
 publication establishes each crate; a later migration to crates.io Trusted
 Publishing can replace the long-lived secret after the crates exist.
 
-`GITHUB_TOKEN` supplies the publication job's `contents: write` permission for
-the GitHub release. Validation has read-only repository permissions. The
+`GITHUB_TOKEN` supplies the finalization job's `contents: write` permission for
+the GitHub release. Validation and crate publication have read-only repository permissions. The
 workflow accepts only manual dispatch from this repository's `main`, checks out
-the immutable selected commit in both jobs and serializes release attempts
+the immutable selected commit in all three jobs and serializes release attempts
 without cancelling an in-progress upload. It does not use pull-request code or
 run automatically when a GitHub release is created.
 
@@ -129,7 +167,20 @@ a newer `main` may legitimately produce different package bytes and will fail
 rather than silently adopting another release. Inspect the cause before deciding
 whether a new version is required.
 
-Only after all five versions are confirmed does the helper create the GitHub
+After all five versions are confirmed, publication saves a `PACKAGES_PUBLISHED`
+receipt and the verified archives. A separate finalization job downloads that
+exact artifact ID from the successful publication job. It verifies the original
+repository, run, source, version, qualification declaration, archive hashes and
+current non-yanked registry checksums before checking hosted documentation.
+
+Finalization waits at most 20 minutes for all five exact-version docs.rs status
+responses and crate-root HTML pages. Each page must identify the expected crate
+and version and render the reviewed logo URL; the fetched PNG must match the
+repository asset. Redirects, wrong versions, missing pages and invalid logos do
+not pass. HTTP 404 or `doc_status: false` means not ready, not proof of a failed
+build or upstream fault. Per-attempt observations and diagnostics are retained.
+
+Only after all five hosted docsites pass does finalization create the GitHub
 release and `vVERSION` tag at the selected SHA. An existing tag must resolve to
 that exact commit. An existing draft or conflicting release requires maintainer
 review. The release lists crates.io links, versioned rustdoc links, source SHA,
@@ -137,12 +188,18 @@ qualification scope and the unresolved advisory policy. Validation and
 publication artifacts preserve raw audit results, package checksums, command
 outcomes and uploaded archives.
 
-crates.io uploads automatically queue **docs.rs** builds from each published
-package. No generated HTML is uploaded to docs.rs by this workflow. Versioned
+**docs.rs** independently observes published crates and builds their documentation.
+No generated HTML is uploaded to docs.rs by this workflow. Versioned
 URLs use the form `https://docs.rs/CRATE/VERSION`, such as
-`https://docs.rs/agents-kit/0.0.2`. Confirm each docs.rs build after publication;
-a successful upload or GitHub release does not prove an
-asynchronous documentation build succeeded. This workflow does not deploy the
+`https://docs.rs/agents-kit/0.0.2`. A successful upload alone does not prove the
+asynchronous documentation build succeeded. If finalization fails, preserve its
+artifact and use **Re-run failed jobs** on the same workflow run: only docs/release
+finalization repeats, without Cargo, credentials for crate uploads, or rerunning
+qualification. This path depends on retaining the successful publication artifact
+(30 days). Missing or conflicting evidence fails closed. There is no automatic
+yank, rebuild request, upstream issue, republish or version bump.
+Successful checks establish availability at their recorded time, not permanence.
+This workflow does not deploy the
 combined workspace `target/doc` site to GitHub Pages.
 
 Crate logos use the same public, commit-pinned HTTPS image URL so nested pages

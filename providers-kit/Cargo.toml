@@ -1,6 +1,6 @@
 [package]
 name = "providers-kit"
-version = "0.0.3"
+version = "0.0.4"
 edition = "2024"
 rust-version = "1.99"
 description = "Portable enum-dispatch Kit over multiple model provider APIs."

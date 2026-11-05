@@ -92,6 +92,13 @@ and full native qualification remain the maintainer's recorded local evidence;
 GitHub CI does not replace them. Storage uses explicit supported feature lanes,
 never `--all-features`.
 
+The disposable Ubuntu release runners remove unused .NET and Android SDKs
+before building. Validation shares `target/docs-site-build` between primary CI
+and rustdoc/doctests to avoid duplicating dependency outputs. Publication keeps
+its separate `target/release-build` archive directory. Both jobs report disk
+usage, including after failure. SDK cleanup leaves build outputs and evidence
+untouched.
+
 ## Publication, documentation and retries
 
 The release helper packages and publishes in dependency order:

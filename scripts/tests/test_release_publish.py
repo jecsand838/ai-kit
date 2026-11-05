@@ -3,6 +3,7 @@
 import hashlib
 import json
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 import unittest
@@ -38,6 +39,23 @@ class ReleaseTests(unittest.TestCase):
         self.release.env.update(values)
         self.release.version = self.env["RELEASE_VERSION"]
         self.release.override = self.env["INITIAL_RELEASE_OVERRIDE"] == "true"
+
+    def test_validation_reuses_the_docs_build_directory_for_both_gates(self):
+        root = Path(__file__).resolve().parents[2]
+        workflow = (root / ".github/workflows/release.yml").read_text()
+        validation = workflow.split("  validate:\n", 1)[1].split("  publish:\n", 1)[0]
+        docs = (root / "scripts/check_docs_site.sh").read_text()
+        target = re.search(r'DOC_BUILD_TARGET_DIR="\$\{WORKSPACE_DIR\}/([^\"]+)"', docs)[1]
+        self.assertIn("CARGO_TARGET_DIR: ${{ github.workspace }}/" + target,
+                      validation.split("    steps:\n", 1)[0])
+        self.assertIn("bash scripts/check_ci.sh\n          bash scripts/check_docs_site.sh", validation)
+
+    def test_publication_keeps_its_archive_directory_despite_inherited_target(self):
+        self.release.env["CARGO_TARGET_DIR"] = str(self.root / "target/docs-site-build")
+        with patch("scripts.release_publish.Runner.owned_process", return_value=subprocess.CompletedProcess([], 0)) as run:
+            self.release.command(["cargo", "package", "--locked", "-p", "providers-kit"])
+        self.assertEqual(run.call_args.kwargs["env"]["CARGO_TARGET_DIR"],
+                         str(self.release.root / "target/release-build"))
 
     def test_initial_override_is_visible_and_limited_to_initial_version(self):
         self.assertEqual(self.release.admit()["qualification"], "INITIAL_0_0_1_OVERRIDE")

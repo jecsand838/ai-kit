@@ -486,6 +486,24 @@ class DocumentationContractTests(unittest.TestCase):
     def test_documented_markdown_local_file_links_resolve(self) -> None:
         self.assertEqual(self.local_link_failures(self.documented_paths()), [], "broken documentation file links")
 
+    def test_rustdoc_logos_work_outside_the_workspace_site(self) -> None:
+        logos = set()
+        for crate in ("agents-kit", "app-kit", "providers-kit", "storage-kit", "tools-kit"):
+            with self.subTest(crate=crate):
+                source = (self.workspace / crate / "src/lib.rs").read_text(encoding="utf-8")
+                urls = re.findall(r'html_logo_url\s*=\s*"([^"]+)"', source)
+                self.assertEqual(len(urls), 1, "each crate needs its shared rustdoc logo")
+                # A relative URL changes meaning on nested/source pages and docs.rs
+                # does not receive the workspace site's separately staged assets.
+                match = re.fullmatch(
+                    r"https://raw\.githubusercontent\.com/jecsand838/ai-kit/"
+                    r"[0-9a-f]{40}/(docs/assets/[^/]+\.png)", urls[0],
+                )
+                self.assertIsNotNone(match, "use a public, commit-pinned image URL")
+                self.assertTrue((self.workspace / match[1]).is_file())
+                logos.add(urls[0])
+        self.assertEqual(len(logos), 1, "all crates share the same logo")
+
     def test_private_evidence_link_boundaries(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             workspace = Path(temporary) / "workspace"

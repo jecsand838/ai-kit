@@ -145,6 +145,10 @@ a successful upload or GitHub release does not prove an
 asynchronous documentation build succeeded. This workflow does not deploy the
 combined workspace `target/doc` site to GitHub Pages.
 
+Crate logos use the same public, commit-pinned HTTPS image URL so nested pages
+and docs.rs do not depend on the combined site's asset directory. When changing
+the logo, verify that URL serves the repository image before publishing.
+
 Backwards compatibility is not guaranteed until `1.0.0`. Pin versions and
 review release notes when upgrading; the initial override does not weaken the
 qualification requirements for subsequent releases.

@@ -6,6 +6,16 @@ cancellation follow-up started at `1de968b3c98015f7fc48255d6ac40ef4593ca44d`.
 Regressions remain enabled; fixture and validation-setup errors are distinguished
 from production defects. Manifests, lockfiles, features, and vendor sources are unchanged.
 
+## Rustdoc logo paths — 2026-11-05
+
+At `fd92dfe`, the documentation-contract logo regression failed for all five
+crates before repair: three used a workspace-relative URL and two lacked a logo.
+Local nested Provider, Storage and Tool pages returned HTTP 404 for their image;
+the crate-root image returned 200. Receipts remain in
+`target/v0.0.3-preparation/logo-{regression,behavior}-red.*`. The enabled
+`test_rustdoc_logos_work_outside_the_workspace_site` requires one shared,
+public commit-pinned URL; its availability is checked separately before release.
+
 ## Provider session refactor evidence — 2026-11-01
 
 The separately authorized session replacement starts at `2853a542`; its target

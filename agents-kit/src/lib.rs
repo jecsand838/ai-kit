@@ -67,6 +67,10 @@
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/jecsand838/ai-kit/fd92dfecd8262bfe59d64db44528c848933c6f83/docs/assets/ai-kit-logo.png"
+)]
+
 mod agent;
 mod agent_storage;
 mod backends;

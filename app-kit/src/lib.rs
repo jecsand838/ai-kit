@@ -87,6 +87,9 @@
 //! ```
 
 #![forbid(unsafe_code)]
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/jecsand838/ai-kit/fd92dfecd8262bfe59d64db44528c848933c6f83/docs/assets/ai-kit-logo.png"
+)]
 #![warn(missing_docs)]
 
 use std::fmt;

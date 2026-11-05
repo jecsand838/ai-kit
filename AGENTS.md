@@ -10,6 +10,9 @@ Operating contract for the five compiled `ai-kit` crates.
   validate, stage, or treat those files as current architecture.
 - Do not create an app substitute, compatibility crate, or shared runtime
   framework.
+- The harness and all agents must never open an upstream issue. If no existing
+  upstream issue documents the observed problem, assume there is no upstream
+  issue.
 
 ## Public Architecture
 

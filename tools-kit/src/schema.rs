@@ -1,6 +1,6 @@
 //! JSON Schema declarations, rendering preferences, and validation diagnostics.
 //!
-//! [`JsonSchema`](crate::schema::JsonSchema) is a passive wrapper. Owning execution boundaries validate
+//! [`JsonSchema`] is a passive wrapper. Owning execution boundaries validate
 //! arguments and successful structured output; strictness describes rendering
 //! preference and does not turn an invalid schema into a valid one.
 

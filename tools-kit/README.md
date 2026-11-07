@@ -4,6 +4,8 @@ This crate is in early development. Backwards compatibility is not guaranteed
 until `1.0.0`; pin exact versions and review the
 [release notes](https://github.com/jecsand838/ai-kit/releases) before upgrading.
 
+Repository guides and examples linked below track `main`.
+
 `tools-kit` executes Local and MCP tools through:
 
 ```text
@@ -22,8 +24,10 @@ let mcp = Toolset::mcp(client_config).await?;
 Import `ToolsetBackend` and `ToolHandlerBackend` to list `Vec<ToolInfo>`, select
 one handler by `ToolName`, and drive its `step` state machine.
 Tool-authored errors are completed `ToolResult` values with
-`is_error = true`; outer `ToolError` values mean the invocation could not be
-executed or the handler was used incorrectly.
+`is_error = true`. Outer `ToolError` values cover input/output validation, state,
+protocol, transport, cancellation, timeout, and lifecycle failures. They can
+follow execution, including validation of a completed result, and do not prove
+that no side effects occurred.
 
 Custom implementations implement `ToolsetBackend` and return their associated
 `Handler: ToolHandlerBackend` directly. Consumers such as Agent and MCP serving
@@ -50,10 +54,10 @@ task; the caller separately shuts down the underlying shared toolset.
 
 See:
 
-- [Portable API](docs/PORTABLE_API.md)
-- [Architecture](ARCHITECTURE.md)
-- [Strict Testing](docs/STRICT_TESTING.md)
-- [Behavior Proof Policy](docs/BEHAVIOR_PROOF_POLICY.md)
+- [Portable API](https://github.com/jecsand838/ai-kit/blob/main/tools-kit/docs/PORTABLE_API.md)
+- [Architecture](https://github.com/jecsand838/ai-kit/blob/main/tools-kit/ARCHITECTURE.md)
+- [Strict Testing](https://github.com/jecsand838/ai-kit/blob/main/tools-kit/docs/STRICT_TESTING.md)
+- [Behavior Proof Policy](https://github.com/jecsand838/ai-kit/blob/main/tools-kit/docs/BEHAVIOR_PROOF_POLICY.md)
 
 Validation:
 
@@ -65,11 +69,11 @@ source tools-kit/strict-tests.env && bash tools-kit/scripts/verify_strict_live.s
 The live MCP case requires `TEST_TOOLS_KIT_MCP_EXPECTED_RESULT_JSON`, a complete
 independently specified successful `ToolResult`. The pinned filesystem example
 reads a prepared marker file and compares exact text, structured content, and
-metadata after shutdown. See [Strict Testing](docs/STRICT_TESTING.md).
+metadata after shutdown. See [Strict Testing](https://github.com/jecsand838/ai-kit/blob/main/tools-kit/docs/STRICT_TESTING.md).
 
 ## Direct public-trait tests
 
 Run `bash scripts/check_mock_contracts.sh --crate tools-kit` from the workspace
 root for the credential-free mock lane. The workspace primary CI entrypoint is
-`bash scripts/check_ci.sh`. See [mock testing](../docs/mock-testing.md) for
+`bash scripts/check_ci.sh`. See [mock testing](https://github.com/jecsand838/ai-kit/blob/main/docs/mock-testing.md) for
 targets, evidence, runtime qualification, and the separate release/live gates.

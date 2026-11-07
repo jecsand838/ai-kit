@@ -1,7 +1,8 @@
 //! Caller input requested by a suspended tool invocation.
 //!
 //! Declare capabilities before execution. Preserve the pending request id in
-//! [`ToolInteractionResponse`](crate::interaction::ToolInteractionResponse); text replies are strings and form replies are objects.
+//! [`ToolInteractionResponse`]; text replies are strings and form replies are
+//! objects.
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;

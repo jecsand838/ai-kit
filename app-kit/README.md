@@ -4,17 +4,19 @@ This crate is in early development. Backwards compatibility is not guaranteed
 until `1.0.0`; pin exact versions and review the
 [release notes](https://github.com/jecsand838/ai-kit/releases) before upgrading.
 
+Repository guides and examples linked below track `main`.
+
 `app-kit` opens one application, materializes configured Agents into
 application workspaces, and runs compact versioned workflow definitions
 durably through `App` and the functional `app_kit::workflow` module.
 
-Start with the [runnable quickstart](docs/QUICKSTART.md) or the
-[guide index](docs/README.md).
+Start with the [runnable quickstart](https://github.com/jecsand838/ai-kit/blob/main/app-kit/docs/QUICKSTART.md) or the
+[guide index](https://github.com/jecsand838/ai-kit/blob/main/app-kit/docs/README.md).
 
-The [history and recovery example](examples/history_and_recovery.rs) builds its
+The [history and recovery example](https://github.com/jecsand838/ai-kit/blob/main/app-kit/examples/history_and_recovery.rs) builds its
 own embedded Lance store, restores a workflow checkpoint, and verifies the
 retained result and source lineage without an LLM, service, or credentials.
-Install the native [build prerequisites](../CONTRIBUTING.md#get-started) first,
+Install the native [build prerequisites](https://github.com/jecsand838/ai-kit/blob/main/CONTRIBUTING.md#get-started) first,
 then run from the repository root with its pinned Rust toolchain:
 
 ```bash
@@ -26,13 +28,13 @@ and its remaining step adds `1`. The default mode reopens the result within one
 process. The quickstart also shows `create DIRECTORY` and `reopen DIRECTORY`
 invocations that retain the completed result across process exit. Both paths
 await App cleanup. For the smallest state-only workflow, see
-[pure_state](examples/pure_state.rs).
+[pure_state](https://github.com/jecsand838/ai-kit/blob/main/app-kit/examples/pure_state.rs).
 
 `WorkflowRun::resolve` is the single fenced control path for caller input,
 exact Agent notifications, accepting/failing an unknown effect, and a retry
 whose safety has been proven. Dropping ordinary run handles or wait observers
 does not cancel accepted work. An owning Execution revokes uncommitted advancement
-under the [execution ownership rules](docs/STREAMING.md).
+under the [execution ownership rules](https://github.com/jecsand838/ai-kit/blob/main/app-kit/docs/STREAMING.md).
 
 Internally it remains a strict graph engine with deterministic BSP, reducers,
 joins, child/map parallelism, interactions, retries, checkpoints, and recovery.
@@ -47,7 +49,7 @@ homogeneous in `A`; callers needing runtime heterogeneity supply matching
 Agent, Workspace, and Conversation enums.
 
 The exact public contract is
-[`specs/SPECIFICATIONS.md`](specs/SPECIFICATIONS.md).
+[`specs/SPECIFICATIONS.md`](https://github.com/jecsand838/ai-kit/blob/main/app-kit/specs/SPECIFICATIONS.md).
 
 App's packaged dependency requires exactly `agents-kit =0.0.4`, inherited from
 the workspace dependency declaration. This prevents Cargo from selecting a
@@ -62,13 +64,13 @@ bash app-kit/scripts/verify_strict_live.sh
 
 Strict-live uses real OpenCode, Ollama and embedded LanceDB, and fails on
 missing prerequisites. State and knowledge fixtures own isolated directories;
-no external database service is required. See [the strict-testing guide](docs/STRICT_TESTING.md)
-for setup and [`specs/workflows/TESTING.md`](specs/workflows/TESTING.md) for the
+no external database service is required. See [the strict-testing guide](https://github.com/jecsand838/ai-kit/blob/main/app-kit/docs/STRICT_TESTING.md)
+for setup and [`specs/workflows/TESTING.md`](https://github.com/jecsand838/ai-kit/blob/main/app-kit/specs/workflows/TESTING.md) for the
 proof requirements.
 
 ## Direct public-trait tests
 
 Run `bash scripts/check_mock_contracts.sh --crate app-kit` from the workspace
 root for the credential-free mock lane. The workspace primary CI entrypoint is
-`bash scripts/check_ci.sh`. See [mock testing](../docs/mock-testing.md) for
+`bash scripts/check_ci.sh`. See [mock testing](https://github.com/jecsand838/ai-kit/blob/main/docs/mock-testing.md) for
 targets, evidence, runtime qualification, and the separate release/live gates.

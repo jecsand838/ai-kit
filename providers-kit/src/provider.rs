@@ -38,25 +38,8 @@ use crate::runtime::HealthStatus;
 ///
 /// # Examples
 ///
-/// ```
-///
-/// # #[tokio::main(flavor = "current_thread")]
-/// # async fn main() -> Result<(), providers_kit::KitError> {
-/// use providers_kit::{
-///     ModelBackend, ModelId, Provider, ProviderBackend, ProviderConfig,
-///     config::{OllamaConfig, ProviderKind, TransportConfig},
-/// };
-/// let provider = Provider::from_config(ProviderConfig::new(
-///     ProviderKind::Ollama(OllamaConfig::local()),
-///     TransportConfig::default(),
-/// ))?;
-/// let model = provider.model(ModelId::new("exact-model")?)?;
-/// assert_eq!(model.model_id().as_str(), "exact-model");
-/// provider.shutdown().await?;
-///
-/// # Ok(())
-/// # }
-/// ```
+/// See the [local construction example](crate#local-construction) for exact model
+/// selection and shared provider shutdown.
 ///
 /// # Implement a concrete local hierarchy
 ///

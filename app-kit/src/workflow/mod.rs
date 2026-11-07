@@ -2,16 +2,16 @@
 //!
 //! Parse strict versioned JSON with
 //! [`WorkflowDefinition::parse`](crate::workflow::WorkflowDefinition::parse), inspect its
-//! [`GraphDescription`](crate::workflow::GraphDescription), and transfer definitions
+//! [`GraphDescription`], and transfer definitions
 //! through [`crate::AppConfig`].
 //! [`Workflow::start`](crate::workflow::Workflow::start) drives accepted work in the background;
 //! [`Workflow::prepare`](crate::workflow::Workflow::prepare) admits checkpoint zero for explicit
 //! [`WorkflowRun::execution`](crate::workflow::WorkflowRun::execution) or
-//! [`SyncExecution`](crate::workflow::SyncExecution). Synchronous calls require an outside thread and a runtime
+//! [`SyncExecution`]. Synchronous calls require an outside thread and a runtime
 //! that stays driven elsewhere. Both lanes share the same commit authority.
 //!
-//! [`ExecutionEvent::Partial`](crate::workflow::ExecutionEvent::Partial) never commits state.
-//! [`ExecutionEvent::Committed`](crate::workflow::ExecutionEvent::Committed)
+//! [`ExecutionEvent::Partial`] never commits state.
+//! [`ExecutionEvent::Committed`]
 //! identifies a durable boundary; action ordinals and checkpoint sequences are
 //! different coordinates. [`WorkflowRun::history`](crate::workflow::WorkflowRun::history)
 //! reads a fixed cutoff, and [`Workflow::restore`](crate::workflow::Workflow::restore)
@@ -23,7 +23,7 @@
 //! [`LifecycleHooks`] and [`ChildExecutor`].
 //! The child executor's
 //! associated future can remain local/non-Send without future erasure.
-//! [`StateSerialization`](crate::workflow::StateSerialization) separately registers JSON field/tag codecs only.
+//! [`StateSerialization`] separately registers JSON field/tag codecs only.
 //! Supporting DTOs describe inputs, results and controls; runtime ownership
 //! stays private. Run observers do not cancel work when dropped; execution owners
 //! revoke uncommitted advancement while preserving admitted native commits.

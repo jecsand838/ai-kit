@@ -1,7 +1,7 @@
 //! Tool identities and complete executable declarations.
 //!
-//! [`ToolInfo`](crate::declaration::ToolInfo) carries schemas, interaction capabilities and model-visible metadata.
-//! [`ToolName`](crate::declaration::ToolName) is the rendered identity; native MCP routing stays private.
+//! [`ToolInfo`] carries schemas, interaction capabilities and model-visible metadata.
+//! [`ToolName`] is the rendered identity; native MCP routing stays private.
 
 use std::collections::BTreeMap;
 

@@ -4,6 +4,8 @@ This crate is in early development. Backwards compatibility is not guaranteed
 until `1.0.0`; pin exact versions and review the
 [release notes](https://github.com/jecsand838/ai-kit/releases) before upgrading.
 
+Repository guides and examples linked below track `main`.
+
 `agents-kit` provides one portable runtime hierarchy over Codex App Server,
 OpenCode Server, and Custom provider-backed agents:
 
@@ -107,11 +109,11 @@ receiving Kit-authored replacement text.
 
 ## Documentation
 
-- [Public API ledger](specs/API.md)
-- [Architecture](ARCHITECTURE.md)
-- [Specification index](specs/SPECIFICATIONS.md)
-- [Strict testing](docs/STRICT_TESTING.md)
-- [Contributor rules](AGENTS.md)
+- [Public API ledger](https://github.com/jecsand838/ai-kit/blob/main/agents-kit/specs/API.md)
+- [Architecture](https://github.com/jecsand838/ai-kit/blob/main/agents-kit/ARCHITECTURE.md)
+- [Specification index](https://github.com/jecsand838/ai-kit/blob/main/agents-kit/specs/SPECIFICATIONS.md)
+- [Strict testing](https://github.com/jecsand838/ai-kit/blob/main/agents-kit/docs/STRICT_TESTING.md)
+- [Contributor rules](https://github.com/jecsand838/ai-kit/blob/main/agents-kit/AGENTS.md)
 
 ## Inspecting failures
 
@@ -134,12 +136,12 @@ assert_eq!(error.http_status(), Some(401));
 Caller implementations must supply already-redacted messages. Supplied
 implementations never publish native prose through errors. Diagnostic trees
 are bounded; check `diagnostics_truncated()` before treating retained evidence
-as complete. See [the error contract](specs/ERRORS.md). Codex prompt records use
+as complete. See [the error contract](https://github.com/jecsand838/ai-kit/blob/main/agents-kit/specs/ERRORS.md). Codex prompt records use
 version 4; older records are rejected unchanged and are not migrated.
 
 ## Direct public-trait tests
 
 Run `bash scripts/check_mock_contracts.sh --crate agents-kit` from the workspace
 root for the credential-free mock lane. The workspace primary CI entrypoint is
-`bash scripts/check_ci.sh`. See [mock testing](../docs/mock-testing.md) for
+`bash scripts/check_ci.sh`. See [mock testing](https://github.com/jecsand838/ai-kit/blob/main/docs/mock-testing.md) for
 targets, evidence, runtime qualification, and the separate release/live gates.

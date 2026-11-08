@@ -212,11 +212,14 @@ and shared-abstraction changes require relevant alternative strict-live coverage
 Downstream persistence/knowledge fixtures use Lance; backend-specific proof
 stays in Storage.
 
-The approved LanceDB 0.40.0 dependency exception enables only its `remote`
-feature to compile the published job-error paths. Keep direct dependency
-defaults and cloud object-store features disabled. This does not authorize
-remote supplied Storage routes, additional public behavior or unrelated
-dependency features; the local filesystem/memory boundary remains required.
+The approved vendor refresh targets LanceDB 0.41.0 and the exact
+Lance/lance-io/lance-table 14.0.2 family. It preserves only LanceDB's existing
+`remote` feature. That feature worked around the 0.40.0 job-error compilation
+defect; 0.41.0 fixes that defect, so it is no longer a compilation requirement.
+Keep direct dependency defaults and cloud object-store features disabled. This
+does not authorize remote supplied Storage routes, additional public behavior
+or unrelated dependency features; the local filesystem/memory boundary remains
+required. Qualify both Database and StateStore against the selected native family.
 
 External Rust dependencies must resolve from crates.io. Cargo patches,
 replacements, and external path overrides are forbidden; the dependency checker

@@ -1,8 +1,9 @@
 # Workspace dependency security
 
 All Kit dependencies now resolve from crates.io without local source patches.
-LanceDB 0.40.0 and Lance 13.0.0 remain selected. The approved SurrealDB
-security migration selects exact client/Core 4.0.0. Its scoped qualification
+The approved vendor refresh targets LanceDB 0.41.0 and Lance 14.0.2; its
+resolved graph requires a fresh two-scan audit before qualification. The approved
+SurrealDB security migration selects exact client/Core 4.0.0. Its scoped qualification
 and historical receipts below do not establish full release qualification.
 Qdrant is temporarily unavailable: its Geo dependency conflicts with the
 published SurrealDB dependency graph. Restoring it requires compatible upstream
@@ -24,7 +25,8 @@ target-specific dependencies, so a finding does not by itself prove execution in
 a particular native build. Conversely, a passing build does not prove an
 advisory unreachable.
 
-The current registry lockfile was scanned on 2026-11-08 using cargo-audit 0.22.2
+The registry lockfile before the LanceDB 0.41.0 refresh was scanned on
+2026-11-08 using cargo-audit 0.22.2
 and RustSec commit `309392b18f6b17022f82c701f300433126901068`. The
 [two-scan receipt](../target/security-2026-0454-0452/audit-20261108T113519Z/report.json)
 records five vulnerability findings and ten unsoundness findings covered by

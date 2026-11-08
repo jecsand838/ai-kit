@@ -504,7 +504,7 @@ cargo test --locked -p storage-kit --test strict_live --no-default-features --fe
 ```
 
 Their combined inventory includes Lance memory/filesystem; Surreal memory,
-RocksDB, SurrealKV, HTTP and WebSocket; Redb memory/file;
+SurrealKV, HTTP and WebSocket; Redb memory/file;
 SQLite/Turso memory/file; and PostgreSQL. The canonical full verifier also tests
 each alternative independently and compiles the full feature matrix.
 
@@ -512,7 +512,7 @@ each alternative independently and compiles the full feature matrix.
 
 The strict target's private database_cases module calls only DatabaseBackend
 operations on the shipped Database. It exercises real Lance memory/filesystem, Surreal memory,
-RocksDB, SurrealKV, HTTP and WebSocket modes. Embedded cases own fresh temporary directories;
+SurrealKV, HTTP and WebSocket modes. Embedded cases own fresh temporary directories;
 remote cases use the configured service and UUID-named collections. Each
 operation case has its own connection and collection, a bounded observation,
 and cleanup after success, assertion failure, or timeout. A grouped test records
@@ -635,7 +635,7 @@ the locked native versions remain unchanged.
 
 ### Native wire and mutation ownership regressions
 
-`surreal_partition_deadline` uses the pinned native public FlatBuffers codec to
+`surreal_partition_deadline` uses the pinned native public CBOR v2 codec to
 exercise exact conflict classification and the original operation deadline for
 partition replacement and collection removal. Collection cases cover retry
 exhaustion including zero retries, context selection, query waits, and backoff
@@ -687,12 +687,15 @@ names, actor type names, or match-arm syntax.
 
 ### SurrealDB release regressions
 
+The following inventory covers the four supported 4.0.0 modes. Qualification
+requires current receipts for the exact source and invocation.
+
 The canonical `strict_live` target also exercises populated `sq_` collection
 create/open/list/scan/drop behavior, exact filtered indexed-vector top-k
 including empty predicates, full-text term
 removal after update and partition replacement/clearing, and concurrent first
 use of the same collection name in three namespace/database scopes. Every case
-runs memory, RocksDB, SurrealKV, HTTP, and WebSocket, aggregates mode failures,
+runs memory, SurrealKV, HTTP, and WebSocket, aggregates mode failures,
 and cleans all owned collections after failure or timeout. Scoped first use
 shares one Database through public clones and settles all three concurrent
 cold-scope creates. Successful responses must report the exact locator and
@@ -706,30 +709,31 @@ isolation, and the unchanged default-context sentinel remain required.
 Full-text mutations preserve
 unrelated records and the existing index inventory without rebuilding indexes.
 Existing focused Surreal score-payload, full-text setup, overwrite, and
-rejected-overwrite regressions also run all five modes. The repeated full-text
+rejected-overwrite regressions also run all four modes. The repeated full-text
 collection-removal case runs 16 create/index/query/immediate-drop cycles per
 mode, alternating `ignore_missing`. It proves the collection is absent, requires
 an error for a second strict drop, and requires completion for an absent-table
 drop with `ignore_missing: true`. It adds no sleeps, readiness workaround, or
 caller retry around removal; usable full-text indexes can still have native
 compaction transactions in flight.
-Nearest-query validation also runs all five modes: empty projection precedes
+Nearest-query validation also runs all four modes: empty projection precedes
 missing indexed `ef` or incompatible distance/`ef`.
 Vector fixtures use shuffled physical IDs so identity order cannot substitute
 for distance ranking.
 
-SurrealDB 3.3.0's versioned
-[debug-test configuration](https://github.com/surrealdb/surrealdb/blob/v3.3.0/.cargo/config.toml)
+SurrealDB 4.0.0's versioned
+[debug-test configuration](https://github.com/surrealdb/surrealdb/blob/v4.0.0/.cargo/config.toml)
 documents an 8 MiB stack for deep native async query execution in unoptimised
-builds. The shared Surreal database cases own and join a thread with that stack and run
-their current-thread Tokio runtime there. This scopes the native debug-test
+builds. The shared Surreal database cases, embedded round trips and the combined
+rename/cast regression own and join a thread with that stack and run their
+current-thread Tokio runtime there. This scopes the native debug-test
 requirement to the fixtures, without a process-wide environment override or
 changed verifier limits. Assertion failures propagate after each case's cleanup
 and the owning thread is joined before the test returns.
 
 The deterministic `surreal_partition_deadline` peer retains its `/health`
 route because the native Rust client's HTTP connection probes that endpoint. Its
-synthetic version response tracks 3.3.0. Its fourteen deadline/conflict cases and
+synthetic version response tracks 4.0.0. Its fourteen deadline/conflict cases and
 the verifier process fixtures are protocol/orchestration evidence only; real native
 behavior requires the strict-live engines and service. Focused vendor runs do
 not replace any complete feature lane or blocking completion gate above.
@@ -752,3 +756,30 @@ the canonical crash case once; do not duplicate that case in a preliminary
 selection. Preserve original receipt identities and platform scope when a later
 private adapter changes. Scoped macOS proof is not Linux or full-workspace
 qualification.
+
+The 4.0.0 migration adds `surrealdb_legacy_store_requires_native_upgrade` and
+`surrealdb_fresh_surrealkv_cold_reopen` to the feature-selected `strict_live`
+target. The former validates the sealed fixture manifest, attempts public
+connection only on a disposable copy, requires the specific native experimental
+3.x upgrade refusal, and verifies the same copy's exact records/catalog through
+a digest-pinned 3.3.0 process. The original fixture is never opened. The latter
+creates a fresh SurrealKV store through the public API, settles its process,
+and compares exact records/catalog from an independent cold reader process.
+
+These cases require Docker and the legacy image in addition to the selected
+4.0.0 Compose service. Prepare the exact image, without retargeting it:
+
+```bash
+docker pull surrealdb/surrealdb@sha256:681c6c22c287421b5c7d99e0fde79b6e0d32c36c1ddeaab2762a1661cb04cd20
+```
+
+Native version output must identify 3.3.0. The public legacy attempt has a
+10-second connection timeout and 30-second external child bound. Old-reader
+startup/readiness is bounded to 60 seconds, each request to 10 seconds, and
+cleanup uses bounded stop/kill/reap observations before any directory reuse.
+Fresh-store seed/read processes each have a 60-second external bound. All
+process outcomes, exact snapshots, and cleanup failures are retained at the
+printed evidence path; a timeout or generic connection error cannot pass the
+upgrade-refusal case. The baseline 3.3.0 success is an intentional version
+boundary red, not a Kit production defect. Fixture reproduction and hashes are
+owned by `tests/fixtures/surrealdb-3.3.0-surrealkv/README.md`.

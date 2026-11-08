@@ -45,7 +45,7 @@ combinations; never use Storage `--all-features`.
 The live target covers these implementation families:
 
 - LanceDB memory and filesystem;
-- SurrealDB memory, RocksDB, SurrealKV, remote WebSocket and remote HTTP;
+- SurrealDB memory, SurrealKV, remote WebSocket and remote HTTP;
 - Redb memory and file StateStore;
 - SQLite/Turso memory and file StateStore when `sqlite` is selected;
 - PostgreSQL StateStore against Docker Postgres.

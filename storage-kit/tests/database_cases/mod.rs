@@ -36,8 +36,6 @@ enum Mode {
     #[cfg(feature = "surrealdb")]
     SurrealMemory,
     #[cfg(feature = "surrealdb")]
-    SurrealRocks,
-    #[cfg(feature = "surrealdb")]
     SurrealKv,
     #[cfg(feature = "surrealdb")]
     SurrealHttp,
@@ -47,9 +45,8 @@ enum Mode {
 
 impl Mode {
     #[cfg(feature = "surrealdb")]
-    const SURREAL: [Self; 5] = [
+    const SURREAL: [Self; 4] = [
         Self::SurrealMemory,
-        Self::SurrealRocks,
         Self::SurrealKv,
         Self::SurrealHttp,
         Self::SurrealWs,
@@ -59,7 +56,7 @@ impl Mode {
     fn surreal_cases(modes: &[Self], cases: &[Case]) {
         let modes = modes.to_vec();
         let cases = cases.to_vec();
-        // SurrealDB 3.3.0's .cargo/config.toml documents the 8 MiB stack
+        // SurrealDB 4.0.0's .cargo/config.toml documents the 8 MiB stack
         // needed by deep native query futures in unoptimised builds. Keep
         // that test-runtime requirement local to these native regressions.
         let worker = std::thread::Builder::new()
@@ -104,11 +101,7 @@ impl Mode {
     fn is_surreal(self) -> bool {
         match self {
             #[cfg(feature = "surrealdb")]
-            Self::SurrealMemory
-            | Self::SurrealRocks
-            | Self::SurrealKv
-            | Self::SurrealHttp
-            | Self::SurrealWs => true,
+            Self::SurrealMemory | Self::SurrealKv | Self::SurrealHttp | Self::SurrealWs => true,
             Self::Lance | Self::LanceMemory => false,
         }
     }
@@ -119,13 +112,6 @@ impl Mode {
             Self::LanceMemory => DatabaseConfig::lance(LanceConfig::embedded_path("memory://")),
             #[cfg(feature = "surrealdb")]
             Self::SurrealMemory => DatabaseConfig::surreal(SurrealConfig::default()),
-            #[cfg(feature = "surrealdb")]
-            Self::SurrealRocks => DatabaseConfig::surreal(SurrealConfig {
-                mode: SurrealModeConfig::RocksDb {
-                    path: directory.join("rocks"),
-                },
-                ..SurrealConfig::default()
-            }),
             #[cfg(feature = "surrealdb")]
             Self::SurrealKv => DatabaseConfig::surreal(SurrealConfig {
                 mode: SurrealModeConfig::SurrealKv {
@@ -4023,16 +4009,6 @@ fn surrealdb_memory_catalog_data_schema() {
 #[test]
 fn surrealdb_memory_query_index() {
     Mode::surreal_cases(&[Mode::SurrealMemory], &Case::QUERY_INDEX);
-}
-#[cfg(feature = "surrealdb")]
-#[test]
-fn surrealdb_rocksdb_catalog_data_schema() {
-    Mode::surreal_cases(&[Mode::SurrealRocks], &Case::CATALOG_DATA);
-}
-#[cfg(feature = "surrealdb")]
-#[test]
-fn surrealdb_rocksdb_query_index() {
-    Mode::surreal_cases(&[Mode::SurrealRocks], &Case::QUERY_INDEX);
 }
 #[cfg(feature = "surrealdb")]
 #[test]

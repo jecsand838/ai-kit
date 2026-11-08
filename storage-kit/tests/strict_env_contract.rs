@@ -29,9 +29,8 @@ enum ReadinessStall {
 }
 
 impl VerifierFixture {
-    const REQUIRED: [&'static str; 15] = [
+    const REQUIRED: [&'static str; 14] = [
         "TEST_LANCEDB_EMBEDDED_PATH",
-        "TEST_SURREALDB_ROCKSDB_PATH",
         "TEST_SURREALDB_SURREALKV_PATH",
         "TEST_SURREALDB_REMOTE_WS",
         "TEST_SURREALDB_REMOTE_HTTP",
@@ -244,7 +243,6 @@ printf 'curl\n' >> "${STORAGE_CALLS}"
             .env("STORAGE_FAILURE", failure);
         for name in [
             "TEST_LANCEDB_EMBEDDED_PATH",
-            "TEST_SURREALDB_ROCKSDB_PATH",
             "TEST_SURREALDB_SURREALKV_PATH",
         ] {
             command.env(name, self.directory.path().join(name));
@@ -909,6 +907,43 @@ fn strict_verifier_runs_selected_deterministic_lanes_before_owned_services() {
             .trim(),
         "1"
     );
+}
+
+#[test]
+fn selected_surreal_verifier_does_not_require_deleted_rocksdb_path() {
+    let fixture = VerifierFixture::new();
+    let output = fixture.run("none", Some("TEST_SURREALDB_ROCKSDB_PATH"));
+    assert!(output.status.success(), "{output:?}");
+    fixture.assert_live_once();
+    let calls = fixture.calls();
+    assert!(
+        calls.iter().any(|call| call[0] == "curl"),
+        "readiness must run"
+    );
+    assert!(
+        calls
+            .iter()
+            .any(|call| call[0] == "docker" && call.iter().any(|arg| arg == "up"))
+    );
+    assert_eq!(
+        fs::read_to_string(fixture.directory.path().join("downs"))
+            .unwrap()
+            .trim(),
+        "1",
+        "owned service cleanup must run exactly once"
+    );
+    for name in [
+        "TEST_LANCEDB_EMBEDDED_PATH",
+        "TEST_SURREALDB_SURREALKV_PATH",
+    ] {
+        let root = fixture.directory.path().join(name);
+        assert!(root.is_dir(), "retained mode must allocate its owned child");
+        assert_eq!(
+            fs::read_dir(root).unwrap().count(),
+            0,
+            "owned children must be cleaned"
+        );
+    }
 }
 
 #[test]

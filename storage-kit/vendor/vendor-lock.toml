@@ -29,8 +29,8 @@ published_at = "2026-11-03T15:22:58Z"
 sha256 = "9c1bdcc9438db96a0b74e2ef6455a966e6042f08367642c376f7812af6f4ead8"
 
 [vendors.turso]
-tag = "v0.8.2"
-archive = "turso-0.8.2.zip"
-extracted_dir = "turso-0.8.2"
-published_at = "2026-10-06T07:27:41Z"
-sha256 = "388e77695ed9086cc7fcc96b3d6473756bab9954c390a62aef16d5caabdceccd"
+tag = "v0.8.3"
+archive = "turso-0.8.3.zip"
+extracted_dir = "turso-0.8.3"
+published_at = "2026-10-12T15:03:37Z"
+sha256 = "8708ae13069cfd1570526ec2c0df9be173dc3f15469b45a728d98c786e0120b5"

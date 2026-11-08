@@ -305,8 +305,8 @@ The supplied implementations rely on distinct native mechanisms:
   commit/abort and tombstones. See the repository-only research archive
   `vendor/redb-4.3.0.zip` (excluded from the published crate), members
   `src/db.rs` and `src/transactions.rs`; no newer Redb guarantee is implied.
-- Turso 0.8.2 backs SQLite with dedicated actor connections and native
-  immediate transactions. Pinned `vendor/turso-0.8.2.zip` members under
+- Turso 0.8.3 backs SQLite with dedicated actor connections and native
+  immediate transactions. Pinned `vendor/turso-0.8.3.zip` members under
   `bindings/rust/src/` (`connection.rs`, `rows.rs`, `lib.rs`, and `transaction.rs`)
   ground its native operations: batches acquire exclusive connection access,
   while query rows retain shared access until exhaustion, error, or drop.

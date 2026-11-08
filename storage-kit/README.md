@@ -4,6 +4,8 @@ This crate is in early development. Backwards compatibility is not guaranteed
 until `1.0.0`; pin exact versions and review the
 [release notes](https://github.com/jecsand838/ai-kit/releases) before upgrading.
 
+Repository guides and examples linked below track `main`.
+
 `storage-kit` provides two focused Rust APIs:
 
 - `Database` for portable data, retrieval, and indexes with always-available LanceDB
@@ -69,11 +71,11 @@ The default 30-second timeout bounds admission and observation, not accepted
 commit authority or final filesystem joining. Read preconditions inside the
 transaction; reconcile a durable application receipt after ambiguous errors.
 
-The [evidence ledger](docs/lancedb-state-store-prototype.md) records the embedded
+The [evidence ledger](https://github.com/jecsand838/ai-kit/blob/main/storage-kit/docs/lancedb-state-store-prototype.md) records the embedded
 backend's macOS/APFS and Linux/ext4 validation, consumer and packaged-build
 checks, and measured capacity. Those results apply to the recorded source,
 locked dependency graph, and execution environments.
-The [focused verifier](docs/testing.md#embedded-lance-statestore)
+The [focused verifier](https://github.com/jecsand838/ai-kit/blob/main/storage-kit/docs/testing.md#embedded-lance-statestore)
 runs ordinary real-engine, public-API, and owned-process checks. The privileged
 fault campaign remains excluded. JSON values retain the existing public
 representation; the private codec does not impose a nesting limit.
@@ -251,25 +253,25 @@ caller-defined static implementations are unchanged.
 
 Dependencies use public registry releases without workspace source patches.
 Review the temporary advisory exceptions in
-[the dependency security policy](../docs/security-dependencies.md).
+[the dependency security policy](https://github.com/jecsand838/ai-kit/blob/main/docs/security-dependencies.md).
 Use the explicit supported feature lanes instead of Storage `--all-features`.
 
 Run `bash storage-kit/scripts/verify_strict_live.sh` for default Lance coverage.
 Use `--backend NAME`, `--changed-since BASE`, or `--all-backends` for additional
-coverage; see [testing](docs/testing.md). Alternative services and their
+coverage; see [testing](https://github.com/jecsand838/ai-kit/blob/main/storage-kit/docs/testing.md). Alternative services and their
 credentials are required only when selected.
 
 ## More
 
-- [Portable API and transaction contract](docs/PORTABLE_API.md)
-- [Architecture](ARCHITECTURE.md)
-- [Capability matrix](docs/capability-matrix.md)
-- [Testing](docs/testing.md)
-- [Contributor rules](AGENTS.md)
+- [Portable API and transaction contract](https://github.com/jecsand838/ai-kit/blob/main/storage-kit/docs/PORTABLE_API.md)
+- [Architecture](https://github.com/jecsand838/ai-kit/blob/main/storage-kit/ARCHITECTURE.md)
+- [Capability matrix](https://github.com/jecsand838/ai-kit/blob/main/storage-kit/docs/capability-matrix.md)
+- [Testing](https://github.com/jecsand838/ai-kit/blob/main/storage-kit/docs/testing.md)
+- [Contributor rules](https://github.com/jecsand838/ai-kit/blob/main/storage-kit/AGENTS.md)
 
 ## Direct public-trait tests
 
 Run `bash scripts/check_mock_contracts.sh --crate storage-kit` from the workspace
 root for the credential-free mock lane. The workspace primary CI entrypoint is
-`bash scripts/check_ci.sh`. See [mock testing](../docs/mock-testing.md) for
+`bash scripts/check_ci.sh`. See [mock testing](https://github.com/jecsand838/ai-kit/blob/main/docs/mock-testing.md) for
 targets, evidence, runtime qualification, and the separate release/live gates.

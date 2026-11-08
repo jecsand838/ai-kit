@@ -124,7 +124,6 @@ pub mod config {
     pub use crate::state_stores::config::{SqliteStateStoreConfig, SqliteStateStoreLocation};
 }
 
-/// Revisioned records, keys, and pagination.
 pub mod record;
 
 /// The unique owned transaction handle.

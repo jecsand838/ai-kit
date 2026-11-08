@@ -8,6 +8,7 @@ import tomllib
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from urllib.parse import unquote, urlsplit
 
 
 class DocumentationContractTests(unittest.TestCase):
@@ -448,6 +449,23 @@ class DocumentationContractTests(unittest.TestCase):
             roots[owner] = destination
         return roots
 
+    def markdown_lines(self, path: Path):
+        fence = None
+        for line in path.read_text(encoding="utf-8").splitlines():
+            marker = re.match(r"^\s*(`{3,}|~{3,})", line)
+            if marker:
+                if fence is None:
+                    fence = marker[1]
+                elif marker[1][0] == fence[0] and len(marker[1]) >= len(fence):
+                    fence = None
+            elif fence is None:
+                yield line
+
+    def markdown_links(self, path: Path):
+        for line in self.markdown_lines(path):
+            for match in re.finditer(r"\]\((<[^>]+>|[^\s)]+)(?:\s+\"[^\"]*\")?\)", line):
+                yield match[1].strip("<>")
+
     def local_link_failures(self, paths: set[Path]) -> list[str]:
         # Only ordinary inline file links outside code fences are checked.
         # Beyond explicitly adopted files, historical records are not traversed.
@@ -457,34 +475,148 @@ class DocumentationContractTests(unittest.TestCase):
         for path in sorted(paths):
             if path.suffix != ".md":
                 continue
-            fence = None
-            for line in path.read_text(encoding="utf-8").splitlines():
-                marker = re.match(r"^\s*(`{3,}|~{3,})", line)
-                if marker:
-                    if fence is None:
-                        fence = marker[1]
-                    elif marker[1][0] == fence[0] and len(marker[1]) >= len(fence):
-                        fence = None
+            for target in self.markdown_links(path):
+                if target.startswith("#") or re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*:", target):
                     continue
-                if fence is not None:
+                target = target.split("#", 1)[0]
+                destination = path.parent / target
+                if destination.exists():
                     continue
-                for match in re.finditer(r"\]\((<[^>]+>|[^\s)]+)(?:\s+\"[^\"]*\")?\)", line):
-                    target = match[1].strip("<>")
-                    if target.startswith("#") or re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*:", target):
-                        continue
-                    target = target.split("#", 1)[0]
-                    destination = path.parent / target
-                    if destination.exists():
-                        continue
-                    prefix = evidence_roots.get(path)
-                    if (prefix is not None and not Path(target).is_absolute()
-                            and destination.resolve().is_relative_to(prefix)):
-                        continue
-                    failures.append(f"{path.relative_to(self.workspace)} -> {target}")
+                prefix = evidence_roots.get(path)
+                if (prefix is not None and not Path(target).is_absolute()
+                        and destination.resolve().is_relative_to(prefix)):
+                    continue
+                failures.append(f"{path.relative_to(self.workspace)} -> {target}")
         return failures
 
     def test_documented_markdown_local_file_links_resolve(self) -> None:
         self.assertEqual(self.local_link_failures(self.documented_paths()), [], "broken documentation file links")
+
+    def markdown_anchors(self, path: Path) -> set[str]:
+        # Published README targets use ordinary ATX headings or explicit IDs;
+        # this is not a general GitHub Markdown renderer.
+        anchors, headings = set(), set()
+        for line in self.markdown_lines(path):
+            anchors.update(re.findall(r'\b(?:id|name)=[\"\']([^\"\']+)[\"\']', line))
+            heading = re.match(r"^ {0,3}#{1,6}\s+(.+?)\s*#*\s*$", line)
+            if heading:
+                slug = re.sub(r"[^\w\- ]", "", heading[1].lower()).replace(" ", "-")
+                anchor, suffix = slug, 0
+                while anchor in headings:
+                    suffix += 1
+                    anchor = f"{slug}-{suffix}"
+                headings.add(anchor)
+                anchors.add(anchor)
+        return anchors
+
+    def published_readme_link_failures(self, paths: set[Path]) -> list[str]:
+        failures = []
+        for path in sorted(paths):
+            for target in self.markdown_links(path):
+                url = urlsplit(target)
+                destination, kind = None, "blob"
+                if target.startswith("#"):
+                    destination = path
+                elif not url.scheme or not url.netloc:
+                    failures.append(f"{path.relative_to(self.workspace)} -> {target}: relative publication link")
+                    continue
+                elif url.netloc == "github.com":
+                    match = re.fullmatch(r"/jecsand838/ai-kit/(blob|tree)/main/(.+)", unquote(url.path))
+                    if match:
+                        kind = match[1]
+                        destination = self.workspace / match[2]
+                if destination is None:
+                    continue
+                destination = destination.resolve()
+                exists = destination.is_file() if kind == "blob" else destination.is_dir()
+                if not destination.is_relative_to(self.workspace.resolve()) or not exists:
+                    failures.append(f"{path.relative_to(self.workspace)} -> {target}: missing {kind} target")
+                elif url.fragment and (kind != "blob" or unquote(url.fragment) not in self.markdown_anchors(destination)):
+                    failures.append(f"{path.relative_to(self.workspace)} -> {target}: missing anchor")
+        return failures
+
+    def test_packaged_readme_links_survive_publication(self) -> None:
+        workspace = tomllib.loads((self.workspace / "Cargo.toml").read_text())["workspace"]
+        readmes = set()
+        for member in workspace["members"]:
+            manifest = tomllib.loads((self.workspace / member / "Cargo.toml").read_text())
+            readmes.add(self.workspace / member / manifest["package"]["readme"])
+        self.assertEqual(self.published_readme_link_failures(readmes), [], "broken packaged README links")
+
+    def test_published_readme_link_boundaries(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = Path(temporary)
+            source = workspace / "README.md"
+            guide = workspace / "docs/guide.md"
+            guide.parent.mkdir()
+            guide.write_text('# Get Started\n<a id="explicit"></a>\n~~~md\n# Fenced\n~~~\n', encoding="utf-8")
+            base = "https://github.com/jecsand838/ai-kit/"
+            cases = [
+                ("docs/guide.md", False), ("../guide.md", False), ("/docs/guide.md", False),
+                (base + "blob/main/docs/guide.md#get-started", True),
+                (base + "blob/main/docs/guide.md#explicit", True),
+                (base + "blob/main/docs/missing.md", False),
+                (base + "blob/main/docs/guide.md#missing", False),
+                (base + "blob/main/docs/guide.md#fenced", False),
+                (base + "tree/main/docs", True), (base + "blob/main/docs", False),
+                (base + "tree/main/docs/guide.md", False),
+                ("#local", True), ("#missing", False),
+                ("https://docs.rs/app-kit/0.0.4/app_kit/", True),
+            ]
+            with patch.object(self, "workspace", workspace):
+                for target, allowed in cases:
+                    with self.subTest(target=target):
+                        source.write_text(f"# Local\n[guide]({target})\n```md\n[example](missing.md)\n```\n", encoding="utf-8")
+                        self.assertEqual(self.published_readme_link_failures({source}) == [], allowed)
+
+    def assert_storage_rustdoc_dependency_root(self) -> None:
+        manifest = tomllib.loads((self.workspace / "storage-kit/Cargo.toml").read_text())
+        packages = tomllib.loads((self.workspace / "Cargo.lock").read_text())["package"]
+        storage = next(package for package in packages if package["name"] == "storage-kit")
+        dependency = next(value.split() for value in storage["dependencies"] if value.split()[0] == "bitflags")
+        versions = [package["version"] for package in packages if package["name"] == "bitflags"
+                    and (len(dependency) == 1 or package["version"] == dependency[1])]
+        self.assertEqual(len(versions), 1, "Storage's direct bitflags version must resolve unambiguously")
+        args = manifest["package"]["metadata"]["docs"]["rs"].get("rustdoc-args", [])
+        roots = []
+        for index, arg in enumerate(args):
+            if arg == "--extern-html-root-url":
+                self.assertLess(index + 1, len(args), "external root flag needs a value")
+                roots.append(args[index + 1])
+            elif arg.startswith("--extern-html-root-url="):
+                roots.append(arg.split("=", 1)[1])
+        bitflags = [root for root in roots if root.startswith("bitflags=")]
+        self.assertTrue(bitflags, "Storage needs an explicit bitflags documentation root")
+        self.assertEqual(bitflags[-1], f"bitflags=https://docs.rs/bitflags/{versions[0]}")
+
+    def test_storage_rustdoc_dependency_matches_locked_version(self) -> None:
+        self.assert_storage_rustdoc_dependency_root()
+
+    def test_storage_rustdoc_rejects_missing_or_wrong_dependency_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = Path(temporary)
+            (workspace / "storage-kit").mkdir()
+            (workspace / "Cargo.lock").write_text('''[[package]]
+name = "storage-kit"
+dependencies = ["bitflags 2.11.0"]
+[[package]]
+name = "bitflags"
+version = "1.3.2"
+[[package]]
+name = "bitflags"
+version = "2.11.0"
+''', encoding="utf-8")
+            with patch.object(self, "workspace", workspace):
+                for version in (None, "1.3.2", "2.11.0"):
+                    with self.subTest(version=version):
+                        args = [] if version is None else ["--extern-html-root-url", f"bitflags=https://docs.rs/bitflags/{version}"]
+                        (workspace / "storage-kit/Cargo.toml").write_text(
+                            f"[package.metadata.docs.rs]\nrustdoc-args = {args!r}\n", encoding="utf-8")
+                        if version == "2.11.0":
+                            self.assert_storage_rustdoc_dependency_root()
+                        else:
+                            with self.assertRaises(AssertionError):
+                                self.assert_storage_rustdoc_dependency_root()
 
     def test_rustdoc_logos_work_outside_the_workspace_site(self) -> None:
         logos = set()

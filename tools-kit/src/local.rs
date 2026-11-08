@@ -2,7 +2,7 @@
 //!
 //! [`ToolRegistration::function`](crate::local::ToolRegistration::function) accepts normalized invocation values;
 //! [`ToolRegistration::typed`](crate::local::ToolRegistration::typed) derives schemas for typed arguments and results.
-//! Interactive handlers use their [`ToolInvocationContext`](crate::local::ToolInvocationContext) and resume through
+//! Interactive handlers use their [`ToolInvocationContext`] and resume through
 //! the same unique handler. Construct a source with [`crate::Toolset::local`].
 //!
 //! # Caller interaction and cancellation
@@ -80,42 +80,8 @@ use crate::{
 ///
 /// # Examples
 ///
-/// ```
-///
-/// # #[tokio::main(flavor = "current_thread")]
-/// # async fn main() -> Result<(), tools_kit::ToolError> {
-/// use tools_kit::{declaration::{ToolInfo, ToolName}, schema::JsonSchema};
-/// let info = ToolInfo::new(
-///     ToolName::new("ping")?,
-///     JsonSchema::strict(serde_json::json!({"type":"object"})),
-/// );
-/// use tools_kit::{local::ToolRegistration, execution::ToolResult};
-/// let registration = ToolRegistration::function(info, |_| async { Ok(ToolResult::text("pong")) });
-/// use tools_kit::{
-///     ToolHandlerBackend, Toolset, ToolsetBackend,
-///     execution::{ToolHandlerInput, ToolHandlerOutput, ToolInvocation},
-/// };
-/// let tools = Toolset::local(vec![registration])?;
-/// let result = async {
-///     let mut handler = tools.tool_handler(ToolName::new("ping")?).await?;
-///     handler
-///         .step(ToolHandlerInput::Invoke(ToolInvocation {
-///             call_id: None,
-///             arguments: serde_json::json!({}),
-///         }))
-///         .await
-/// }.await;
-/// let cleanup = tools.shutdown().await;
-/// if let Err(error) = &cleanup {
-///     eprintln!("Cleanup failed: {error}");
-/// }
-/// assert!(matches!(result?, ToolHandlerOutput::Completed(_)));
-/// cleanup?;
-///
-/// # Ok(())
-/// # }
-/// ```
-///
+/// See the [crate-level example](crate) for registration, invocation, and
+/// shutdown with a completed result.
 #[derive(Clone)]
 pub struct ToolRegistration {
     inner: Arc<RegisteredTool>,

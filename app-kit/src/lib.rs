@@ -113,7 +113,6 @@ mod app;
 mod storage;
 mod workspace;
 
-/// Opaque workflow definitions and runtime handles.
 pub mod workflow;
 
 /// An open application generation.
@@ -773,13 +772,8 @@ impl<
 impl<A: AgentBackend> AgentSpec<A> {
     /// Constructs one configured lower-agent entry.
     ///
-    /// The key and revision are caller-owned logical binding metadata, validated by
-    /// [`App::open`]. Keep the same revision only while the configuration is compatible.
-    /// App never derives compatibility from the opaque lower Agent identity. A
-    /// successful open takes responsibility for consuming Agent shutdown.
-    ///
-    /// Construction is local and does not start a service. See [caller-owned Agent
-    /// composition](AgentSpec) for an executable recipe using direct trait mocks.
+    /// Construction is local and does not start a service. See [`AgentSpec`] for
+    /// binding compatibility, ownership, and an executable caller-owned Agent recipe.
     #[must_use]
     pub fn new(key: String, revision: String, agent: A) -> Self {
         Self {

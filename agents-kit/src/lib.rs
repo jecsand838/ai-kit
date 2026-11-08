@@ -75,26 +75,17 @@ mod agent;
 mod agent_storage;
 mod backends;
 mod builder;
-/// Agent construction settings and backend runtime policies.
 pub mod config;
-/// Conversation handles, backend contracts, and conversation requests and responses.
 pub mod conversation;
 mod core;
 pub mod error;
 mod file;
-/// Validated identities and agent inventory information.
 pub mod identity;
-/// Knowledge sources, scopes, ingestion requests, and retrieval policies.
 pub mod knowledge;
-/// Model inventory, opaque selectors, and reasoning settings.
 pub mod model;
-/// Durable notifications, caller resolutions, and notification streams.
 pub mod notification;
-/// Prompt requests, responses, and incremental output streams.
 pub mod prompt;
-/// Portable tool selection and managed tool inventory.
 pub mod tool;
-/// Workspace handles, backend contracts, defaults, and workspace requests.
 pub mod workspace;
 
 pub use crate::agent::{Agent, AgentBackend};

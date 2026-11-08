@@ -1,8 +1,8 @@
 //! MCP client construction and independently owned server lifecycle.
 //!
-//! [`McpClientConfig`](crate::mcp::McpClientConfig) selects stdio or Streamable HTTP plus naming and interaction
-//! policy. Construction is passive; [`crate::Toolset::mcp`] connects. The optional
-//! `mcp-server` feature adds a server whose consuming shutdown settles serving
+//! [`McpClientConfig`] selects stdio or Streamable HTTP plus naming and
+//! interaction policy. Construction is passive; [`crate::Toolset::mcp`] connects.
+//! The optional `mcp-server` feature adds a server whose consuming shutdown settles serving
 //! work while the caller retains separate toolset shutdown authority.
 //!
 //! # Invoke an explicitly configured service

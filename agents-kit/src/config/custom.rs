@@ -7,7 +7,9 @@ use crate::{KitError, ModelSelector, ToolSelection};
 /// ```
 /// use agents_kit::config::CustomLoopLimits;
 /// let limits = CustomLoopLimits::new(8, 0, 1)?;
+/// assert_eq!(limits.max_model_turns(), 8);
 /// assert_eq!(limits.max_tool_actions(), 0);
+/// assert_eq!(limits.max_parallel_tool_actions(), 1);
 /// # Ok::<(), agents_kit::KitError>(())
 /// ```
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
@@ -53,13 +55,7 @@ impl CustomLoopLimits {
 
     /// Returns the maximum number of model turns admitted by one prompt.
     ///
-    /// ```
-    /// use agents_kit::config::CustomLoopLimits;
-    ///
-    /// let limits = CustomLoopLimits::new(8, 16, 2)?;
-    /// assert_eq!(limits.max_model_turns(), 8);
-    /// # Ok::<(), agents_kit::KitError>(())
-    /// ```
+    /// See [`CustomLoopLimits`] for construction and inspection.
     #[must_use]
     pub fn max_model_turns(self) -> usize {
         self.max_model_turns.get()
@@ -71,13 +67,7 @@ impl CustomLoopLimits {
     /// budget fails the prompt with
     /// [`crate::error::ErrorKind::InvalidState`] before executing that batch.
     ///
-    /// ```
-    /// use agents_kit::config::CustomLoopLimits;
-    ///
-    /// let limits = CustomLoopLimits::new(8, 0, 2)?;
-    /// assert_eq!(limits.max_tool_actions(), 0);
-    /// # Ok::<(), agents_kit::KitError>(())
-    /// ```
+    /// See [`CustomLoopLimits`] for construction and inspection.
     #[must_use]
     pub fn max_tool_actions(self) -> usize {
         self.max_tool_actions
@@ -85,13 +75,7 @@ impl CustomLoopLimits {
 
     /// Returns the maximum number of tool actions that may execute concurrently.
     ///
-    /// ```
-    /// use agents_kit::config::CustomLoopLimits;
-    ///
-    /// let limits = CustomLoopLimits::new(8, 16, 2)?;
-    /// assert_eq!(limits.max_parallel_tool_actions(), 2);
-    /// # Ok::<(), agents_kit::KitError>(())
-    /// ```
+    /// See [`CustomLoopLimits`] for construction and inspection.
     #[must_use]
     pub fn max_parallel_tool_actions(self) -> usize {
         self.max_parallel_tool_actions.get()
@@ -124,9 +108,13 @@ pub enum CustomToolApproval {
 /// ```
 /// use agents_kit::{config::{CustomAgentConfig, CustomLoopLimits, CustomToolApproval},
 ///     model::ModelSelector, tool::ToolSelection};
+/// let limits = CustomLoopLimits::new(4, 0, 1)?;
 /// let config = CustomAgentConfig::new(ModelSelector::new("exact-model-id")?,
-///     ToolSelection::None, CustomLoopLimits::new(4, 0, 1)?, CustomToolApproval::Deny)?;
+///     ToolSelection::None, limits, CustomToolApproval::Deny)?;
+/// assert_eq!(config.default_model().as_str(), "exact-model-id");
 /// assert_eq!(config.default_tool_selection(), &ToolSelection::None);
+/// assert_eq!(config.loop_limits(), limits);
+/// assert_eq!(config.tool_approval(), CustomToolApproval::Deny);
 /// # Ok::<(), agents_kit::KitError>(())
 /// ```
 #[derive(Clone, Debug)]
@@ -163,20 +151,7 @@ impl CustomAgentConfig {
 
     /// Returns the configured default model selector.
     ///
-    /// ```
-    /// use agents_kit::{
-    ///     config::{CustomAgentConfig, CustomLoopLimits, CustomToolApproval},
-    ///     model::ModelSelector,
-    ///     tool::ToolSelection,
-    /// };
-    ///
-    /// let config = CustomAgentConfig::new(
-    ///     ModelSelector::new("model-slug")?, ToolSelection::Auto,
-    ///     CustomLoopLimits::new(8, 16, 2)?, CustomToolApproval::Allow,
-    /// )?;
-    /// assert_eq!(config.default_model().as_str(), "model-slug");
-    /// # Ok::<(), agents_kit::KitError>(())
-    /// ```
+    /// See [`CustomAgentConfig`] for construction and inspection.
     #[must_use]
     pub fn default_model(&self) -> &ModelSelector {
         &self.default_model
@@ -184,20 +159,7 @@ impl CustomAgentConfig {
 
     /// Returns the configured default tool selection.
     ///
-    /// ```
-    /// use agents_kit::{
-    ///     config::{CustomAgentConfig, CustomLoopLimits, CustomToolApproval},
-    ///     model::ModelSelector,
-    ///     tool::ToolSelection,
-    /// };
-    ///
-    /// let config = CustomAgentConfig::new(
-    ///     ModelSelector::new("model-slug")?, ToolSelection::Auto,
-    ///     CustomLoopLimits::new(8, 16, 2)?, CustomToolApproval::Allow,
-    /// )?;
-    /// assert_eq!(config.default_tool_selection(), &ToolSelection::Auto);
-    /// # Ok::<(), agents_kit::KitError>(())
-    /// ```
+    /// See [`CustomAgentConfig`] for construction and inspection.
     #[must_use]
     pub fn default_tool_selection(&self) -> &ToolSelection {
         &self.default_tool_selection
@@ -205,21 +167,7 @@ impl CustomAgentConfig {
 
     /// Returns the configured bounds for one prompt's model and tool work.
     ///
-    /// ```
-    /// use agents_kit::{
-    ///     config::{CustomAgentConfig, CustomLoopLimits, CustomToolApproval},
-    ///     model::ModelSelector,
-    ///     tool::ToolSelection,
-    /// };
-    ///
-    /// let limits = CustomLoopLimits::new(8, 16, 2)?;
-    /// let config = CustomAgentConfig::new(
-    ///     ModelSelector::new("model-slug")?, ToolSelection::Auto,
-    ///     limits, CustomToolApproval::Allow,
-    /// )?;
-    /// assert_eq!(config.loop_limits(), limits);
-    /// # Ok::<(), agents_kit::KitError>(())
-    /// ```
+    /// See [`CustomAgentConfig`] for construction and inspection.
     #[must_use]
     pub fn loop_limits(&self) -> CustomLoopLimits {
         self.loop_limits
@@ -227,20 +175,7 @@ impl CustomAgentConfig {
 
     /// Returns the approval policy for model-requested tool actions.
     ///
-    /// ```
-    /// use agents_kit::{
-    ///     config::{CustomAgentConfig, CustomLoopLimits, CustomToolApproval},
-    ///     model::ModelSelector,
-    ///     tool::ToolSelection,
-    /// };
-    ///
-    /// let config = CustomAgentConfig::new(
-    ///     ModelSelector::new("model-slug")?, ToolSelection::Auto,
-    ///     CustomLoopLimits::new(8, 16, 2)?, CustomToolApproval::Interaction,
-    /// )?;
-    /// assert_eq!(config.tool_approval(), CustomToolApproval::Interaction);
-    /// # Ok::<(), agents_kit::KitError>(())
-    /// ```
+    /// See [`CustomAgentConfig`] for construction and inspection.
     #[must_use]
     pub fn tool_approval(&self) -> CustomToolApproval {
         self.tool_approval

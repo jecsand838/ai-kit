@@ -4,6 +4,8 @@ This crate is in early development. Backwards compatibility is not guaranteed
 until `1.0.0`; pin exact versions and review the
 [release notes](https://github.com/jecsand838/ai-kit/releases) before upgrading.
 
+Repository guides and examples linked below track `main`.
+
 `providers-kit` is a portable provider and model API for OpenAI, Anthropic,
 Gemini, and Ollama.
 
@@ -90,15 +92,15 @@ behavior.
 `KitError` is opaque and exposes provider-neutral `error::ErrorKind` values,
 operation/phase context, and typed response-validation reasons. Default formatting
 is safe for ordinary logs; bounded native diagnostics require explicit access.
-See [the error contract and provider mappings](docs/PORTABLE_API.md#errors).
+See [the error contract and provider mappings](https://github.com/jecsand838/ai-kit/blob/main/providers-kit/docs/PORTABLE_API.md#errors).
 
 See:
 
-- [Portable API](docs/PORTABLE_API.md)
-- [Architecture](ARCHITECTURE.md)
-- [Strict Testing](docs/STRICT_TESTING.md)
-- [Behavior Proof Policy](docs/BEHAVIOR_PROOF_POLICY.md)
-- [Provider notes](docs/providers)
+- [Portable API](https://github.com/jecsand838/ai-kit/blob/main/providers-kit/docs/PORTABLE_API.md)
+- [Architecture](https://github.com/jecsand838/ai-kit/blob/main/providers-kit/ARCHITECTURE.md)
+- [Strict Testing](https://github.com/jecsand838/ai-kit/blob/main/providers-kit/docs/STRICT_TESTING.md)
+- [Behavior Proof Policy](https://github.com/jecsand838/ai-kit/blob/main/providers-kit/docs/BEHAVIOR_PROOF_POLICY.md)
+- [Provider notes](https://github.com/jecsand838/ai-kit/tree/main/providers-kit/docs/providers)
 
 Validation:
 
@@ -135,12 +137,12 @@ pre-provisioned and borrowed; the suite never mutates or deletes them. The
 separate Gemini consistency probes create and delete fresh owned stores under
 their narrow fixture exception. Those probes do not replace the borrowed
 positive cases, and management absence does not prove retrieval erasure.
-See [Strict Testing](docs/STRICT_TESTING.md) for exact evidence requirements,
+See [Strict Testing](https://github.com/jecsand838/ai-kit/blob/main/providers-kit/docs/STRICT_TESTING.md) for exact evidence requirements,
 the narrow native fixture/cleanup exceptions, and validation policy.
 
 ## Direct public-trait tests
 
 Run `bash scripts/check_mock_contracts.sh --crate providers-kit` from the workspace
 root for the credential-free mock lane. The workspace primary CI entrypoint is
-`bash scripts/check_ci.sh`. See [mock testing](../docs/mock-testing.md) for
+`bash scripts/check_ci.sh`. See [mock testing](https://github.com/jecsand838/ai-kit/blob/main/docs/mock-testing.md) for
 targets, evidence, runtime qualification, and the separate release/live gates.

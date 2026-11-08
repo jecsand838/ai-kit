@@ -69,17 +69,11 @@
 )]
 #![forbid(unsafe_code)]
 
-/// Tool names and source-neutral executable declarations.
 pub mod declaration;
-/// Invocation, continuation, and completed-result values.
 pub mod execution;
-/// Portable caller interactions requested during execution.
 pub mod interaction;
-/// In-process tool registration and interaction context.
 pub mod local;
-/// MCP client configuration and optional independent server support.
 pub mod mcp;
-/// JSON Schema values and validation diagnostics.
 pub mod schema;
 
 mod error;

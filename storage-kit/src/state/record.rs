@@ -1,8 +1,8 @@
 //! Revisioned state records, validated keys, and pagination.
 //!
-//! [`StateKey`](crate::state::record::StateKey) separates a validated namespace from a namespace-local key.
-//! Write a [`StateRecord`](crate::state::record::StateRecord) through [`crate::StateTransactionBackend`] and read
-//! a [`StateRecordSnapshot`](crate::state::record::StateRecordSnapshot) to observe its per-key revision. Listing uses
+//! [`StateKey`] separates a validated namespace from a namespace-local key.
+//! Write a [`StateRecord`] through [`crate::StateTransactionBackend`] and read
+//! a [`StateRecordSnapshot`] to observe its per-key revision. Listing uses
 //! literal prefixes and exclusive key cursors; multiple pages do not form a
 //! historical snapshot. JSON payload clones support caller-owned copy-on-write
 //! editing through [`Arc::make_mut`](std::sync::Arc::make_mut), without publishing edits automatically.

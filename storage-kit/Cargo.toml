@@ -40,8 +40,8 @@ object_store = { version = "=0.14.2", default-features = false }
 arrow-array = { version = "58.4.1" }
 arrow-schema = { version = "58.4.1" }
 
-surrealdb = { version = "=3.3.0", default-features = false, features = ["protocol-ws", "protocol-http", "rustls", "kv-mem", "kv-rocksdb", "kv-surrealkv"], optional = true }
-surrealdb-core = { version = "=3.3.0", default-features = false, optional = true }
+surrealdb = { version = "=4.0.0", default-features = false, features = ["protocol-ws", "protocol-http", "rustls", "kv-mem", "kv-surrealkv"], optional = true }
+surrealdb-core = { version = "=4.0.0", default-features = false, optional = true }
 tokio-postgres = { version = "0.7.18", default-features = false, features = ["runtime"], optional = true }
 turso = { version = "=0.8.2", default-features = false, optional = true }
 redb = { version = "=4.3.0", default-features = false, optional = true }

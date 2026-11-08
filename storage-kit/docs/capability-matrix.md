@@ -62,3 +62,7 @@ or cross-product transaction capability.
 Private decoded-image caching and lease-protected reclamation are implementation
 details. Tombstones persist, and retained transactions can defer reclamation;
 there is no portable retention or maintenance control.
+
+SurrealDB 4.0.0 modes are memory, SurrealKV, HTTP and WebSocket. Existing 3.x
+SurrealKV stores require native upgrade and are refused by ordinary connection;
+no automatic migration or RocksDB compatibility mode is provided.

@@ -181,9 +181,9 @@ writers are stopped. The portable list/put API cannot migrate exact hidden
 tombstone revisions from another backend; existing Redb files are never
 automatically converted or reinterpreted as Lance directories.
 
-For SurrealDB 3.3 embedded memory, RocksDB, and SurrealKV, deep native queries
+For SurrealDB 4.0.0 embedded memory and SurrealKV, deep native queries
 in unoptimized builds may need an 8 MiB stack on the thread polling the query
-future. The upstream [debug-test configuration](https://github.com/surrealdb/surrealdb/blob/v3.3.0/.cargo/config.toml)
+future. The upstream [debug-test configuration](https://github.com/surrealdb/surrealdb/blob/v4.0.0/.cargo/config.toml)
 sets that size, and the crate's embedded regression workloads need it. When
 using a current-thread runtime or polling the query directly through
 `Runtime::block_on`, configure the enclosing OS thread with
@@ -222,6 +222,11 @@ drop never detaches cleanup or commits implicitly.
 `StateStore` is for Kit control-plane state. `Database` is for application data
 and managed retrieval. Model-visible tools are caller-authored in `tools-kit`;
 storage-kit has no tool runtime dependency.
+
+SurrealDB 4.0.0 supports memory, SurrealKV, HTTP and WebSocket. RocksDB
+configuration is removed. Ordinary connection refuses an existing 3.x SurrealKV
+store that requires native upgrade; the Kit does not enable experimental
+upgrading or provide a migration configuration option.
 
 ## Features
 

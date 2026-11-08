@@ -3,8 +3,6 @@
 # Keep every ID explicit. No year-wide or future-advisory exemptions.
 advisories = [
   "RUSTSEC-2023-0071",
-  "RUSTSEC-2026-0194",
-  "RUSTSEC-2026-0195",
   "RUSTSEC-2026-0387",
   "RUSTSEC-2026-0391",
   "RUSTSEC-2026-0395",

@@ -22,11 +22,11 @@ published_at = "2026-09-15T03:46:59Z"
 sha256 = "a5ae5c250f1a8102d3bca02eb17a9891b5feb9f6ff1035abf7fb2598df49c546"
 
 [vendors.surrealdb]
-tag = "v3.3.0"
-archive = "surrealdb-3.3.0.zip"
-extracted_dir = "surrealdb-3.3.0"
-published_at = "2026-09-28T11:40:24Z"
-sha256 = "507ff33e50fece0cdd732198adc71a347a91f702baecbd6b2cb46c40d3034cc4"
+tag = "v4.0.0"
+archive = "surrealdb-4.0.0.zip"
+extracted_dir = "surrealdb-4.0.0"
+published_at = "2026-11-03T15:22:58Z"
+sha256 = "9c1bdcc9438db96a0b74e2ef6455a966e6042f08367642c376f7812af6f4ead8"
 
 [vendors.turso]
 tag = "v0.8.2"

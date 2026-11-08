@@ -1,8 +1,22 @@
-use storage_kit::database::config::{DatabaseConfig, SurrealConfig};
+use storage_kit::database::config::{DatabaseConfig, SurrealConfig, SurrealModeConfig};
 use storage_kit::state::config::{
     PostgresStateStoreConfig, RedbStateStoreConfig, StateStoreConfig,
 };
 use storage_kit::{Database, StateStore, StateStoreError, StorageError};
+
+#[test]
+fn removed_rocksdb_serialization_is_rejected_without_backend_features() {
+    let old_mode = serde_json::json!({"RocksDb": {"path": "caller-owned-old-store"}});
+    let mode = serde_json::from_value::<SurrealModeConfig>(old_mode.clone());
+    let mut config = serde_json::to_value(DatabaseConfig::surreal(SurrealConfig::default()))
+        .expect("serialize unconditional configuration");
+    config["Surreal"]["config"]["mode"] = old_mode;
+    let database = serde_json::from_value::<DatabaseConfig>(config);
+    assert!(
+        mode.is_err() && database.is_err(),
+        "removed RocksDb must reject both mode and DatabaseConfig: mode={mode:?}; database={database:?}"
+    );
+}
 
 #[tokio::test]
 async fn disabled_redb_is_rejected_without_creating_a_database() {

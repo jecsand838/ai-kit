@@ -1,0 +1,29 @@
+{
+  "generated_utc": "2026-11-07T20:44:13.791494+00:00",
+  "platform": "macOS-26.7.1-arm64-arm-64bit",
+  "image": "surrealdb/surrealdb@sha256:681c6c22c287421b5c7d99e0fde79b6e0d32c36c1ddeaab2762a1661cb04cd20",
+  "generation_command": "python3 storage-kit/tests/surreal_legacy_store/fixture.py generate",
+  "source_archive_sha256": "507ff33e50fece0cdd732198adc71a347a91f702baecbd6b2cb46c40d3034cc4",
+  "files": {
+    "store/LOCK": {
+      "length": 2,
+      "sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865"
+    },
+    "store/manifest/00000000000000000000.manifest": {
+      "length": 63,
+      "sha256": "3e67a59763cb430b43b8a81e2681d458ace2881e65ed59c95c91d34f3995fb2d"
+    },
+    "store/sstables/00000000000000000001.sst": {
+      "length": 3018,
+      "sha256": "41af0ec46081acb4610ed1330b3230831ba4f47da6f963099c45c8d4d9fcf842"
+    }
+  },
+  "support_files": {
+    "seed.surql": "c6593671b815bb28b14df0aeaedb6ce486df68786d763d4eddd3321f49fa86b6",
+    "verify.surql": "c74abb392867db5e2b4c5743c260994ac48e0538595a4d262e60eecd82f62448",
+    "expected.json": "d2edd8b7dd9a3990c94d4de72da1ee9d8e92f6988b108b02b534501b465323c3",
+    "generation/receipt.json": "395a7bf6a0b82a25263d0e0b0e40ec44655418dbe4227313e8e312b4a5117bc0",
+    "generation/anonymous-volume-cleanup.json": "d32465cb759e270fad6474e662fe3cc20e830986d036abf8f6d3c734b377e256"
+  },
+  "cold_read_evidence": "target/security-2026-0454-0452/leaf-20261107T204006Z/fixture-cold-read"
+}

@@ -1,0 +1,40 @@
+[
+  [
+    {
+      "id": "records:a",
+      "label": "alpha",
+      "sequence": 1
+    },
+    {
+      "id": "records:b",
+      "label": "beta",
+      "sequence": 2
+    }
+  ],
+  {
+    "accesses": {},
+    "analyzers": {},
+    "apis": {},
+    "buckets": {},
+    "configs": {},
+    "functions": {},
+    "models": {},
+    "modules": {},
+    "params": {},
+    "sequences": {},
+    "tables": {
+      "records": "DEFINE TABLE records TYPE NORMAL SCHEMAFULL PERMISSIONS NONE"
+    },
+    "users": {}
+  },
+  {
+    "events": {},
+    "fields": {
+      "label": "DEFINE FIELD label ON records TYPE string PERMISSIONS FULL",
+      "sequence": "DEFINE FIELD `sequence` ON records TYPE int PERMISSIONS FULL"
+    },
+    "indexes": {},
+    "lives": {},
+    "tables": {}
+  }
+]

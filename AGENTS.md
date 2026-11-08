@@ -366,7 +366,7 @@ App may add exact locked sha2 0.10.9 without default features solely for the pin
 public child identity digest; no other hash API, package version, dependency
 expansion or generated code.
 
-Tool may add locked `futures-core =0.3.32` directly, optional without default
+Tool may add locked `futures-core =0.3.34` directly, optional without default
 features, enabled only by existing `mcp-server`, solely for native Stream bounds
 owning MCP session/worker cleanup. No public trait, package version or other
 dependency is permitted.

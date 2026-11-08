@@ -96,6 +96,33 @@ fn construction_configs_are_direct_and_validated() {
 }
 
 #[test]
+fn surreal_configuration_has_exactly_four_public_modes() {
+    use storage_kit::database::config::SurrealModeConfig;
+
+    let modes = [
+        SurrealModeConfig::Mem,
+        SurrealModeConfig::SurrealKv {
+            path: "owned-store".into(),
+        },
+        SurrealModeConfig::RemoteHttp {
+            endpoint: "http://127.0.0.1:8000".into(),
+        },
+        SurrealModeConfig::RemoteWs {
+            endpoint: "ws://127.0.0.1:8000".into(),
+        },
+    ];
+    for (position, mode) in modes.into_iter().enumerate() {
+        let selected = match mode {
+            SurrealModeConfig::Mem => 0,
+            SurrealModeConfig::SurrealKv { .. } => 1,
+            SurrealModeConfig::RemoteHttp { .. } => 2,
+            SurrealModeConfig::RemoteWs { .. } => 3,
+        };
+        assert_eq!(selected, position);
+    }
+}
+
+#[test]
 fn state_record_shared_value_keeps_copy_on_write_content_independent() {
     let original = StateRecord::new(
         StateKey::new("shared-record", "input").expect("key"),

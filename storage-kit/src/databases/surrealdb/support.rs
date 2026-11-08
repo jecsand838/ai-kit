@@ -15,15 +15,10 @@ impl SurrealConfig {
     pub(crate) fn mode_label(&self) -> &'static str {
         match &self.mode {
             SurrealModeConfig::Mem => "embedded-mem",
-            SurrealModeConfig::RocksDb { .. } => "embedded-rocksdb",
             SurrealModeConfig::SurrealKv { .. } => "embedded-surrealkv",
             SurrealModeConfig::RemoteWs { .. } => "remote-ws",
             SurrealModeConfig::RemoteHttp { .. } => "remote-http",
         }
-    }
-
-    pub(crate) fn endpoint_string(&self) -> String {
-        super::mapper::endpoint_from_mode(&self.mode)
     }
 
     pub(super) fn context_key(&self) -> Option<SurrealContextKey> {
@@ -33,6 +28,18 @@ impl SurrealConfig {
                 database: database.clone(),
             }),
             _ => None,
+        }
+    }
+}
+
+impl SurrealModeConfig {
+    pub(crate) fn endpoint_string(&self) -> String {
+        match self {
+            Self::Mem => "mem://".to_owned(),
+            Self::SurrealKv { path } => format!("surrealkv://{}", path.to_string_lossy()),
+            Self::RemoteWs { endpoint } | Self::RemoteHttp { endpoint } => {
+                endpoint.trim().to_owned()
+            }
         }
     }
 }

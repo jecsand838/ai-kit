@@ -24,7 +24,7 @@ use storage_kit::{
 use surrealdb::types::{Array, ErrorDetails, Object, QueryError, SurrealValue, Value};
 
 // Native RPC normalization/deadline proof only, outside strict_live. This fixture
-// uses the pinned client's public FlatBuffers codec and typed native error values.
+// uses the pinned client's public CBOR v2 codec and typed native error values.
 // It cannot establish the availability or transactional behavior of a service.
 #[derive(Clone, Copy)]
 enum Scenario {
@@ -218,8 +218,8 @@ impl ConflictServer {
         let response = if line.starts_with("GET /health ") {
             Vec::new()
         } else {
-            let Value::Object(request) =
-                surrealdb::types::decode::<Value>(&bytes).map_err(|error| error.to_string())?
+            let Value::Object(request) = surrealdb::types::cbor::decode_exact_v2(&bytes, 512, None)
+                .map_err(|error| error.to_string())?
             else {
                 return Err("native RPC request must be an object".to_owned());
             };
@@ -298,7 +298,7 @@ impl ConflictServer {
             } else if method == "query" {
                 Value::Array(Array::from(vec![Self::statement(None)]))
             } else if method == "version" {
-                Value::String("surrealdb-3.3.0".to_owned())
+                Value::String("surrealdb-4.0.0".to_owned())
             } else {
                 Value::None
             };
@@ -308,10 +308,10 @@ impl ConflictServer {
                     envelope.insert(key.to_owned(), value.clone());
                 }
             }
-            surrealdb::types::encode(&Value::Object(Object::from(envelope)))
+            surrealdb::types::cbor::encode_v2(Value::Object(Object::from(envelope)))
                 .map_err(|error| error.to_string())?
         };
-        write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/surrealdb\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", response.len()).map_err(|error| error.to_string())?;
+        write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/cbor; v=2\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", response.len()).map_err(|error| error.to_string())?;
         stream
             .write_all(&response)
             .map_err(|error| error.to_string())

@@ -30,7 +30,7 @@ mcp-server = [
 
 [dependencies]
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio"], optional = true }
-futures-core = { version = "=0.3.32", default-features = false, optional = true }
+futures-core = { version = "=0.3.34", default-features = false, optional = true }
 http = { workspace = true }
 jsonschema.workspace = true
 rmcp = { version = "1.5", default-features = false, features = ["client", "elicitation", "transport-child-process", "transport-io", "transport-streamable-http-client-reqwest"] }

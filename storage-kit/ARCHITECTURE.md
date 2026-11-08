@@ -73,6 +73,13 @@ aliases, single-family search and administration operations, sparse-only
 models, and backend optimizer controls. Backend-native APIs may still exist
 privately where their concrete implementation needs them.
 
+SurrealDB SDK/Core 4.0.0 supports exactly four supplied modes: memory,
+SurrealKV, HTTP and WebSocket. RocksDB configuration is removed, including its
+serialized spelling. Ordinary connection to an existing 3.x SurrealKV store
+refuses the required native upgrade. The Kit exposes no migration option and
+never enables experimental upgrading or parses native formats. The existing
+connection owner preserves the native refusal through its connection error.
+
 ## StateStore And Transactions
 
 The exact trait signatures and portable isolation, revision, pagination and

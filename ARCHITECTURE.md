@@ -409,8 +409,9 @@ and Session-half dispatchers and require exact absence of deleted public symbols
 - `scripts/vendor_update.py` and crate-local vendor metadata own pinned-source
   refreshes.
 
-The integrated graph uses LanceDB 0.40.0 and Lance 13.0.0 for the local Database
-and StateStore products, and SurrealDB 3.3.0. External Rust dependencies come
+The graph retains LanceDB 0.40.0 and Lance 13.0.0 for the local Database and
+StateStore products and selects exact SurrealDB SDK/Core 4.0.0.
+External Rust dependencies come
 from crates.io; Cargo patches, replacements and external path overrides are
 forbidden. The path and alias guards have no upstream source exemptions.
 Explicit temporary advisory exceptions retain raw findings and permit only the

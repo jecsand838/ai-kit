@@ -88,6 +88,13 @@ private fields and validating constructors.
   caller-authored in `tools-kit`; storage-kit has no `toolsets` feature,
   tools-kit dependency, adapter DTO, or `Database::build_toolset`.
 
+SurrealDB SDK/Core 4.0.0 supports exactly four supplied modes: memory,
+SurrealKV, HTTP and WebSocket. RocksDB configuration is removed, including its
+serialized spelling. Ordinary connection to an existing 3.x SurrealKV store
+refuses the required native upgrade. The Kit exposes no migration option and
+never enables experimental upgrading. Preserve caller data and validate this
+refusal on disposable copies of the sealed 3.3.0 fixture.
+
 ## StateStore Contract
 
 - `StateStore::connect(StateStoreConfig)` is the built-in construction path.
@@ -153,7 +160,7 @@ ObjectStoreProvider and CommitHandler seams add no public behavior. Directory
 qualification remains scoped to macOS and Linux.
 
 Dependencies resolve from the public registry without workspace source patches.
-Retain LanceDB 0.40.0, Lance 13, SurrealDB client/Core 3.3.0 and registry
+Retain LanceDB 0.40.0, Lance 13, exact SurrealDB client/Core 4.0.0 and registry
 ObjectStore 0.14.2. Resolve the Arrow 58 family together at 58.4.1.
 Temporary, explicit advisory exceptions and their review requirements belong to
 [the dependency security policy](../docs/security-dependencies.md).

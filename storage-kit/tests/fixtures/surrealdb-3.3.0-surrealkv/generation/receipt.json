@@ -1,0 +1,272 @@
+{
+  "image": "surrealdb/surrealdb@sha256:681c6c22c287421b5c7d99e0fde79b6e0d32c36c1ddeaab2762a1661cb04cd20",
+  "container": "storage-legacy-ead3552faa0e4e1d8c9d74a2bc3f7064",
+  "commands": [
+    {
+      "args": [
+        "docker",
+        "image",
+        "inspect",
+        "surrealdb/surrealdb@sha256:681c6c22c287421b5c7d99e0fde79b6e0d32c36c1ddeaab2762a1661cb04cd20"
+      ],
+      "exit": 0,
+      "stdout": "[\n    {\n        \"Id\": \"sha256:681c6c22c287421b5c7d99e0fde79b6e0d32c36c1ddeaab2762a1661cb04cd20\",\n        \"RepoTags\": [\n            \"surrealdb/surrealdb:v3.3.0\"\n        ],\n        \"RepoDigests\": [\n            \"surrealdb/surrealdb@sha256:681c6c22c287421b5c7d99e0fde79b6e0d32c36c1ddeaab2762a1661cb04cd20\"\n        ],\n        \"Comment\": \"buildkit.dockerfile.v0\",\n        \"Created\": \"2026-09-24T11:18:55.09440356Z\",\n        \"Author\": \"github.com/chainguard-dev/apko\",\n        \"Config\": {\n            \"User\": \"nonroot\",\n            \"Env\": [\n                \"PATH=/usr/local/sbin:/usr/local/bin:/usr/bin:/usr/sbin:/sbin:/bin\",\n                \"SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt\",\n                \"SURREAL_BIND=0.0.0.0:8000\"\n            ],\n            \"Entrypoint\": [\n                \"/surreal\"\n            ],\n            \"Volumes\": {\n                \"/data\": {},\n                \"/logs\": {}\n            },\n            \"Labels\": {\n                \"dev.chainguard.image.title\": \"glibc-dynamic\",\n                \"dev.chainguard.package.main\": \"\",\n                \"org.opencontainers.image.authors\": \"Chainguard Team https://www.chainguard.dev/\",\n                \"org.opencontainers.image.created\": \"2026-05-28T07:37:08Z\",\n                \"org.opencontainers.image.source\": \"https://github.com/chainguard-images/images/tree/main/images/glibc-dynamic\",\n                \"org.opencontainers.image.title\": \"glibc-dynamic\",\n                \"org.opencontainers.image.url\": \"https://images.chainguard.dev/directory/image/glibc-dynamic/overview\",\n                \"org.opencontainers.image.vendor\": \"Chainguard\"\n            },\n            \"Healthcheck\": {\n                \"Test\": [\n                    \"CMD\",\n                    \"/surreal\",\n                    \"isready\",\n                    \"--endpoint\",\n                    \"http://localhost:8000\"\n                ],\n                \"Interval\": 30000000000,\n                \"Timeout\": 5000000000,\n                \"StartPeriod\": 20000000000,\n                \"Retries\": 3\n            }\n        },\n        \"Architecture\": \"arm64\",\n        \"Os\": \"linux\",\n        \"Size\": 430126732,\n        \"RootFS\": {\n            \"Type\": \"layers\",\n            \"Layers\": [\n                \"sha256:0e896cf0ab0c2f9335bd6cece4cdea487170ab32aef879621373d1c7d5e665d1\",\n                \"sha256:f6b5891593e321012c7b227092b874f9ab6068d28ee6bf92ba30854f87d265f2\",\n                \"sha256:0572f99e88ea3679bb1d06d2ed2ece9ddad579d2c3f187e2b19d5038c3453b10\",\n                \"sha256:65b89448b43f9b201fd7122f59b4b1d7747dcecdc5c6a4dd779c46dc908bd3a8\",\n                \"sha256:e1f52535e021ce140b102954bc09d92276977c94605a8b7be3e9b323ff2e46e7\",\n                \"sha256:83040661a4cdbc53de9c63e57cbbbe568e19dd1357428ea981ed350239ca6745\",\n                \"sha256:a37bab461379b20239e80ff19c0b038cdcf41df94f12d7a3242809d63a4ed4b4\",\n                \"sha256:307815b8f8aac4ff45e4e0d638f3e7273faf05b0303372efb7177bc13667769a\",\n                \"sha256:503dff3e1ba1dc66544ffbebe5caa056c7f1a9613eb2d44af2a6d42e4e07f99b\",\n                \"sha256:5e1f6131c0c53a04244fa202196c980d973c1ba3e6118606e9a59f01d506e7c8\"\n            ]\n        },\n        \"Metadata\": {\n            \"LastTagTime\": \"2026-10-27T04:57:27.530830551Z\"\n        },\n        \"Descriptor\": {\n            \"mediaType\": \"application/vnd.oci.image.index.v1+json\",\n            \"digest\": \"sha256:681c6c22c287421b5c7d99e0fde79b6e0d32c36c1ddeaab2762a1661cb04cd20\",\n            \"size\": 1611\n        },\n        \"Identity\": {\n            \"Pull\": [\n                {\n                    \"Repository\": \"docker.io/surrealdb/surrealdb\"\n                }\n            ]\n        }\n    }\n]\n",
+      "stderr": ""
+    },
+    {
+      "args": [
+        "docker",
+        "create",
+        "--name",
+        "storage-legacy-ead3552faa0e4e1d8c9d74a2bc3f7064",
+        "--user",
+        "0:0",
+        "--publish",
+        "127.0.0.1::8000",
+        "--mount",
+        "type=bind,source=/Users/connorsanders/.codex/worktrees/provider-sessions-clean-proof/ai-kit/storage-kit/tests/fixtures/surrealdb-3.3.0-surrealkv/native,target=/data",
+        "surrealdb/surrealdb@sha256:681c6c22c287421b5c7d99e0fde79b6e0d32c36c1ddeaab2762a1661cb04cd20",
+        "start",
+        "--user",
+        "root",
+        "--pass",
+        "fixture-secret",
+        "surrealkv:/data/store"
+      ],
+      "exit": 0,
+      "stdout": "e73b5ec78f500891a3b531941d62c8a4b2947232540fa89e3d623c03b8c13863\n",
+      "stderr": ""
+    },
+    {
+      "args": [
+        "docker",
+        "start",
+        "storage-legacy-ead3552faa0e4e1d8c9d74a2bc3f7064"
+      ],
+      "exit": 0,
+      "stdout": "storage-legacy-ead3552faa0e4e1d8c9d74a2bc3f7064\n",
+      "stderr": ""
+    },
+    {
+      "args": [
+        "docker",
+        "port",
+        "storage-legacy-ead3552faa0e4e1d8c9d74a2bc3f7064",
+        "8000/tcp"
+      ],
+      "exit": 0,
+      "stdout": "127.0.0.1:55147\n",
+      "stderr": ""
+    },
+    {
+      "args": [
+        "docker",
+        "exec",
+        "storage-legacy-ead3552faa0e4e1d8c9d74a2bc3f7064",
+        "/surreal",
+        "version"
+      ],
+      "exit": 0,
+      "stdout": "3.3.0 for linux on aarch64\n",
+      "stderr": "onnxruntime cpuid_info warning: Unknown CPU vendor. cpuinfo_vendor value: 0\n"
+    },
+    {
+      "args": [
+        "docker",
+        "inspect",
+        "storage-legacy-ead3552faa0e4e1d8c9d74a2bc3f7064"
+      ],
+      "exit": 0,
+      "stdout": "[\n    {\n        \"Id\": \"e73b5ec78f500891a3b531941d62c8a4b2947232540fa89e3d623c03b8c13863\",\n        \"Created\": \"2026-11-07T20:44:12.768397845Z\",\n        \"Path\": \"/surreal\",\n        \"Args\": [\n            \"start\",\n            \"--user\",\n            \"root\",\n            \"--pass\",\n            \"fixture-secret\",\n            \"surrealkv:/data/store\"\n        ],\n        \"State\": {\n            \"Status\": \"running\",\n            \"Running\": true,\n            \"Paused\": false,\n            \"Restarting\": false,\n            \"OOMKilled\": false,\n            \"Dead\": false,\n            \"Pid\": 1065,\n            \"ExitCode\": 0,\n            \"Error\": \"\",\n            \"StartedAt\": \"2026-11-07T20:44:12.847311012Z\",\n            \"FinishedAt\": \"0001-01-01T00:00:00Z\",\n            \"Health\": {\n                \"Status\": \"starting\",\n                \"FailingStreak\": 0,\n                \"Log\": []\n            }\n        },\n        \"Image\": \"sha256:681c6c22c287421b5c7d99e0fde79b6e0d32c36c1ddeaab2762a1661cb04cd20\",\n        \"ResolvConfPath\": \"/var/lib/docker/containers/e73b5ec78f500891a3b531941d62c8a4b2947232540fa89e3d623c03b8c13863/resolv.conf\",\n        \"HostnamePath\": \"/var/lib/docker/containers/e73b5ec78f500891a3b531941d62c8a4b2947232540fa89e3d623c03b8c13863/hostname\",\n        \"HostsPath\": \"/var/lib/docker/containers/e73b5ec78f500891a3b531941d62c8a4b2947232540fa89e3d623c03b8c13863/hosts\",\n        \"LogPath\": \"\",\n        \"Name\": \"/storage-legacy-ead3552faa0e4e1d8c9d74a2bc3f7064\",\n        \"RestartCount\": 0,\n        \"Driver\": \"overlayfs\",\n        \"Platform\": \"linux\",\n        \"MountLabel\": \"\",\n        \"ProcessLabel\": \"\",\n        \"AppArmorProfile\": \"\",\n        \"ExecIDs\": null,\n        \"HostConfig\": {\n            \"Binds\": null,\n            \"ContainerIDFile\": \"\",\n            \"LogConfig\": {\n                \"Type\": \"local\",\n                \"Config\": {}\n            },\n            \"NetworkMode\": \"bridge\",\n            \"PortBindings\": {\n                \"8000/tcp\": [\n                    {\n                        \"HostIp\": \"127.0.0.1\",\n                        \"HostPort\": \"\"\n                    }\n                ]\n            },\n            \"RestartPolicy\": {\n                \"Name\": \"no\",\n                \"MaximumRetryCount\": 0\n            },\n            \"AutoRemove\": false,\n            \"VolumeDriver\": \"\",\n            \"VolumesFrom\": null,\n            \"ConsoleSize\": [\n                0,\n                0\n            ],\n            \"CapAdd\": null,\n            \"CapDrop\": null,\n            \"CgroupnsMode\": \"private\",\n            \"Dns\": null,\n            \"DnsOptions\": [],\n            \"DnsSearch\": [],\n            \"ExtraHosts\": null,\n            \"GroupAdd\": null,\n            \"IpcMode\": \"private\",\n            \"Cgroup\": \"\",\n            \"Links\": null,\n            \"OomScoreAdj\": 0,\n            \"PidMode\": \"\",\n            \"Privileged\": false,\n            \"PublishAllPorts\": false,\n            \"ReadonlyRootfs\": false,\n            \"SecurityOpt\": null,\n            \"UTSMode\": \"\",\n            \"UsernsMode\": \"\",\n            \"ShmSize\": 67108864,\n            \"Runtime\": \"runc\",\n            \"Isolation\": \"\",\n            \"CpuShares\": 0,\n            \"Memory\": 0,\n            \"NanoCpus\": 0,\n            \"CgroupParent\": \"\",\n            \"BlkioWeight\": 0,\n            \"BlkioWeightDevice\": [],\n            \"BlkioDeviceReadBps\": [],\n            \"BlkioDeviceWriteBps\": [],\n            \"BlkioDeviceReadIOps\": [],\n            \"BlkioDeviceWriteIOps\": [],\n            \"CpuPeriod\": 0,\n            \"CpuQuota\": 0,\n            \"CpuRealtimePeriod\": 0,\n            \"CpuRealtimeRuntime\": 0,\n            \"CpusetCpus\": \"\",\n            \"CpusetMems\": \"\",\n            \"Devices\": [],\n            \"DeviceCgroupRules\": null,\n            \"DeviceRequests\": null,\n            \"MemoryReservation\": 0,\n            \"MemorySwap\": 0,\n            \"MemorySwappiness\": null,\n            \"OomKillDisable\": null,\n            \"PidsLimit\": null,\n            \"Ulimits\": null,\n            \"CpuCount\": 0,\n            \"CpuPercent\": 0,\n            \"IOMaximumIOps\": 0,\n            \"IOMaximumBandwidth\": 0,\n            \"Mounts\": [\n                {\n                    \"Type\": \"bind\",\n                    \"Source\": \"/Users/connorsanders/.codex/worktrees/provider-sessions-clean-proof/ai-kit/storage-kit/tests/fixtures/surrealdb-3.3.0-surrealkv/native\",\n                    \"Target\": \"/data\"\n                }\n            ],\n            \"MaskedPaths\": [\n                \"/proc/acpi\",\n                \"/proc/asound\",\n                \"/proc/interrupts\",\n                \"/proc/kcore\",\n                \"/proc/keys\",\n                \"/proc/latency_stats\",\n                \"/proc/sched_debug\",\n                \"/proc/scsi\",\n                \"/proc/timer_list\",\n                \"/proc/timer_stats\",\n                \"/sys/devices/virtual/powercap\",\n                \"/sys/firmware\"\n            ],\n            \"ReadonlyPaths\": [\n                \"/proc/bus\",\n                \"/proc/fs\",\n                \"/proc/irq\",\n                \"/proc/sys\",\n                \"/proc/sysrq-trigger\"\n            ]\n        },\n        \"Storage\": {\n            \"RootFS\": {\n                \"Snapshot\": {\n                    \"Name\": \"overlayfs\"\n                }\n            }\n        },\n        \"Mounts\": [\n            {\n                \"Type\": \"bind\",\n                \"Source\": \"/Users/connorsanders/.codex/worktrees/provider-sessions-clean-proof/ai-kit/storage-kit/tests/fixtures/surrealdb-3.3.0-surrealkv/native\",\n                \"Destination\": \"/data\",\n                \"Mode\": \"\",\n                \"RW\": true,\n                \"Propagation\": \"rprivate\"\n            },\n            {\n                \"Type\": \"volume\",\n                \"Name\": \"4f48bec8e5508cdbc372f58b29be3c058d9d41669fb8c5278f88032d3c169598\",\n                \"Source\": \"/var/lib/docker/volumes/4f48bec8e5508cdbc372f58b29be3c058d9d41669fb8c5278f88032d3c169598/_data\",\n                \"Destination\": \"/logs\",\n                \"Driver\": \"local\",\n                \"Mode\": \"\",\n                \"RW\": true,\n                \"Propagation\": \"\"\n            }\n        ],\n        \"Config\": {\n            \"Hostname\": \"e73b5ec78f50\",\n            \"Domainname\": \"\",\n            \"User\": \"0:0\",\n            \"AttachStdin\": false,\n            \"AttachStdout\": true,\n            \"AttachStderr\": true,\n            \"ExposedPorts\": {\n                \"8000/tcp\": {}\n            },\n            \"Tty\": false,\n            \"OpenStdin\": false,\n            \"StdinOnce\": false,\n            \"Env\": [\n                \"PATH=/usr/local/sbin:/usr/local/bin:/usr/bin:/usr/sbin:/sbin:/bin\",\n                \"SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt\",\n                \"SURREAL_BIND=0.0.0.0:8000\"\n            ],\n            \"Cmd\": [\n                \"start\",\n                \"--user\",\n                \"root\",\n                \"--pass\",\n                \"fixture-secret\",\n                \"surrealkv:/data/store\"\n            ],\n            \"Healthcheck\": {\n                \"Test\": [\n                    \"CMD\",\n                    \"/surreal\",\n                    \"isready\",\n                    \"--endpoint\",\n                    \"http://localhost:8000\"\n                ],\n                \"Interval\": 30000000000,\n                \"Timeout\": 5000000000,\n                \"StartPeriod\": 20000000000,\n                \"Retries\": 3\n            },\n            \"Image\": \"surrealdb/surrealdb@sha256:681c6c22c287421b5c7d99e0fde79b6e0d32c36c1ddeaab2762a1661cb04cd20\",\n            \"Volumes\": {\n                \"/data\": {},\n                \"/logs\": {}\n            },\n            \"WorkingDir\": \"\",\n            \"Entrypoint\": [\n                \"/surreal\"\n            ],\n            \"Labels\": {\n                \"dev.chainguard.image.title\": \"glibc-dynamic\",\n                \"dev.chainguard.package.main\": \"\",\n                \"org.opencontainers.image.authors\": \"Chainguard Team https://www.chainguard.dev/\",\n                \"org.opencontainers.image.created\": \"2026-05-28T07:37:08Z\",\n                \"org.opencontainers.image.source\": \"https://github.com/chainguard-images/images/tree/main/images/glibc-dynamic\",\n                \"org.opencontainers.image.title\": \"glibc-dynamic\",\n                \"org.opencontainers.image.url\": \"https://images.chainguard.dev/directory/image/glibc-dynamic/overview\",\n                \"org.opencontainers.image.vendor\": \"Chainguard\"\n            }\n        },\n        \"NetworkSettings\": {\n            \"SandboxID\": \"890f8f48efa85e47bab85b32f6f820bfff718cf22e537426fb05021e2055bd9b\",\n            \"SandboxKey\": \"/var/run/docker/netns/890f8f48efa8\",\n            \"Ports\": {\n                \"8000/tcp\": [\n                    {\n                        \"HostIp\": \"127.0.0.1\",\n                        \"HostPort\": \"55147\"\n                    }\n                ]\n            },\n            \"Networks\": {\n                \"bridge\": {\n                    \"IPAMConfig\": null,\n                    \"Links\": null,\n                    \"Aliases\": null,\n                    \"DriverOpts\": null,\n                    \"GwPriority\": 0,\n                    \"NetworkID\": \"82b0eedd80fbfdd3ff92cd8f1a244d66e91f2bdd5ca40d775f6beae1f032c6dc\",\n                    \"EndpointID\": \"2949392a25de67422c3cd1c858a22b2d59efb33555f760fd6ca55ceeec6181cc\",\n                    \"Gateway\": \"172.17.0.1\",\n                    \"IPAddress\": \"172.17.0.2\",\n                    \"MacAddress\": \"12:98:bd:dc:09:28\",\n                    \"IPPrefixLen\": 16,\n                    \"IPv6Gateway\": \"\",\n                    \"GlobalIPv6Address\": \"\",\n                    \"GlobalIPv6PrefixLen\": 0,\n                    \"DNSNames\": null\n                }\n            }\n        },\n        \"ImageManifestDescriptor\": {\n            \"mediaType\": \"application/vnd.oci.image.manifest.v1+json\",\n            \"digest\": \"sha256:089a93b0634a7863e1328289520773d0676d85dd9b9f20478b4a1d367b89a50a\",\n            \"size\": 2190,\n            \"platform\": {\n                \"architecture\": \"arm64\",\n                \"os\": \"linux\"\n            }\n        }\n    }\n]\n",
+      "stderr": ""
+    },
+    {
+      "args": [
+        "docker",
+        "stop",
+        "--time",
+        "10",
+        "storage-legacy-ead3552faa0e4e1d8c9d74a2bc3f7064"
+      ],
+      "exit": 0,
+      "stdout": "Flag --time has been deprecated, use --timeout instead\nstorage-legacy-ead3552faa0e4e1d8c9d74a2bc3f7064\n",
+      "stderr": ""
+    },
+    {
+      "args": [
+        "docker",
+        "inspect",
+        "storage-legacy-ead3552faa0e4e1d8c9d74a2bc3f7064"
+      ],
+      "exit": 0,
+      "stdout": "[\n    {\n        \"Id\": \"e73b5ec78f500891a3b531941d62c8a4b2947232540fa89e3d623c03b8c13863\",\n        \"Created\": \"2026-11-07T20:44:12.768397845Z\",\n        \"Path\": \"/surreal\",\n        \"Args\": [\n            \"start\",\n            \"--user\",\n            \"root\",\n            \"--pass\",\n            \"fixture-secret\",\n            \"surrealkv:/data/store\"\n        ],\n        \"State\": {\n            \"Status\": \"exited\",\n            \"Running\": false,\n            \"Paused\": false,\n            \"Restarting\": false,\n            \"OOMKilled\": false,\n            \"Dead\": false,\n            \"Pid\": 0,\n            \"ExitCode\": 0,\n            \"Error\": \"\",\n            \"StartedAt\": \"2026-11-07T20:44:12.847311012Z\",\n            \"FinishedAt\": \"2026-11-07T20:44:13.619146387Z\",\n            \"Health\": {\n                \"Status\": \"unhealthy\",\n                \"FailingStreak\": 0,\n                \"Log\": []\n            }\n        },\n        \"Image\": \"sha256:681c6c22c287421b5c7d99e0fde79b6e0d32c36c1ddeaab2762a1661cb04cd20\",\n        \"ResolvConfPath\": \"/var/lib/docker/containers/e73b5ec78f500891a3b531941d62c8a4b2947232540fa89e3d623c03b8c13863/resolv.conf\",\n        \"HostnamePath\": \"/var/lib/docker/containers/e73b5ec78f500891a3b531941d62c8a4b2947232540fa89e3d623c03b8c13863/hostname\",\n        \"HostsPath\": \"/var/lib/docker/containers/e73b5ec78f500891a3b531941d62c8a4b2947232540fa89e3d623c03b8c13863/hosts\",\n        \"LogPath\": \"\",\n        \"Name\": \"/storage-legacy-ead3552faa0e4e1d8c9d74a2bc3f7064\",\n        \"RestartCount\": 0,\n        \"Driver\": \"overlayfs\",\n        \"Platform\": \"linux\",\n        \"MountLabel\": \"\",\n        \"ProcessLabel\": \"\",\n        \"AppArmorProfile\": \"\",\n        \"ExecIDs\": null,\n        \"HostConfig\": {\n            \"Binds\": null,\n            \"ContainerIDFile\": \"\",\n            \"LogConfig\": {\n                \"Type\": \"local\",\n                \"Config\": {}\n            },\n            \"NetworkMode\": \"bridge\",\n            \"PortBindings\": {\n                \"8000/tcp\": [\n                    {\n                        \"HostIp\": \"127.0.0.1\",\n                        \"HostPort\": \"\"\n                    }\n                ]\n            },\n            \"RestartPolicy\": {\n                \"Name\": \"no\",\n                \"MaximumRetryCount\": 0\n            },\n            \"AutoRemove\": false,\n            \"VolumeDriver\": \"\",\n            \"VolumesFrom\": null,\n            \"ConsoleSize\": [\n                0,\n                0\n            ],\n            \"CapAdd\": null,\n            \"CapDrop\": null,\n            \"CgroupnsMode\": \"private\",\n            \"Dns\": null,\n            \"DnsOptions\": [],\n            \"DnsSearch\": [],\n            \"ExtraHosts\": null,\n            \"GroupAdd\": null,\n            \"IpcMode\": \"private\",\n            \"Cgroup\": \"\",\n            \"Links\": null,\n            \"OomScoreAdj\": 0,\n            \"PidMode\": \"\",\n            \"Privileged\": false,\n            \"PublishAllPorts\": false,\n            \"ReadonlyRootfs\": false,\n            \"SecurityOpt\": null,\n            \"UTSMode\": \"\",\n            \"UsernsMode\": \"\",\n            \"ShmSize\": 67108864,\n            \"Runtime\": \"runc\",\n            \"Isolation\": \"\",\n            \"CpuShares\": 0,\n            \"Memory\": 0,\n            \"NanoCpus\": 0,\n            \"CgroupParent\": \"\",\n            \"BlkioWeight\": 0,\n            \"BlkioWeightDevice\": [],\n            \"BlkioDeviceReadBps\": [],\n            \"BlkioDeviceWriteBps\": [],\n            \"BlkioDeviceReadIOps\": [],\n            \"BlkioDeviceWriteIOps\": [],\n            \"CpuPeriod\": 0,\n            \"CpuQuota\": 0,\n            \"CpuRealtimePeriod\": 0,\n            \"CpuRealtimeRuntime\": 0,\n            \"CpusetCpus\": \"\",\n            \"CpusetMems\": \"\",\n            \"Devices\": [],\n            \"DeviceCgroupRules\": null,\n            \"DeviceRequests\": null,\n            \"MemoryReservation\": 0,\n            \"MemorySwap\": 0,\n            \"MemorySwappiness\": null,\n            \"OomKillDisable\": null,\n            \"PidsLimit\": null,\n            \"Ulimits\": null,\n            \"CpuCount\": 0,\n            \"CpuPercent\": 0,\n            \"IOMaximumIOps\": 0,\n            \"IOMaximumBandwidth\": 0,\n            \"Mounts\": [\n                {\n                    \"Type\": \"bind\",\n                    \"Source\": \"/Users/connorsanders/.codex/worktrees/provider-sessions-clean-proof/ai-kit/storage-kit/tests/fixtures/surrealdb-3.3.0-surrealkv/native\",\n                    \"Target\": \"/data\"\n                }\n            ],\n            \"MaskedPaths\": [\n                \"/proc/acpi\",\n                \"/proc/asound\",\n                \"/proc/interrupts\",\n                \"/proc/kcore\",\n                \"/proc/keys\",\n                \"/proc/latency_stats\",\n                \"/proc/sched_debug\",\n                \"/proc/scsi\",\n                \"/proc/timer_list\",\n                \"/proc/timer_stats\",\n                \"/sys/devices/virtual/powercap\",\n                \"/sys/firmware\"\n            ],\n            \"ReadonlyPaths\": [\n                \"/proc/bus\",\n                \"/proc/fs\",\n                \"/proc/irq\",\n                \"/proc/sys\",\n                \"/proc/sysrq-trigger\"\n            ]\n        },\n        \"Storage\": {\n            \"RootFS\": {\n                \"Snapshot\": {\n                    \"Name\": \"overlayfs\"\n                }\n            }\n        },\n        \"Mounts\": [\n            {\n                \"Type\": \"bind\",\n                \"Source\": \"/Users/connorsanders/.codex/worktrees/provider-sessions-clean-proof/ai-kit/storage-kit/tests/fixtures/surrealdb-3.3.0-surrealkv/native\",\n                \"Destination\": \"/data\",\n                \"Mode\": \"\",\n                \"RW\": true,\n                \"Propagation\": \"rprivate\"\n            },\n            {\n                \"Type\": \"volume\",\n                \"Name\": \"4f48bec8e5508cdbc372f58b29be3c058d9d41669fb8c5278f88032d3c169598\",\n                \"Source\": \"/var/lib/docker/volumes/4f48bec8e5508cdbc372f58b29be3c058d9d41669fb8c5278f88032d3c169598/_data\",\n                \"Destination\": \"/logs\",\n                \"Driver\": \"local\",\n                \"Mode\": \"\",\n                \"RW\": true,\n                \"Propagation\": \"\"\n            }\n        ],\n        \"Config\": {\n            \"Hostname\": \"e73b5ec78f50\",\n            \"Domainname\": \"\",\n            \"User\": \"0:0\",\n            \"AttachStdin\": false,\n            \"AttachStdout\": true,\n            \"AttachStderr\": true,\n            \"ExposedPorts\": {\n                \"8000/tcp\": {}\n            },\n            \"Tty\": false,\n            \"OpenStdin\": false,\n            \"StdinOnce\": false,\n            \"Env\": [\n                \"PATH=/usr/local/sbin:/usr/local/bin:/usr/bin:/usr/sbin:/sbin:/bin\",\n                \"SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt\",\n                \"SURREAL_BIND=0.0.0.0:8000\"\n            ],\n            \"Cmd\": [\n                \"start\",\n                \"--user\",\n                \"root\",\n                \"--pass\",\n                \"fixture-secret\",\n                \"surrealkv:/data/store\"\n            ],\n            \"Healthcheck\": {\n                \"Test\": [\n                    \"CMD\",\n                    \"/surreal\",\n                    \"isready\",\n                    \"--endpoint\",\n                    \"http://localhost:8000\"\n                ],\n                \"Interval\": 30000000000,\n                \"Timeout\": 5000000000,\n                \"StartPeriod\": 20000000000,\n                \"Retries\": 3\n            },\n            \"Image\": \"surrealdb/surrealdb@sha256:681c6c22c287421b5c7d99e0fde79b6e0d32c36c1ddeaab2762a1661cb04cd20\",\n            \"Volumes\": {\n                \"/data\": {},\n                \"/logs\": {}\n            },\n            \"WorkingDir\": \"\",\n            \"Entrypoint\": [\n                \"/surreal\"\n            ],\n            \"Labels\": {\n                \"dev.chainguard.image.title\": \"glibc-dynamic\",\n                \"dev.chainguard.package.main\": \"\",\n                \"org.opencontainers.image.authors\": \"Chainguard Team https://www.chainguard.dev/\",\n                \"org.opencontainers.image.created\": \"2026-05-28T07:37:08Z\",\n                \"org.opencontainers.image.source\": \"https://github.com/chainguard-images/images/tree/main/images/glibc-dynamic\",\n                \"org.opencontainers.image.title\": \"glibc-dynamic\",\n                \"org.opencontainers.image.url\": \"https://images.chainguard.dev/directory/image/glibc-dynamic/overview\",\n                \"org.opencontainers.image.vendor\": \"Chainguard\"\n            }\n        },\n        \"NetworkSettings\": {\n            \"SandboxID\": \"\",\n            \"SandboxKey\": \"\",\n            \"Ports\": {},\n            \"Networks\": {\n                \"bridge\": {\n                    \"IPAMConfig\": null,\n                    \"Links\": null,\n                    \"Aliases\": null,\n                    \"DriverOpts\": null,\n                    \"GwPriority\": 0,\n                    \"NetworkID\": \"82b0eedd80fbfdd3ff92cd8f1a244d66e91f2bdd5ca40d775f6beae1f032c6dc\",\n                    \"EndpointID\": \"\",\n                    \"Gateway\": \"\",\n                    \"IPAddress\": \"\",\n                    \"MacAddress\": \"\",\n                    \"IPPrefixLen\": 0,\n                    \"IPv6Gateway\": \"\",\n                    \"GlobalIPv6Address\": \"\",\n                    \"GlobalIPv6PrefixLen\": 0,\n                    \"DNSNames\": null\n                }\n            }\n        },\n        \"ImageManifestDescriptor\": {\n            \"mediaType\": \"application/vnd.oci.image.manifest.v1+json\",\n            \"digest\": \"sha256:089a93b0634a7863e1328289520773d0676d85dd9b9f20478b4a1d367b89a50a\",\n            \"size\": 2190,\n            \"platform\": {\n                \"architecture\": \"arm64\",\n                \"os\": \"linux\"\n            }\n        }\n    }\n]\n",
+      "stderr": ""
+    },
+    {
+      "args": [
+        "docker",
+        "logs",
+        "storage-legacy-ead3552faa0e4e1d8c9d74a2bc3f7064"
+      ],
+      "exit": 0,
+      "stdout": "\n .d8888b.                                             888 8888888b.  888888b.\nd88P  Y88b                                            888 888  'Y88b 888  '88b\nY88b.                                                 888 888    888 888  .88P\n 'Y888b.   888  888 888d888 888d888  .d88b.   8888b.  888 888    888 8888888K.\n    'Y88b. 888  888 888P'   888P'   d8P  Y8b     '88b 888 888    888 888  'Y88b\n      '888 888  888 888     888     88888888 .d888888 888 888    888 888    888\nY88b  d88P Y88b 888 888     888     Y8b.     888  888 888 888  .d88P 888   d88P\n 'Y8888P'   'Y88888 888     888      'Y8888  'Y888888 888 8888888P'  8888888P'\n\n\n2026-11-07T20:44:13.182333Z  INFO surrealdb_server::cli::start: Memory threshold is disabled; queries will not be refused on memory pressure\n2026-11-07T20:44:13.182354Z  INFO surrealdb_server::env: Running 3.3.0 for linux on aarch64\n2026-11-07T20:44:13.182738Z  INFO surrealdb::core::kvs::ds: Starting kvs store at absolute path surrealkv:/data/store\n2026-11-07T20:44:13.183615Z  INFO surrealdb::core::kvs::surrealkv: Enabling value log separation: true\n2026-11-07T20:44:13.183629Z  INFO surrealdb::core::kvs::surrealkv: Setting value log max file size: 134217728\n2026-11-07T20:44:13.183630Z  INFO surrealdb::core::kvs::surrealkv: Setting value log threshold: 4096\n2026-11-07T20:44:13.183631Z  INFO surrealdb::core::kvs::surrealkv: Versioning enabled: false with retention period: 0ns\n2026-11-07T20:44:13.183632Z  INFO surrealdb::core::kvs::surrealkv: Versioning with versioned_index: false\n2026-11-07T20:44:13.183632Z  INFO surrealdb::core::kvs::surrealkv: Setting max memtable size: 268435456\n2026-11-07T20:44:13.183633Z  INFO surrealdb::core::kvs::surrealkv: Setting block cache capacity: 3085613056\n2026-11-07T20:44:13.183634Z  INFO surrealdb::core::kvs::surrealkv: Setting block size: 65536\n2026-11-07T20:44:13.184456Z  INFO surrealkv::lsm: === Starting LSM tree initialization ===\n2026-11-07T20:44:13.184462Z  INFO surrealkv::lsm: Database path: \"/data/store\"\n2026-11-07T20:44:13.186415Z  INFO surrealkv::lsm: Manifest state: log_number=0, last_sequence=0\n2026-11-07T20:44:13.186425Z  INFO surrealkv::wal::recovery: Starting WAL recovery from directory: \"/data/store/wal\"\n2026-11-07T20:44:13.186823Z  INFO surrealkv::wal::recovery: Replaying WAL segments #00000000000000000000 to #00000000000000000000\n2026-11-07T20:44:13.187084Z  INFO surrealkv::wal::recovery: WAL recovery complete: 0 batches across 0 segments, 0 memtables created, max_seq_num=None\n2026-11-07T20:44:13.187338Z  INFO surrealkv::lsm: === LSM tree initialization complete ===\n2026-11-07T20:44:13.187884Z  INFO surrealdb::core::kvs::surrealkv: Sync mode: every transaction commit\n2026-11-07T20:44:13.187889Z  INFO surrealdb::core::kvs::surrealkv: Grouped commit: enabled (timeout=5000000ns, wait_threshold=12, max_batch_size=4096)\n2026-11-07T20:44:13.187928Z  INFO surrealdb::core::kvs::ds: Started surrealkv kvs store\n2026-11-07T20:44:13.191271Z  INFO surrealdb::core::kvs::migration: Datastore version recorded version=3.3.0\n2026-11-07T20:44:13.191280Z  INFO surreal::dbs: Operation succeeded operation=\"check_version\" attempts=1\n2026-11-07T20:44:13.191284Z  INFO surrealdb::core::kvs::ds: This is a new SurrealDB instance. Initialising default namespace 'main' and database 'main'\n2026-11-07T20:44:13.192207Z  INFO surreal::dbs: Operation succeeded operation=\"initialise_defaults\" attempts=1\n2026-11-07T20:44:13.192675Z  INFO surreal::dbs: Operation succeeded operation=\"Insert node\" attempts=1\n2026-11-07T20:44:13.192691Z  INFO surreal::dbs: Initialising credentials user=root\n2026-11-07T20:44:13.192701Z  INFO surrealdb::core::kvs::ds: Credentials were provided, and no root users were found. The root user 'root' will be created\n2026-11-07T20:44:13.208080Z  INFO surreal::dbs: Operation succeeded operation=\"initialise_credentials\" attempts=1\n2026-11-07T20:44:13.208093Z  INFO surrealdb_server::cli::start: Startup complete; instance is now ready to serve\n2026-11-07T20:44:13.211749Z  INFO surrealdb::net: Started web server on 0.0.0.0:8000\n2026-11-07T20:44:13.211818Z  INFO surrealdb::net: Listening for a system shutdown signal.\n2026-11-07T20:44:13.602760Z  INFO surrealdb::net: Listening for a system shutdown signal.\n2026-11-07T20:44:13.602879Z  INFO surrealdb::net: Web server stopped. Bye!\n2026-11-07T20:44:13.603456Z  INFO surrealkv::lsm: Shutting down LSM tree...\n2026-11-07T20:44:13.603550Z  INFO surrealkv::lsm: Flushing all memtables on shutdown (flush_on_close=true)\n2026-11-07T20:44:13.603558Z  INFO surrealkv::lsm: Flushing all memtables for shutdown...\n2026-11-07T20:44:13.603560Z  INFO surrealkv::lsm: Flushing active memtable last (newest data): size=4143\n2026-11-07T20:44:13.613902Z  INFO surrealkv::lsm: Manifest updated atomically: table_id=1, log_number=1, last_sequence=31\n2026-11-07T20:44:13.613935Z  INFO surrealkv::lsm: Active memtable flushed: table_id=1, file_size=3018\n2026-11-07T20:44:13.613937Z  INFO surrealkv::lsm: All memtables flushed successfully for shutdown\n2026-11-07T20:44:13.613939Z  INFO surrealkv::lsm: All memtables flushed successfully on shutdown\n2026-11-07T20:44:13.613941Z  INFO surrealkv::lsm: Closing WAL: active_log_number=0\n2026-11-07T20:44:13.614526Z  INFO surrealkv::lsm: Cleaned up 1 obsolete WAL files during shutdown\n2026-11-07T20:44:13.615051Z  INFO surrealkv::lsm: === LSM tree shutdown complete === log_number=1, last_sequence=31\n2026-11-07T20:44:13.615149Z  INFO surrealkv::lsm: Shutting down LSM tree...\nGoodbye!\n",
+      "stderr": "onnxruntime cpuid_info warning: Unknown CPU vendor. cpuinfo_vendor value: 0\n2026-11-07T20:44:13.602737Z  WARN surrealdb::net: SIGTERM received. Waiting for a graceful shutdown. A second signal will force an immediate shutdown.\n2026-11-07T20:44:13.603202Z  WARN surrealkv::lsm: No runtime available for closing the store correctly\n"
+    },
+    {
+      "args": [
+        "docker",
+        "rm",
+        "storage-legacy-ead3552faa0e4e1d8c9d74a2bc3f7064"
+      ],
+      "exit": 0,
+      "stdout": "storage-legacy-ead3552faa0e4e1d8c9d74a2bc3f7064\n",
+      "stderr": ""
+    }
+  ],
+  "image_identity": [
+    {
+      "Id": "sha256:681c6c22c287421b5c7d99e0fde79b6e0d32c36c1ddeaab2762a1661cb04cd20",
+      "RepoTags": [
+        "surrealdb/surrealdb:v3.3.0"
+      ],
+      "RepoDigests": [
+        "surrealdb/surrealdb@sha256:681c6c22c287421b5c7d99e0fde79b6e0d32c36c1ddeaab2762a1661cb04cd20"
+      ],
+      "Comment": "buildkit.dockerfile.v0",
+      "Created": "2026-09-24T11:18:55.09440356Z",
+      "Author": "github.com/chainguard-dev/apko",
+      "Config": {
+        "User": "nonroot",
+        "Env": [
+          "PATH=/usr/local/sbin:/usr/local/bin:/usr/bin:/usr/sbin:/sbin:/bin",
+          "SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt",
+          "SURREAL_BIND=0.0.0.0:8000"
+        ],
+        "Entrypoint": [
+          "/surreal"
+        ],
+        "Volumes": {
+          "/data": {},
+          "/logs": {}
+        },
+        "Labels": {
+          "dev.chainguard.image.title": "glibc-dynamic",
+          "dev.chainguard.package.main": "",
+          "org.opencontainers.image.authors": "Chainguard Team https://www.chainguard.dev/",
+          "org.opencontainers.image.created": "2026-05-28T07:37:08Z",
+          "org.opencontainers.image.source": "https://github.com/chainguard-images/images/tree/main/images/glibc-dynamic",
+          "org.opencontainers.image.title": "glibc-dynamic",
+          "org.opencontainers.image.url": "https://images.chainguard.dev/directory/image/glibc-dynamic/overview",
+          "org.opencontainers.image.vendor": "Chainguard"
+        },
+        "Healthcheck": {
+          "Test": [
+            "CMD",
+            "/surreal",
+            "isready",
+            "--endpoint",
+            "http://localhost:8000"
+          ],
+          "Interval": 30000000000,
+          "Timeout": 5000000000,
+          "StartPeriod": 20000000000,
+          "Retries": 3
+        }
+      },
+      "Architecture": "arm64",
+      "Os": "linux",
+      "Size": 430126732,
+      "RootFS": {
+        "Type": "layers",
+        "Layers": [
+          "sha256:0e896cf0ab0c2f9335bd6cece4cdea487170ab32aef879621373d1c7d5e665d1",
+          "sha256:f6b5891593e321012c7b227092b874f9ab6068d28ee6bf92ba30854f87d265f2",
+          "sha256:0572f99e88ea3679bb1d06d2ed2ece9ddad579d2c3f187e2b19d5038c3453b10",
+          "sha256:65b89448b43f9b201fd7122f59b4b1d7747dcecdc5c6a4dd779c46dc908bd3a8",
+          "sha256:e1f52535e021ce140b102954bc09d92276977c94605a8b7be3e9b323ff2e46e7",
+          "sha256:83040661a4cdbc53de9c63e57cbbbe568e19dd1357428ea981ed350239ca6745",
+          "sha256:a37bab461379b20239e80ff19c0b038cdcf41df94f12d7a3242809d63a4ed4b4",
+          "sha256:307815b8f8aac4ff45e4e0d638f3e7273faf05b0303372efb7177bc13667769a",
+          "sha256:503dff3e1ba1dc66544ffbebe5caa056c7f1a9613eb2d44af2a6d42e4e07f99b",
+          "sha256:5e1f6131c0c53a04244fa202196c980d973c1ba3e6118606e9a59f01d506e7c8"
+        ]
+      },
+      "Metadata": {
+        "LastTagTime": "2026-10-27T04:57:27.530830551Z"
+      },
+      "Descriptor": {
+        "mediaType": "application/vnd.oci.image.index.v1+json",
+        "digest": "sha256:681c6c22c287421b5c7d99e0fde79b6e0d32c36c1ddeaab2762a1661cb04cd20",
+        "size": 1611
+      },
+      "Identity": {
+        "Pull": [
+          {
+            "Repository": "docker.io/surrealdb/surrealdb"
+          }
+        ]
+      }
+    }
+  ],
+  "version": "3.3.0 for linux on aarch64",
+  "verified": [
+    [
+      {
+        "id": "records:a",
+        "label": "alpha",
+        "sequence": 1
+      },
+      {
+        "id": "records:b",
+        "label": "beta",
+        "sequence": 2
+      }
+    ],
+    {
+      "accesses": {},
+      "analyzers": {},
+      "apis": {},
+      "buckets": {},
+      "configs": {},
+      "functions": {},
+      "models": {},
+      "modules": {},
+      "params": {},
+      "sequences": {},
+      "tables": {
+        "records": "DEFINE TABLE records TYPE NORMAL SCHEMAFULL PERMISSIONS NONE"
+      },
+      "users": {}
+    },
+    {
+      "events": {},
+      "fields": {
+        "label": "DEFINE FIELD label ON records TYPE string PERMISSIONS FULL",
+        "sequence": "DEFINE FIELD `sequence` ON records TYPE int PERMISSIONS FULL"
+      },
+      "indexes": {},
+      "lives": {},
+      "tables": {}
+    }
+  ],
+  "terminal_state": {
+    "Status": "exited",
+    "Running": false,
+    "Paused": false,
+    "Restarting": false,
+    "OOMKilled": false,
+    "Dead": false,
+    "Pid": 0,
+    "ExitCode": 0,
+    "Error": "",
+    "StartedAt": "2026-11-07T20:44:12.847311012Z",
+    "FinishedAt": "2026-11-07T20:44:13.619146387Z",
+    "Health": {
+      "Status": "unhealthy",
+      "FailingStreak": 0,
+      "Log": []
+    }
+  },
+  "cleanup_errors": [],
+  "settled": true
+}

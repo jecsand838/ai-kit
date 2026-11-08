@@ -37,32 +37,48 @@ source_kind = "github-release-source"
 channel = "stable"
 release_tag_prefix = "v"
 archive_prefix = "surrealdb"
-upstream_focus_paths = [
-  "Cargo.toml",
-  "surrealdb",
-  "doc",
-]
+upstream_focus_paths = ["Cargo.toml", "surrealdb", "doc"]
 local_focus_paths = [
   "Cargo.lock",
+  "AGENTS.md",
+  "ARCHITECTURE.md",
+  "docs/security-dependencies.md",
+  "docs/mock-testing-production-bugs.md",
+  "scripts/security_exceptions.toml",
+  "tools-kit/Cargo.toml",
+  "tools-kit/ARCHITECTURE.md",
+  ".agents/skills/storage-kit-research/references/strict-live.md",
   "storage-kit/Cargo.toml",
   "storage-kit/src/databases/surrealdb",
   "storage-kit/src/databases/config/surreal.rs",
-  "storage-kit/tests/database_cases/mod.rs",
-  "storage-kit/tests/surreal_partition_deadline.rs",
-  "storage-kit/tests/strict_env_contract.rs",
-  "storage-kit/tests/strict_live.rs",
-  "storage-kit/scripts/verify_strict_live.sh",
+  "storage-kit/tests",
+  "storage-kit/scripts",
   "storage-kit/docker-compose.strict.yml",
   "storage-kit/strict-tests.env.example",
-  "storage-kit/docs/testing.md",
+  "storage-kit/docs",
 ]
-plan_prompt_suffix = """Prioritize sourced SurrealDB 3.0.5 to 3.3.0 drift across the Rust Kit, matching core package, bundled server, and all five supported modes: memory, RocksDB, SurrealKV, HTTP, and WebSocket. Inspect the reorganized surrealdb tree and root Cargo.toml, including engine/local/api/rpc/types/sql/syn/idx/kvs/server ownership, without adding new direct split-package dependencies or features. Align the Kit/core/service and tracked environment example with the selected release. First add a real public create/open/list/scan/drop case for an sq-prefixed collection to expose the former sequence/table keyspace collision; run the old pins and report red only if observed. Add or strengthen exact filtered indexed-vector results, full-text removal after update and partition replacement, and concurrent first-use isolation for distinct namespace/database scopes with the same collection name; preserve scoped clone semantics and all retained operations. For canonical server readiness, change only Surreal's verifier probe from /health to unauthenticated /ready with no namespace/database headers: /ready is authoritative for completed startup and a fresh heartbeat, whereas /health only proves backend reachability. First adapt strict_env_contract endpoint/order expectations and add 503-to-200 readiness coverage, recording red against the old /health verifier and forbidding live selection before readiness. Preserve the already-fixed setup/stall-retry/child-settlement phase budgets, unchanged native curl connection/transfer limits, peer EOF, both full lanes, owned cleanup, and primary failure. Keep surreal_partition_deadline's /health route because the native Kit HTTP connect still uses it; update only its synthetic version response to the selected release. Keep deterministic codec/protocol evidence distinct from real strict-live proof, and update docs/testing.md for server startup readiness. Existing passing coverage closes a proof gap; do not manufacture a failure or introduce unrelated production changes. Plan meaningful public-behavior tests first; during leaf execution add or extend them and record actual red evidence before production adaptation, then run the focused native regressions and relevant compile/test checks for this vendor in its supported feature lanes. Return implementation and evidence ready for the updater: after leaf implementation, the updater runs target preflight and every exact manifest completion gate in the recorded order, all blocking under strict acceptance before cleanup, staging, and commit. Do not pre-run those whole-crate/workspace gates inside the leaf solely to duplicate the updater's unchanged immediate run; broaden or repeat checks when new changes, failures, or unresolved concerns justify them. This sequencing does not permit no-regression acceptance, skipped gates/cases, weakened assertions, or treating focused checks as completion. The parent still performs independent actual-diff review and the complete final campaign validation for every in-scope crate. Preserve supported feature lanes and limit fixes to sourced vendor drift."""
+plan_prompt_suffix = """Implement only the approved SurrealDB 3.3.0 to 4.0.0 security migration for RUSTSEC-2026-0454 and RUSTSEC-2026-0452. Both planning and implementation must read the generated dossier target first and stop before edits unless it is exactly v4.0.0; do not retarget this approval to a newer release. Use the requested Rust core, async, testing, networking, abstractions, architecture and rust-code-structuring skills, Storage research/change-contract, and validation-matrix guidance. The external paths in local_focus_paths are explicitly authorized parts of this single migration, not permission for unrelated cleanup.
+
+First align active owning guidance with the target under implementation: exact SDK/Core 4.0.0, four Surreal modes, and the narrow Tool futures-core 0.3.34 exception. Preserve historical receipts and tmp/**. Record a fresh baseline two-scan security audit with the prepared checksum-verified cargo-audit 0.22.2 at target/security-2026-0454-0452/bin/cargo-audit (scanner-receipt.json records its official archive and executable hashes) and retain the original failing CI report under target/v0.0.4-docsite-audit/fixes/security-ci. Run applicable existing passing controls before dependency changes. Write meaningful tests before production adaptation and retain their separate red results: old RocksDb serialized configuration must be rejected (currently accepted); an exhaustive public match must cover only memory, SurrealKV, HTTP and WebSocket; selected Surreal verifier execution must not require the deleted RocksDB variable. Keep readiness, deadlines, fresh directories, owned cleanup and primary failures. Do not let a compile failure mask behavioral red evidence.
+
+Before changing the old dependency pins, generate a minimal closed 3.3.0 SurrealKV fixture with exact seeded records/catalog, source/build or image identity, hashes and generation instructions. Verify reads with 3.3.0. Add a public-connect regression using a disposable copy: ordinary 4.0.0 connection must fail specifically because native upgrade is required, within a bound; generic connection failure is insufficient. Verify the attempted copy remains readable with exact original data using a bounded, owned, version-pinned 3.3 process; preserve the original fixture. The baseline refusal assertion failing because 3.3 opens successfully is an intentional version-boundary red, not an invented Kit bug. Do not enable experimental_upgrade_from_3x, add a migration configuration option, parse native formats in production, or add an old SDK dependency.
+
+Pin surrealdb and surrealdb-core to =4.0.0 and resolve transitive surrealkv 1.3.0 without a direct dependency. Update only the required futures family to 0.3.34, Tools optional futures-core to =0.3.34 without default features, and shared serde_json to 1.0.154; preserve unrelated compatible selections and review every lock delta. Keep the frozen Lance/Arrow/ObjectStore family and existing crate boundaries. No Cargo patches, Git/path overrides, new direct split-package dependencies or unrelated features. Remove RocksDb from the public mode enum, rendering, validation, Cargo feature, environment inventory and mode cases without aliases or compatibility shims. Retain unconditional configuration availability and every distinct operation/regression across memory, SurrealKV, HTTP and WebSocket. Use server 4.0.0 with SurrealKV and invocation-owned fresh volumes. Preserve /ready readiness and version/identity receipts.
+
+Adapt only demonstrated SDK/query drift. Preserve scoped client isolation, typed rollback/conflict classification, safe retry boundaries, cancellation, exact filtered vectors/full-text updates and removal, partition replacement, index readiness and cold reopen. Keep all surreal_partition_deadline cases and run existing Tools MCP server startup/capacity/stream/handler-ownership/cancellation/shutdown regressions before and after the futures update. Passing controls are evidence, not a reason to manufacture failures. Add regressions for actual gaps or failures before fixing them. Update active owning docs, rustdoc, scripts and source contracts together. Append accurate security remediation evidence and any actual Kit-bug regression to its owning ledger; never overwrite historical failures. Add no audit exceptions for the two target advisories. Remove existing exceptions only where a fresh raw audit proves them obsolete; retained accepted findings remain PASS_WITH_EXCEPTIONS.
+
+Use Rust 1.99.0, CARGO_INCREMENTAL=0 and CARGO_BUILD_JOBS=1, one Cargo command at a time, and --locked for qualification; only deliberate dependency adaptation regenerates the lock. During this leaf run focused tests and evidence, leaving whole completion gates to the updater to avoid immediate duplicate runs. The approved completion scope is all five crates' deterministic/docs/security checks, all Storage lanes and Tool strict-live; Agent, Provider and App live suites are deferred. Never run Storage --all-features. Do not run a full live workspace qualification, push, publish, open upstream issues, migrate existing user data, create commits, or spawn/delegate subagents. The updater owns archives/vendor-lock cleanup and its local commit. The parent independently reviews the actual complete diff, resolves findings, and performs a fresh locked clean-checkout all-target workspace check at the final reviewed commit. Preserve all evidence, fixtures and dossiers; only obsolete rebuildable Cargo outputs may be reclaimed for disk space. On failure preserve the dossier for supported resume; do not rewrite frozen metadata or weaken gates."""
+preflight_gates = [
+  ["python3", "-c", "import pathlib,sys,tomllib; tag=tomllib.loads(pathlib.Path('storage-kit/vendor/vendor-lock.toml').read_text())['vendors']['surrealdb']['tag']; sys.exit(0 if tag == 'v4.0.0' else 'Unexpected SurrealDB target: ' + tag)"],
+]
 completion_gates = [
-  ["cargo", "fmt", "--all", "--check"],
   ["cargo", "clippy", "--locked", "--workspace", "--all-targets", "--all-features", "--exclude", "storage-kit", "--exclude", "app-kit", "--", "-D", "warnings"],
-  ["bash", "storage-kit/scripts/check.sh"],
-  ["bash", "scripts/check_docs_site.sh"],
-  ["bash", "-lc", "source storage-kit/strict-tests.env && bash storage-kit/scripts/verify_strict_live.sh"],
+  ["bash", "scripts/check_ci.sh"],
+  ["bash", "scripts/verify_workspace_strict.sh", "--skip-strict-live"],
+  ["bash", "-lc", "source storage-kit/strict-tests.env && bash storage-kit/scripts/verify_strict_live.sh --all-backends"],
+  ["bash", "-lc", 'source tools-kit/strict-tests.env && AI_KIT_WORKSPACE_OWNS_DOCS_SITE="$PWD" bash tools-kit/scripts/verify_strict_live.sh'],
+  ["bash", "-lc", 'python3 scripts/security_dependencies.py audit --root "$PWD" --scanner "$PWD/target/security-2026-0454-0452/bin/cargo-audit" --database "$PWD/target/security-2026-0454-0452/advisory-db" --output "$PWD/target/security-2026-0454-0452/audit-$(date -u +%Y%m%dT%H%M%SZ)"'],
+  ["git", "diff", "--check"],
 ]
 
 [vendors.turso]

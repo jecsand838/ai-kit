@@ -5,6 +5,10 @@ mod postgres_cleanup;
 mod state_cases;
 #[cfg(any(feature = "redb", feature = "sqlite"))]
 mod state_file_cases;
+#[cfg(feature = "surrealdb")]
+mod surreal_legacy_store;
+#[cfg(feature = "surrealdb")]
+mod surreal_store_reopen;
 
 use std::{collections::BTreeMap, path::PathBuf};
 
@@ -346,158 +350,192 @@ async fn lancedb_create_if_missing_preserves_native_failure_without_a_collection
 }
 
 #[cfg(feature = "surrealdb")]
-#[tokio::test]
-async fn surrealdb_memory_is_live() {
-    assert_database_round_trip(DatabaseConfig::surreal(SurrealConfig::default()), false).await;
-}
-
-#[cfg(feature = "surrealdb")]
-#[tokio::test]
-async fn surrealdb_combined_rename_and_cast_is_live() {
-    let database = Database::connect(DatabaseConfig::surreal(SurrealConfig::default()))
-        .await
-        .expect("SurrealDB memory connection");
-    let locator = StorageLocator::new(format!("surreal_alter_{}", uuid::Uuid::new_v4().simple()));
-    let fields = ["title", "label", "atomic_title"]
-        .into_iter()
-        .map(|name| FieldSchema {
-            name: name.to_owned(),
-            field_type: FieldType::String,
-            nullable: false,
-            metadata: BTreeMap::new(),
+#[test]
+fn surrealdb_memory_is_live() {
+    std::thread::Builder::new()
+        .stack_size(8 * 1024 * 1024)
+        .spawn(|| {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("owned embedded round-trip runtime")
+                .block_on(async {
+                    assert_database_round_trip(
+                        DatabaseConfig::surreal(SurrealConfig::default()),
+                        false,
+                    )
+                    .await;
+                });
         })
-        .collect();
-    database
-        .catalog(CatalogRequest::CreateCollection(CreateCollectionRequest {
-            locator: locator.clone(),
-            schema: Some(CollectionSchema {
-                fields,
-                metadata: BTreeMap::new(),
-            }),
-            records: vec![
-                DataRecord::without_id()
-                    .json_field("title", serde_json::json!("41"))
-                    .json_field("label", serde_json::json!("rename-only"))
-                    .json_field("atomic_title", serde_json::json!("preserved")),
-            ],
-            mode: CreateCollectionMode::Create,
-        }))
-        .await
-        .expect("create alter collection");
+        .expect("owned embedded round-trip thread")
+        .join()
+        .expect("settled embedded round-trip thread");
+}
 
-    database
-        .catalog(CatalogRequest::AlterCollection(
-            SchemaEvolutionRequest::AlterColumns(AlterColumnsRequest {
-                locator: locator.clone(),
-                alterations: vec![
-                    ColumnAlterationSpec {
-                        path: "title".to_owned(),
-                        rename: Some("heading".to_owned()),
-                        nullable: Some(false),
-                        cast_to: Some(FieldType::I64),
-                    },
-                    ColumnAlterationSpec {
-                        path: "label".to_owned(),
-                        rename: Some("name".to_owned()),
-                        nullable: None,
-                        cast_to: None,
-                    },
-                ],
-            }),
-        ))
-        .await
-        .expect("alter combined and rename-only columns");
-    let DataResponse::Records(page) = database
-        .data(DataRequest::Scan(ScanRequest::new(locator.clone())))
-        .await
-        .expect("scan altered record")
-    else {
-        panic!("scan must return records");
-    };
-    let record = page.records.first().expect("altered record");
-    assert_eq!(record.fields.get("heading"), Some(&serde_json::json!(41)));
-    assert!(!record.fields.contains_key("title"));
-    assert_eq!(
-        record.fields.get("name"),
-        Some(&serde_json::json!("rename-only"))
-    );
-    assert!(!record.fields.contains_key("label"));
+#[cfg(feature = "surrealdb")]
+#[test]
+fn surrealdb_combined_rename_and_cast_is_live() {
+    // Native 4.0 debug queries require the same 8 MiB polling stack as the
+    // grouped Surreal cases; the test owns and joins this runtime thread.
+    std::thread::Builder::new()
+        .stack_size(8 * 1024 * 1024)
+        .spawn(|| {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("owned schema runtime")
+                .block_on(async {
+                    let database =
+                        Database::connect(DatabaseConfig::surreal(SurrealConfig::default()))
+                            .await
+                            .expect("SurrealDB memory connection");
+                    let locator = StorageLocator::new(format!(
+                        "surreal_alter_{}",
+                        uuid::Uuid::new_v4().simple()
+                    ));
+                    let fields = ["title", "label", "atomic_title"]
+                        .into_iter()
+                        .map(|name| FieldSchema {
+                            name: name.to_owned(),
+                            field_type: FieldType::String,
+                            nullable: false,
+                            metadata: BTreeMap::new(),
+                        })
+                        .collect();
+                    database
+                        .catalog(CatalogRequest::CreateCollection(CreateCollectionRequest {
+                            locator: locator.clone(),
+                            schema: Some(CollectionSchema {
+                                fields,
+                                metadata: BTreeMap::new(),
+                            }),
+                            records: vec![
+                                DataRecord::without_id()
+                                    .json_field("title", serde_json::json!("41"))
+                                    .json_field("label", serde_json::json!("rename-only"))
+                                    .json_field("atomic_title", serde_json::json!("preserved")),
+                            ],
+                            mode: CreateCollectionMode::Create,
+                        }))
+                        .await
+                        .expect("create alter collection");
 
-    database
-        .catalog(CatalogRequest::AlterCollection(
-            SchemaEvolutionRequest::AlterColumns(AlterColumnsRequest {
-                locator: locator.clone(),
-                alterations: vec![
-                    ColumnAlterationSpec {
-                        path: "atomic_title".to_owned(),
-                        rename: Some("atomic_heading".to_owned()),
-                        nullable: None,
-                        cast_to: None,
-                    },
-                    ColumnAlterationSpec {
-                        path: "heading".to_owned(),
-                        rename: None,
-                        nullable: Some(true),
-                        cast_to: None,
-                    },
-                ],
-            }),
-        ))
-        .await
-        .expect_err("invalid later alteration must reject the request");
-    let DataResponse::Records(page) = database
-        .data(DataRequest::Scan(ScanRequest::new(locator.clone())))
-        .await
-        .expect("scan after rejected alteration")
-    else {
-        panic!("scan must return records");
-    };
-    let record = page.records.first().expect("record after rejection");
-    assert_eq!(
-        record.fields.get("atomic_title"),
-        Some(&serde_json::json!("preserved"))
-    );
-    assert!(!record.fields.contains_key("atomic_heading"));
+                    database
+                        .catalog(CatalogRequest::AlterCollection(
+                            SchemaEvolutionRequest::AlterColumns(AlterColumnsRequest {
+                                locator: locator.clone(),
+                                alterations: vec![
+                                    ColumnAlterationSpec {
+                                        path: "title".to_owned(),
+                                        rename: Some("heading".to_owned()),
+                                        nullable: Some(false),
+                                        cast_to: Some(FieldType::I64),
+                                    },
+                                    ColumnAlterationSpec {
+                                        path: "label".to_owned(),
+                                        rename: Some("name".to_owned()),
+                                        nullable: None,
+                                        cast_to: None,
+                                    },
+                                ],
+                            }),
+                        ))
+                        .await
+                        .expect("alter combined and rename-only columns");
+                    let DataResponse::Records(page) = database
+                        .data(DataRequest::Scan(ScanRequest::new(locator.clone())))
+                        .await
+                        .expect("scan altered record")
+                    else {
+                        panic!("scan must return records");
+                    };
+                    let record = page.records.first().expect("altered record");
+                    assert_eq!(record.fields.get("heading"), Some(&serde_json::json!(41)));
+                    assert!(!record.fields.contains_key("title"));
+                    assert_eq!(
+                        record.fields.get("name"),
+                        Some(&serde_json::json!("rename-only"))
+                    );
+                    assert!(!record.fields.contains_key("label"));
 
-    database
-        .catalog(CatalogRequest::DropCollection {
-            locator,
-            ignore_missing: false,
+                    database
+                        .catalog(CatalogRequest::AlterCollection(
+                            SchemaEvolutionRequest::AlterColumns(AlterColumnsRequest {
+                                locator: locator.clone(),
+                                alterations: vec![
+                                    ColumnAlterationSpec {
+                                        path: "atomic_title".to_owned(),
+                                        rename: Some("atomic_heading".to_owned()),
+                                        nullable: None,
+                                        cast_to: None,
+                                    },
+                                    ColumnAlterationSpec {
+                                        path: "heading".to_owned(),
+                                        rename: None,
+                                        nullable: Some(true),
+                                        cast_to: None,
+                                    },
+                                ],
+                            }),
+                        ))
+                        .await
+                        .expect_err("invalid later alteration must reject the request");
+                    let DataResponse::Records(page) = database
+                        .data(DataRequest::Scan(ScanRequest::new(locator.clone())))
+                        .await
+                        .expect("scan after rejected alteration")
+                    else {
+                        panic!("scan must return records");
+                    };
+                    let record = page.records.first().expect("record after rejection");
+                    assert_eq!(
+                        record.fields.get("atomic_title"),
+                        Some(&serde_json::json!("preserved"))
+                    );
+                    assert!(!record.fields.contains_key("atomic_heading"));
+
+                    database
+                        .catalog(CatalogRequest::DropCollection {
+                            locator,
+                            ignore_missing: false,
+                        })
+                        .await
+                        .expect("drop alter collection");
+                });
         })
-        .await
-        .expect("drop alter collection");
+        .expect("owned schema thread")
+        .join()
+        .expect("settled schema thread");
 }
 
 #[cfg(feature = "surrealdb")]
-#[tokio::test]
-async fn surrealdb_rocksdb_is_live() {
-    let path = PathBuf::from(
-        std::env::var("TEST_SURREALDB_ROCKSDB_PATH").expect("TEST_SURREALDB_ROCKSDB_PATH"),
-    );
-    assert_database_round_trip(
-        DatabaseConfig::surreal(SurrealConfig {
-            mode: SurrealModeConfig::RocksDb { path },
-            ..SurrealConfig::default()
-        }),
-        false,
-    )
-    .await;
-}
-
-#[cfg(feature = "surrealdb")]
-#[tokio::test]
-async fn surrealdb_surrealkv_is_live() {
-    let path = PathBuf::from(
-        std::env::var("TEST_SURREALDB_SURREALKV_PATH").expect("TEST_SURREALDB_SURREALKV_PATH"),
-    );
-    assert_database_round_trip(
-        DatabaseConfig::surreal(SurrealConfig {
-            mode: SurrealModeConfig::SurrealKv { path },
-            ..SurrealConfig::default()
-        }),
-        false,
-    )
-    .await;
+#[test]
+fn surrealdb_surrealkv_is_live() {
+    std::thread::Builder::new()
+        .stack_size(8 * 1024 * 1024)
+        .spawn(|| {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("owned embedded round-trip runtime")
+                .block_on(async {
+                    let path = PathBuf::from(
+                        std::env::var("TEST_SURREALDB_SURREALKV_PATH")
+                            .expect("TEST_SURREALDB_SURREALKV_PATH"),
+                    );
+                    assert_database_round_trip(
+                        DatabaseConfig::surreal(SurrealConfig {
+                            mode: SurrealModeConfig::SurrealKv { path },
+                            ..SurrealConfig::default()
+                        }),
+                        false,
+                    )
+                    .await;
+                });
+        })
+        .expect("owned embedded round-trip thread")
+        .join()
+        .expect("settled embedded round-trip thread");
 }
 
 #[cfg(feature = "surrealdb")]

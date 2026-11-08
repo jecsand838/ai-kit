@@ -207,8 +207,8 @@ printf '%s\n' "${selection}" > "${logs}/selection.json"
 while IFS= read -r backend; do
     case "${backend}" in
         surrealdb)
-            for name in TEST_SURREALDB_ROCKSDB_PATH TEST_SURREALDB_SURREALKV_PATH TEST_SURREALDB_REMOTE_WS TEST_SURREALDB_REMOTE_HTTP TEST_SURREALDB_ROOT_USER TEST_SURREALDB_ROOT_PASS TEST_SURREALDB_NS TEST_SURREALDB_DB; do require_env "${name}"; done
-            embedded_names+=(TEST_SURREALDB_ROCKSDB_PATH TEST_SURREALDB_SURREALKV_PATH)
+            for name in TEST_SURREALDB_SURREALKV_PATH TEST_SURREALDB_REMOTE_WS TEST_SURREALDB_REMOTE_HTTP TEST_SURREALDB_ROOT_USER TEST_SURREALDB_ROOT_PASS TEST_SURREALDB_NS TEST_SURREALDB_DB; do require_env "${name}"; done
+            embedded_names+=(TEST_SURREALDB_SURREALKV_PATH)
             services+=(surrealdb);;
         postgres)
             for name in TEST_POSTGRES_STATE_STORE_HOST TEST_POSTGRES_STATE_STORE_PORT TEST_POSTGRES_STATE_STORE_DB TEST_POSTGRES_STATE_STORE_USER TEST_POSTGRES_STATE_STORE_PASS; do require_env "${name}"; done

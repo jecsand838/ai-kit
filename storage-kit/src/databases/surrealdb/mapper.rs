@@ -2,25 +2,8 @@ use serde_json::{Value, json};
 
 use crate::{
     ComparisonOp, DataRecord, DenseVector, DistanceMetric, FieldType, FilterExpr, Projection,
-    RecordId, StorageError, StorageLocator, SurrealModeConfig, VectorElementType,
+    RecordId, StorageError, StorageLocator, VectorElementType,
 };
-
-pub(crate) fn endpoint_from_mode(mode: &SurrealModeConfig) -> String {
-    match mode {
-        SurrealModeConfig::Mem => "mem://".to_string(),
-        SurrealModeConfig::RocksDb { path } => format!("rocksdb://{}", path.to_string_lossy()),
-        SurrealModeConfig::SurrealKv { path } => {
-            format!("surrealkv://{}", path.to_string_lossy())
-        }
-        SurrealModeConfig::RemoteWs { endpoint } | SurrealModeConfig::RemoteHttp { endpoint } => {
-            normalize_remote_endpoint(endpoint)
-        }
-    }
-}
-
-fn normalize_remote_endpoint(endpoint: &str) -> String {
-    endpoint.trim().to_string()
-}
 
 pub(crate) fn table_name(locator: &StorageLocator) -> String {
     locator.collection.clone()

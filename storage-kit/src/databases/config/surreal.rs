@@ -4,7 +4,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::{Password, StorageError};
 
-/// Selects the SurrealDB deployment mode.
+/// Selects one of the four SurrealDB 4.0.0 deployment modes.
+///
+/// Existing 3.x SurrealKV stores require native upgrade and are refused by
+/// ordinary connection. The Kit does not enable experimental upgrading.
 ///
 /// # Examples
 ///
@@ -18,11 +21,6 @@ use crate::{Password, StorageError};
 pub enum SurrealModeConfig {
     /// Uses the in-memory engine.
     Mem,
-    /// Uses the embedded RocksDB engine rooted at `path`.
-    RocksDb {
-        /// Filesystem path that stores the RocksDB state.
-        path: PathBuf,
-    },
     /// Uses the embedded SurrealKV engine rooted at `path`.
     SurrealKv {
         /// Filesystem path that stores the SurrealKV state.
@@ -84,7 +82,6 @@ impl SurrealConfig {
     pub(crate) fn validate(&self) -> Result<(), StorageError> {
         match &self.mode {
             SurrealModeConfig::Mem => {}
-            SurrealModeConfig::RocksDb { path } => validate_non_empty_path("mode.path", path)?,
             SurrealModeConfig::SurrealKv { path } => validate_non_empty_path("mode.path", path)?,
             SurrealModeConfig::RemoteWs { endpoint } => {
                 validate_endpoint("mode.endpoint", endpoint, &["ws", "wss"])?

@@ -34,7 +34,7 @@ impl SurrealManager {
         common: CommonConfig,
         config: SurrealConfig,
     ) -> Result<Self, StorageError> {
-        let endpoint = config.endpoint_string();
+        let endpoint = config.mode.endpoint_string();
         let root_client =
             Self::connect_client(&common, &config, &endpoint, config.context_key().as_ref())
                 .await?;

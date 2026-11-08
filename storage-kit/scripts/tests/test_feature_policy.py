@@ -917,7 +917,7 @@ sys.exit(result.returncode)
 if '--list' in sys.argv:
     print('fixture_case: test')
 else:
-    names = ('TEST_LANCEDB_EMBEDDED_PATH', 'TEST_SURREALDB_ROCKSDB_PATH', 'TEST_SURREALDB_SURREALKV_PATH')
+    names = ('TEST_LANCEDB_EMBEDDED_PATH', 'TEST_SURREALDB_SURREALKV_PATH')
     paths = {name: os.environ.get(name) for name in names}
     with pathlib.Path(os.environ['TRACE']).open('a') as stream: stream.write(json.dumps(paths) + '\n')
     print('test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out')
@@ -932,7 +932,7 @@ with pathlib.Path(os.environ['HTTP_TRACE']).open('a') as stream: stream.write(sy
                 tool = binary / name
                 tool.write_text('#!' + sys.executable + '\n' + source)
                 tool.chmod(0o700)
-            names = ('TEST_LANCEDB_EMBEDDED_PATH', 'TEST_SURREALDB_ROCKSDB_PATH', 'TEST_SURREALDB_SURREALKV_PATH')
+            names = ('TEST_LANCEDB_EMBEDDED_PATH', 'TEST_SURREALDB_SURREALKV_PATH')
             environment = {
                 'PATH': str(binary) + os.pathsep + os.environ['PATH'], 'TMPDIR': str(root),
                 'TRACE': str(root / 'paths.jsonl'), 'SERVICE_TRACE': str(root / 'services'), 'HTTP_TRACE': str(root / 'http'),

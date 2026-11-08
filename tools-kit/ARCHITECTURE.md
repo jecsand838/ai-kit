@@ -112,8 +112,9 @@ honest Transport failure; available close/join failures remain visible. Server
 completion does not rely on task metrics, sleeps or detached cleanup.
 
 The existing `mcp-server` feature alone enables the optional exact
-`futures-core =0.3.32` dependency, without default features. It names the native
-SessionManager stream bounds; the package version was already locked.
+`futures-core =0.3.34` dependency, without default features. It names the native
+SessionManager stream bounds. This version is shared with the SurrealDB 4.0.0
+dependency graph; it adds no public Tool behavior or feature.
 
 ## Module Ownership
 

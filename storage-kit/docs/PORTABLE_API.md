@@ -128,6 +128,13 @@ CommonConfig's portable operation deadline includes internal preflight requests
 and retries. `WaitForIndexRequest.timeout_ms` adds a caller-selected bound to
 index readiness observation; an absent index remains an explicit failure.
 
+SurrealDB SDK/Core 4.0.0 supports exactly four supplied modes: memory,
+SurrealKV, HTTP and WebSocket. RocksDB configuration is removed, including its
+serialized spelling. Ordinary connection to an existing 3.x SurrealKV store
+refuses the required native upgrade. The Kit exposes no migration option and
+never enables experimental upgrading. A connection refusal is reported through
+the existing connection error; it never grants permission to migrate caller data.
+
 ## StateStore and associated transaction
 
 ```rust,ignore

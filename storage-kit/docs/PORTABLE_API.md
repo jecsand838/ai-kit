@@ -109,7 +109,7 @@ schema or count when it cannot honestly report that information. A
 that token unchanged to the same applicable query path and cannot parse it as
 a universally numeric offset. Distances, similarities and relevance scores
 are not mutually interchangeable. Absence of a raw score must remain absence.
-The selected [Lance 13 scanner](https://docs.rs/crate/lance/13.0.0/source/src/dataset/scanner.rs)
+The selected [Lance 14.0.2 scanner](https://docs.rs/crate/lance/14.0.2/source/src/dataset/scanner.rs)
 uses live-row metadata for eligible unfiltered limit/offset planning and
 defaults to deterministic scan order. The supplied Lance regression
 compares pages with an independently verified same-state scan after deletions,
@@ -287,8 +287,8 @@ backend failure to conflict.
 
 The supplied implementations rely on distinct native mechanisms:
 
-- The embedded Lance StateStore uses the pinned Lance 13.0.0 Dataset APIs beneath
-  LanceDB 0.40.0. It prepares a delta against one immutable snapshot, then guards
+- The embedded Lance StateStore uses the pinned Lance 14.0.2 Dataset APIs beneath
+  LanceDB 0.41.0. It prepares a delta against one immutable snapshot, then guards
   the exact next manifest version before conditional publication. A private
   sentinel, permanent tombstones, owned worker and local durability wrapper
   preserve the contracts above without changing their public surface. Private

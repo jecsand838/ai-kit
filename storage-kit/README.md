@@ -163,10 +163,10 @@ table by deleting manifests, tombstones, or the sentinel, and do not overwrite
 an active directory. Cold-copy/restore coverage and its current execution
 receipt belong in the evidence ledger.
 
-The current native family is LanceDB 0.40.0 with Lance 13.0.0. The supplied
-configuration remains local-only. LanceDB's `remote` feature is enabled solely
-to compile its 0.40.0 job decoder; this does not expose a remote deployment or
-enable its cloud object-store features.
+The current native family is LanceDB 0.41.0 with Lance 14.0.2. The supplied
+configuration remains local-only. LanceDB's existing `remote` feature is retained;
+the job-decoder defect that required it in 0.40.0 is fixed in 0.41.0. This feature
+does not expose a remote deployment or enable cloud object-store features.
 
 For a Kit upgrade, first retain a cold copy and validate the candidate against
 that copy. Stop all older processes before starting the candidate: older

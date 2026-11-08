@@ -31,11 +31,11 @@ tokio = { workspace = true, features = ["fs", "macros", "rt-multi-thread", "sync
 url = { workspace = true }
 uuid = { version = "1", features = ["serde", "v4", "v5"] }
 
-# LanceDB 0.40 job code requires remote error types; keep storage adapters local.
-lancedb = { version = "=0.40.0", default-features = false, features = ["remote"] }
-lance = { version = "=13.0.0", default-features = false }
-lance-io = { version = "=13.0.0", default-features = false }
-lance-table = { version = "=13.0.0", default-features = false }
+# Retain remote selection; 0.41 fixes the old job decoder defect. Kit stays local.
+lancedb = { version = "=0.41.0", default-features = false, features = ["remote"] }
+lance = { version = "=14.0.2", default-features = false }
+lance-io = { version = "=14.0.2", default-features = false }
+lance-table = { version = "=14.0.2", default-features = false }
 object_store = { version = "=0.14.2", default-features = false }
 arrow-array = { version = "58.4.1" }
 arrow-schema = { version = "58.4.1" }

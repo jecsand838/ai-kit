@@ -1,11 +1,11 @@
 version = 1
 
 [vendors.lancedb]
-tag = "v0.40.0"
-archive = "lancedb-0.40.0.zip"
-extracted_dir = "lancedb-0.40.0"
-published_at = "2026-10-07T09:17:29Z"
-sha256 = "d28311beaf5b0a0a3da57e92bc541f0fc5fee990134d28a1bd623b048394ba44"
+tag = "v0.41.0"
+archive = "lancedb-0.41.0.zip"
+extracted_dir = "lancedb-0.41.0"
+published_at = "2026-10-29T08:08:17Z"
+sha256 = "22c7ea7b01394c8cbb13df381e9ce854a709194f648a3e38127868f8818b285b"
 
 [vendors.qdrant]
 tag = "v1.19.2"

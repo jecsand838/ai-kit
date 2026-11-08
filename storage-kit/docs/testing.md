@@ -580,6 +580,17 @@ counts. A separate partition case checks one inserted, one updated, and one
 deleted identity, preserved unrelated records/schema/indexes, and empty
 replacement clearing only the selected apostrophe-containing partition value.
 
+The `lancedb_namespace_pagination_memory` and
+`lancedb_namespace_pagination_filesystem_reopen` cases create 257 sibling
+namespaces through schema-only public collection creation, crossing the native
+256-name listing page limit. Every collection must open and appear as the sole
+member of its namespace; missing sibling and parent listings remain empty.
+The filesystem case drops all Database owners before checking the same inventory
+on reopen. No namespace iteration order is assumed. All collection locators are
+owned before mutation so cleanup covers partial creation, assertion failures and
+timeouts. These cases retain the 30-second connection, 120-second scenario and
+20-second per-collection cleanup bounds and concrete heap-pinned runner.
+
 The Lance deleted-row scan regressions create rows `0..8`, append `8..16`,
 `16..24`, and `24..32` separately, then delete
 `{0,3,7,8,10,15,16,17,18,19,20,21,22,23,24,28,31}` through public operations.

@@ -347,6 +347,8 @@ connections remain isolated. The native ownership suite records the unsafe
 shared-session counterexample separately from the supplied Database behavior.
 
 The existing `LanceManager` owns catalog methods and native namespace lookup.
+Namespace lookup incrementally consumes the native listing stream with a
+256-name page limit, preserving listing errors and checking successful exhaustion.
 Admitted collection creation creates missing namespace ancestors through native
 operations; ordinary reads never create namespace metadata. A successful native
 listing must prove absence before the adapter returns an empty result or creates
@@ -421,10 +423,12 @@ trait or normalization route. Existing unconditional configuration DTOs remain
 available, with typed construction errors when disabled. SQLite retains its feature-conditional public configuration surface. The verifier
 selects explicit supported combinations and compiles all 16 feature subsets.
 
-The local Lance native family is shared at LanceDB 0.40.0 / Lance 13.0.0 with
-ObjectStore 0.14.2. LanceDB's `remote` feature is enabled only because 0.40.0's
-unconditional job decoder references its gated `Error::Http`; the supplied
-configuration remains local-only and no cloud object-store features are enabled.
+The local Lance native family is shared at LanceDB 0.41.0 / Lance 14.0.2 with
+ObjectStore 0.14.2. LanceDB's existing `remote` feature remains enabled. The
+0.40.0 job-decoder compilation defect that required it is fixed in 0.41.0;
+the supplied Lance configuration remains local-only. The Lance-only selection
+enables no cloud object-store features. The combined lane inherits SurrealDB's
+native transitive ObjectStore features without adding supplied Lance routes.
 The StateStore keeps
 its established schema and exact file format 2.0; this dependency transition
 requires cold-reopen and cleanup proof, not a new public or persisted API.

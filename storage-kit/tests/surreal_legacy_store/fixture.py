@@ -206,9 +206,16 @@ CREATE records:b SET label = 'beta', sequence = 2;
             environment = {k: v for k, v in os.environ.items() if "EXPERIMENTAL_UPGRADE" not in k.upper()}
             environment.update(STORAGE_FRESH_STORE=str(owned / "store"), STORAGE_FRESH_PHASE=phase,
                                STORAGE_FRESH_OUTCOME=str(owned / (phase + ".json")))
-            result = subprocess.run([executable, "surreal_store_reopen::surrealdb_fresh_surrealkv_cold_reopen",
-                                     "--exact", "--nocapture"], env=environment,
-                                    capture_output=True, text=True, timeout=60)
+            try:
+                result = subprocess.run([executable, "surreal_store_reopen::surrealdb_fresh_surrealkv_cold_reopen",
+                                         "--exact", "--nocapture"], env=environment,
+                                        capture_output=True, text=True, timeout=60)
+            except subprocess.TimeoutExpired as error:
+                # run has killed and reaped the child; timeout output remains bytes.
+                (owned / (phase + ".log")).write_bytes((error.stdout or b"") + (error.stderr or b""))
+                (owned / (phase + "-timeout.json")).write_text(json.dumps(
+                    {"phase": phase, "timeout_seconds": error.timeout}) + "\n")
+                raise RuntimeError(f"fresh {phase} timed out; evidence={owned}") from error
             (owned / (phase + ".log")).write_text(result.stdout + result.stderr)
             if result.returncode:
                 raise RuntimeError(f"fresh {phase} failed: {result.stdout} {result.stderr}; evidence={owned}")

@@ -1225,7 +1225,10 @@ impl RedbFileGrowth {
                 .list(StateListRequest::new("redb-growth-neighbor").expect("neighbor namespace"))
                 .await
                 .expect("neighbor inventory");
-            assert_eq!(neighbor_page.records, [neighbor.clone()]);
+            assert_eq!(
+                neighbor_page.records.as_slice(),
+                std::slice::from_ref(&neighbor)
+            );
             assert!(neighbor_page.next_start_after.is_none());
             if opening == 0 {
                 for fragment in ["tombstone/deleted", "tombstone/absent", "absent-delete"] {

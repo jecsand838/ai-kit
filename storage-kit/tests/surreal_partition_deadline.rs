@@ -16,7 +16,7 @@ use storage_kit::{
     Database, DatabaseBackend, StorageError,
     database::{
         StorageLocator,
-        catalog::{CatalogRequest, CatalogResponse},
+        catalog::{CatalogRequest, CatalogResponse, DropColumnsRequest, SchemaEvolutionRequest},
         config::{CommonConfig, DatabaseConfig, SurrealConfig, SurrealModeConfig},
         data::{DataRecord, DataRequest, DataResponse, FilterExpr, ReplacePartitionRequest},
     },
@@ -44,9 +44,19 @@ enum Scenario {
 enum Operation {
     ReplacePartition,
     DropCollection,
+    DropColumns,
 }
 
 impl Operation {
+    fn is_mutation(self, sql: &str) -> bool {
+        sql.contains("BEGIN TRANSACTION")
+            && match self {
+                Self::ReplacePartition => sql.contains("DELETE "),
+                Self::DropCollection => sql.contains("REMOVE TABLE "),
+                Self::DropColumns => sql.contains("REMOVE FIELD ") && sql.contains(" UNSET "),
+            }
+    }
+
     async fn execute(
         self,
         database: &Database,
@@ -79,6 +89,17 @@ impl Operation {
                     .await?;
                 assert_eq!(response, CatalogResponse::Completed);
             }
+            Self::DropColumns => {
+                let response = database
+                    .catalog(CatalogRequest::AlterCollection(
+                        SchemaEvolutionRequest::DropColumns(DropColumnsRequest {
+                            locator,
+                            columns: vec!["extra".to_owned()],
+                        }),
+                    ))
+                    .await?;
+                assert_eq!(response, CatalogResponse::Completed);
+            }
         }
         Ok(())
     }
@@ -92,7 +113,7 @@ struct ConflictServer {
 }
 
 impl ConflictServer {
-    fn start(scenario: Scenario) -> Self {
+    fn start(operation: Operation, scenario: Scenario) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind native RPC fixture");
         listener
             .set_nonblocking(true)
@@ -107,7 +128,13 @@ impl ConflictServer {
             while !worker_stopping.load(Ordering::Acquire) && Instant::now() < deadline {
                 match listener.accept() {
                     Ok((stream, _)) => {
-                        Self::reply(stream, scenario, &worker_attempts, &worker_stopping)?;
+                        Self::reply(
+                            stream,
+                            operation,
+                            scenario,
+                            &worker_attempts,
+                            &worker_stopping,
+                        )?;
                     }
                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                         std::thread::sleep(Duration::from_millis(2));
@@ -210,6 +237,7 @@ impl ConflictServer {
 
     fn reply(
         mut stream: TcpStream,
+        operation: Operation,
         scenario: Scenario,
         attempts: &AtomicUsize,
         stopping: &AtomicBool,
@@ -229,7 +257,7 @@ impl ConflictServer {
             };
             let mutation = match request.get("params") {
                 Some(Value::Array(params)) => {
-                    matches!(params.first(), Some(Value::String(sql)) if sql.contains("BEGIN TRANSACTION") && sql.contains("DELETE "))
+                    matches!(params.first(), Some(Value::String(sql)) if operation.is_mutation(sql))
                 }
                 _ => false,
             };
@@ -328,7 +356,7 @@ impl ConflictServer {
     }
 
     async fn exercise(operation: Operation, scenario: Scenario) {
-        let server = Self::start(scenario);
+        let server = Self::start(operation, scenario);
         let config = DatabaseConfig::surreal(SurrealConfig {
             max_retries: match scenario {
                 Scenario::RetryExhausted { max_retries } => max_retries,
@@ -535,4 +563,60 @@ async fn collection_drop_does_not_replay_indeterminate_commit() {
 #[tokio::test]
 async fn collection_drop_does_not_infer_conflict_from_message() {
     ConflictServer::exercise(Operation::DropCollection, Scenario::UntypedConflict).await;
+}
+
+#[tokio::test]
+async fn column_drop_retries_exact_rolled_back_conflict() {
+    ConflictServer::exercise(Operation::DropColumns, Scenario::RetrySuccess).await;
+}
+
+#[tokio::test]
+async fn column_drop_preserves_retry_limit_and_final_conflict() {
+    for max_retries in [0, 2] {
+        ConflictServer::exercise(
+            Operation::DropColumns,
+            Scenario::RetryExhausted { max_retries },
+        )
+        .await;
+    }
+}
+
+#[tokio::test]
+async fn column_drop_does_not_replay_mixed_error() {
+    ConflictServer::exercise(Operation::DropColumns, Scenario::PrimaryError).await;
+}
+
+#[tokio::test]
+async fn column_drop_does_not_replay_not_executed_alone() {
+    ConflictServer::exercise(Operation::DropColumns, Scenario::NotExecutedOnly).await;
+}
+
+#[tokio::test]
+async fn column_drop_does_not_replay_uncertain_transport_completion() {
+    ConflictServer::exercise(Operation::DropColumns, Scenario::TransportLoss).await;
+}
+
+#[tokio::test]
+async fn column_drop_preserves_original_deadline_across_queries() {
+    ConflictServer::exercise(Operation::DropColumns, Scenario::Deadline).await;
+}
+
+#[tokio::test]
+async fn column_drop_deadline_includes_context_selection() {
+    ConflictServer::exercise(Operation::DropColumns, Scenario::ContextDeadline).await;
+}
+
+#[tokio::test]
+async fn column_drop_deadline_includes_retry_backoff() {
+    ConflictServer::exercise(Operation::DropColumns, Scenario::BackoffDeadline).await;
+}
+
+#[tokio::test]
+async fn column_drop_does_not_replay_indeterminate_commit() {
+    ConflictServer::exercise(Operation::DropColumns, Scenario::IndeterminateCommit).await;
+}
+
+#[tokio::test]
+async fn column_drop_does_not_infer_conflict_from_message() {
+    ConflictServer::exercise(Operation::DropColumns, Scenario::UntypedConflict).await;
 }

@@ -67,6 +67,12 @@ envelope. Optional capability reporting describes only retained behavior.
 Calling the operation remains authoritative and may return an honest
 unsupported error.
 
+The Surreal catalog owner uses a private closed removal enum to render collection
+and column removal transactions. Its manager owns their shared confirmed-rollback
+classification and bounded recovery within the original request deadline; it
+accepts no arbitrary query or callback for replay. Exact recovery and error
+behavior belong to the portable contract.
+
 The portable boundary excludes realtime, raw plans/traces, backend notes,
 native status messages, generic located wrappers, namespace administration,
 aliases, single-family search and administration operations, sparse-only

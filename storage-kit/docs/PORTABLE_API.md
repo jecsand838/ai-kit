@@ -59,12 +59,21 @@ mutation with `UnsupportedCapability` or the documented
 manufacture ids, counts, scores, records or completion.
 
 Surreal collection removal keeps table removal and partition-coordination cleanup
-in one native transaction. It retries only a confirmed rolled-back transaction:
-a typed native transaction conflict, with any other failed statements marked
-not executed. `SurrealConfig.max_retries` bounds those retries, and the original
-request deadline includes context selection, all attempts, and backoff. Transport
-failures, indeterminate commits, mixed errors, and not-executed-only responses
-are not replayed. Completion requires a successful native commit.
+in one native transaction. Surreal `SchemaEvolutionRequest::DropColumns` keeps
+field-definition removal and stored-value removal in one native transaction.
+Both retry only a confirmed rolled-back transaction: at least one typed native
+transaction conflict, with every other failed statement either a typed conflict
+or marked not executed. `SurrealConfig.max_retries` bounds retries after the
+initial attempt, and the original request deadline includes context selection,
+all attempts, and backoff. Transport failures, indeterminate commits, mixed
+errors, untyped conflict messages, and not-executed-only responses are not
+replayed. Completion requires a successful native commit. This recovery does
+not extend to `AddColumns` or `AlterColumns`.
+
+Column-removal statement failures and the encompassing deadline use the
+`alter_collection` operation label. Lower context and transport failures retain
+their original labels. Empty column lists complete after request validation
+without a native mutation.
 
 For `SchemaEvolutionRequest::AddColumns`, the supplied Lance implementation
 eagerly fills existing rows from each `ComputedColumn.expression_sql` before

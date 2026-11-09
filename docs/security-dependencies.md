@@ -1,7 +1,8 @@
 # Workspace dependency security
 
 All Kit dependencies now resolve from crates.io without local source patches.
-The approved vendor refresh targets LanceDB 0.41.0 and Lance 14.0.2; its
+The vendor refresh selects LanceDB 0.41.0 and Lance 14.0.2. Its compatible
+Zstd backports remove 13 advisory exceptions, as recorded below; every later
 resolved graph requires a fresh two-scan audit before qualification. The approved
 SurrealDB security migration selects exact client/Core 4.0.0. Its scoped qualification
 and historical receipts below do not establish full release qualification.
@@ -12,7 +13,14 @@ lockfile with `--locked`.
 
 ## Temporary accepted advisories
 
-The maintainer has explicitly accepted the findings below to unblock the initial
+The current policy retains exactly two exceptions: `RUSTSEC-2023-0071` for
+`rsa 0.9.10` and `RUSTSEC-2026-0387` for `crypto-bigint 0.5.5`. The current
+scan still reports both vulnerabilities and remains **`PASS_WITH_EXCEPTIONS`**.
+RSA has no RustSec-listed patched version. The fixed `crypto-bigint >=0.7.6`
+does not satisfy the locked JWT chain's `elliptic-curve` requirement `^0.5`.
+Their removal conditions remain in the dated inventory below.
+
+The maintainer has explicitly accepted these findings to unblock the initial
 0.0.1 release preparation. **We will fix these as soon as possible** by adopting
 compatible upstream fixes and removing each exception. These exceptions are not
 a permanent security policy or evidence that the affected code is safe.
@@ -25,12 +33,39 @@ target-specific dependencies, so a finding does not by itself prove execution in
 a particular native build. Conversely, a passing build does not prove an
 advisory unreachable.
 
+### Compatible Zstd remediation — 2026-11-08
+
+The Storage vendor campaign updates `zstd 0.13.3` to `0.13.4` and
+`zstd-safe 7.3.0` to `7.4.0`. These published backports satisfy Arrow IPC
+58.4.1 and SurrealKV's existing `zstd ^0.13` requirements, superseding the
+historical assumption that remediation required adoption of `zstd 0.14`.
+The existing `zstd 0.14.3`, `zstd-safe 8.2.0` and
+`zstd-sys 2.1.2+zstd.1.5.7` selections remain unchanged. No direct dependency,
+unrelated package selection or enabled feature changes.
+
+Fresh two-scan evidence under
+`target/vendor-campaign-storage-20261108/security/` uses cargo-audit 0.22.2
+and RustSec commit `309392b18f6b17022f82c701f300433126901068`.
+`zstd-before/report.json` preserves all 15 accepted findings on the committed
+Turso 0.8.3 graph. `zstd-after-resolution/report.json` confirms that
+`RUSTSEC-2026-0391` and every ID from `RUSTSEC-2026-0395` through
+`RUSTSEC-2026-0406` are absent from the unfiltered raw scan before their
+exceptions are removed. `zstd-after-policy/report.json` records the fresh
+audit with only the two remaining exceptions: two vulnerability findings,
+zero unsoundness findings and no unapproved blocking findings. These audit
+receipts do not substitute for affected native compatibility and strict-live
+validation or final campaign qualification.
+
+### Historical accepted inventory before the vendor refresh
+
 The registry lockfile before the LanceDB 0.41.0 refresh was scanned on
 2026-11-08 using cargo-audit 0.22.2
 and RustSec commit `309392b18f6b17022f82c701f300433126901068`. The
 [two-scan receipt](../target/security-2026-0454-0452/audit-20261108T113519Z/report.json)
 records five vulnerability findings and ten unsoundness findings covered by
-**15 exact exceptions**, with no unapproved blocking findings:
+**15 exact exceptions**, with no unapproved blocking findings. This dated
+inventory and its original removal assumptions are historical; the Zstd
+backports above supersede those assumptions and remove all 13 Zstd exceptions:
 
 | Locked package | Accepted advisory IDs | Upstream removal condition |
 | --- | --- | --- |
@@ -39,8 +74,9 @@ records five vulnerability findings and ten unsoundness findings covered by
 | `rsa 0.9.10` | [RUSTSEC-2023-0071](https://rustsec.org/advisories/RUSTSEC-2023-0071.html) | SurrealDB's target-specific JWT chain removes the affected RSA dependency or adopts a RustSec-confirmed fix. No patched version was listed at review. |
 | `crypto-bigint 0.5.5` | [RUSTSEC-2026-0387](https://rustsec.org/advisories/RUSTSEC-2026-0387.html) | The SurrealDB JWT/RSA chain removes or upgrades the affected dependency, confirmed by a fresh raw scan. |
 
-RSA's exception is explicitly a **2023 advisory**, in addition to the 2026
-findings. The already-fixed `zstd-sys 2.1.2+zstd.1.5.7` remains locked; its older
+RSA's retained exception is explicitly a **2023 advisory**, alongside the
+remaining 2026 `crypto-bigint` finding. The already-fixed
+`zstd-sys 2.1.2+zstd.1.5.7` remains locked; its older
 advisory is not ignored. Unrelated compatible fixes remain in the lockfile.
 
 The historical initial-release scan at RustSec commit

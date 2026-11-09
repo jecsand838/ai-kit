@@ -1771,6 +1771,11 @@ impl DatabaseCase {
             assert_eq!(row.fields["state"], "original");
             assert!(row.fields["numeric"].as_i64().is_some());
         }
+        let mut without_extra = self.rows().await;
+        assert_eq!(without_extra.len(), 3, "schema changes preserve every row");
+        for row in &mut without_extra {
+            row.fields.remove("extra");
+        }
         self.database
             .catalog(CatalogRequest::AlterCollection(
                 SchemaEvolutionRequest::DropColumns(DropColumnsRequest {
@@ -1780,12 +1785,46 @@ impl DatabaseCase {
             ))
             .await
             .expect("drop computed column");
-        assert!(
-            self.rows()
-                .await
-                .iter()
-                .all(|row| !row.fields.contains_key("extra")),
-            "dropping a computed column removes its stored values as well as its definition"
+        assert_eq!(
+            self.rows().await,
+            without_extra,
+            "dropping a computed column removes its values and preserves every other field and identity"
+        );
+        self.database
+            .catalog(CatalogRequest::AlterCollection(
+                SchemaEvolutionRequest::AddColumns(AddColumnsRequest {
+                    locator: self.locator.clone(),
+                    expressions: vec![ComputedColumn {
+                        name: "extra".to_owned(),
+                        expression_sql: "2".to_owned(),
+                    }],
+                    read_columns: None,
+                }),
+            ))
+            .await
+            .expect("re-add the removed column with a different expression");
+        let mut replacement = without_extra.clone();
+        for row in &mut replacement {
+            row.fields.insert("extra".to_owned(), json!(2));
+        }
+        assert_eq!(
+            self.rows().await,
+            replacement,
+            "a removed computed definition must not survive re-addition or change other fields"
+        );
+        self.database
+            .catalog(CatalogRequest::AlterCollection(
+                SchemaEvolutionRequest::DropColumns(DropColumnsRequest {
+                    locator: self.locator.clone(),
+                    columns: vec!["extra".to_owned()],
+                }),
+            ))
+            .await
+            .expect("remove the replacement computed column");
+        assert_eq!(
+            self.rows().await,
+            without_extra,
+            "replacement computed values are removed without losing or changing records"
         );
     }
 

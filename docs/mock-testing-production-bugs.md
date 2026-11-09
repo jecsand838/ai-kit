@@ -6,6 +6,33 @@ cancellation follow-up started at `1de968b3c98015f7fc48255d6ac40ef4593ca44d`.
 Regressions remain enabled; fixture and validation-setup errors are distinguished
 from production defects. Manifests, lockfiles, features, and vendor sources are unchanged.
 
+## Surreal column-removal recovery — Storage vendor campaign
+
+The separately authorized `upgrade-vendors` follow-up preserves a real
+SurrealDB 4.0.0 WebSocket schema failure: the atomic field-definition and
+stored-value removal received a typed transaction conflict at COMMIT. The
+required Surreal strict lane reported 65 passes and one failure; the Lance
+strict lane passed all 37 cases. The conflicting writer is unknown. No causal
+link to the campaign's compatible Zstd backports was established.
+
+Before production changes, the enabled `column_drop_*` cases in
+`storage-kit/tests/surreal_partition_deadline.rs` reproduced five failures:
+retry success, nonzero retry exhaustion, query/context deadlines and backoff.
+The complete target reported 19 passes and five failures. The fixture uses the
+public adapter and pinned native CBOR errors; it is wire/deadline evidence,
+not direct-trait mock coverage or a real-service substitute. Original native
+evidence remains under
+`target/vendor-campaign-storage-20261108/security/zstd-remediation/failed-strict-live/`;
+tests-first evidence remains under
+`target/vendor-campaign-storage-20261108/surreal-column-recovery/`.
+
+The regressions require bounded replay only after confirmed rollback, preserving
+all uncertain or mixed-error failures without replay. Existing collection and
+partition controls remain enabled. The native schema case additionally compares
+exact three-record snapshots across removal, same-name re-addition with a changed
+computed value, and removal again. Fresh native validation and final campaign
+gates remain required; historical or fixture passes do not qualify the update.
+
 ## Release completion and version identities — 2026-11-05
 
 The v0.0.4 preparation reproduces the release helper creating a public GitHub

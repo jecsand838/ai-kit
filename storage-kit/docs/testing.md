@@ -648,14 +648,22 @@ the locked native versions remain unchanged.
 
 `surreal_partition_deadline` uses the pinned native public CBOR v2 codec to
 exercise exact conflict classification and the original operation deadline for
-partition replacement and collection removal. Collection cases cover retry
-exhaustion including zero retries, context selection, query waits, and backoff
-inside one deadline. Controls preserve mixed primary errors and reject
+partition replacement, collection removal and column removal. Operation-aware
+query recognition counts each actual atomic mutation. Both removal families
+cover retry exhaustion including zero retries, context selection, query waits,
+and backoff inside one deadline. Controls preserve mixed primary errors and reject
 not-executed-only responses, conflict-shaped untyped messages, indeterminate
 commits, and accepted requests whose transport response is lost.
 These loopback fixtures prove normalization and deadlines outside strict-live;
 they are not real-service evidence. Their threads are bounded and joined even
 when an assertion fails.
+
+The native schema case checks complete three-record snapshots after column
+removal, re-addition of the same name with a different computed constant, and a
+second removal. Identities and unrelated fields remain exact. The changed
+constant proves that the original field definition was removed through public
+behavior; Surreal's collection response does not expose schema metadata.
+This case remains required for Lance and all four supported Surreal modes.
 
 The Lance strict cases supervise separate test processes to verify observer
 loss, last-owner drop, and bounded lock admission without requiring that a

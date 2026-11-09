@@ -16,9 +16,12 @@ lockfile with `--locked`.
 The current policy retains exactly two exceptions: `RUSTSEC-2023-0071` for
 `rsa 0.9.10` and `RUSTSEC-2026-0387` for `crypto-bigint 0.5.5`. The current
 scan still reports both vulnerabilities and remains **`PASS_WITH_EXCEPTIONS`**.
-RSA has no RustSec-listed patched version. The fixed `crypto-bigint >=0.7.6`
-does not satisfy the locked JWT chain's `elliptic-curve` requirement `^0.5`.
-Their removal conditions remain in the dated inventory below.
+RustSec lists `rsa >=0.10.0` as patched, but locked `jsonwebtoken 10.4.0`
+requires `rsa ^0.9.6`. The fixed `crypto-bigint >=0.7.6` does not satisfy
+the locked JWT chain's `elliptic-curve` requirement `^0.5`. The final raw
+audit is retained at
+`target/vendor-campaign-storage-20261108/security/final/raw.json`.
+The dated inventory below preserves earlier removal assumptions.
 
 The maintainer has explicitly accepted these findings to unblock the initial
 0.0.1 release preparation. **We will fix these as soon as possible** by adopting

@@ -94,7 +94,10 @@ class AgentKitProtocolAuthorityTests(unittest.TestCase):
                 ("app-server-transport/src/transport/websocket.rs", [
                     "IncomingWebSocketMessage::Text(text)",
                 ]),
-                ("app-server-client/src/remote.rs", ["Message::Text(payload.into())"]),
+                ("app-server-client/src/remote.rs", [
+                    "serde_json::to_string(&message)",
+                    "Some(Ok(Message::Text(text)))",
+                ]),
                 ("app-server-protocol/src/protocol/v1.rs", [
                     "pub experimental_api: bool",
                     "pub opt_out_notification_methods: Option<Vec<String>>",

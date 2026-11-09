@@ -695,6 +695,11 @@ Keep focused cases for:
   row-lock timeout rollback, admitted commit after waiter loss, and canonical
   pagination under an explicitly non-binary database collation;
 - Redb FIFO admission, queued drop, admitted rollback, and thread joins;
+  separate file-backed rollback/drop growth regressions stage 2,048 records
+  with 4 KiB payloads under 1 MiB and 32 MiB caches, then commit a small marker
+  and close every owner. Cold reopens verify exact original values/revisions,
+  tombstones, absent aborted writes, the later commit, neighboring namespace
+  isolation, complete pages/cursors, and revision continuation after recreation;
 - PostgreSQL/SQLite actor finalization after caller loss;
 - exact conflict and non-conflict error propagation;
 - feature-disabled type absence;

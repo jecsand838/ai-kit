@@ -15,11 +15,11 @@ published_at = "2026-10-05T14:16:50Z"
 sha256 = "4228c84132c568959c49143fb5a722018996d1126d82bc1f00838c593473cf8a"
 
 [vendors.redb]
-tag = "v4.3.0"
-archive = "redb-4.3.0.zip"
-extracted_dir = "redb-4.3.0"
-published_at = "2026-09-15T03:46:59Z"
-sha256 = "a5ae5c250f1a8102d3bca02eb17a9891b5feb9f6ff1035abf7fb2598df49c546"
+tag = "v4.5.0"
+archive = "redb-4.5.0.zip"
+extracted_dir = "redb-4.5.0"
+published_at = "2026-11-05T23:50:12Z"
+sha256 = "0a12da34564af6ffd20a1a8c467cb207d6963320d2d15d9cd07ec8f6df17a5cc"
 
 [vendors.surrealdb]
 tag = "v4.0.0"

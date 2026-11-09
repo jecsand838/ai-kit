@@ -309,10 +309,10 @@ The supplied implementations rely on distinct native mechanisms:
   candidate; it does not qualify the current native dependency graph.
   [Cold-copy recovery guidance](../README.md#recovery-and-cold-backups) uses
   settled filesystem ownership and adds no portable backup or import operation.
-- Redb 4.3.0 retains one native writer behind bounded FIFO logical admission.
+- Redb 4.5.0 retains one native writer behind bounded FIFO logical admission.
   Its synchronous transaction runs on the owning OS thread, with native
   commit/abort and tombstones. See the repository-only research archive
-  `vendor/redb-4.3.0.zip` (excluded from the published crate), members
+  `vendor/redb-4.5.0.zip` (excluded from the published crate), members
   `src/db.rs` and `src/transactions.rs`; no newer Redb guarantee is implied.
 - Turso 0.8.3 backs SQLite with dedicated actor connections and native
   immediate transactions. Pinned `vendor/turso-0.8.3.zip` members under

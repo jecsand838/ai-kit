@@ -186,7 +186,10 @@ class VendorUpdater:
         *,
         git_mode: str = "managed",
         completion_policy: str = "strict",
+        implementation_only: bool = False,
     ) -> int:
+        if implementation_only and completion_policy != "strict":
+            raise VendorUpdateError("split execution requires strict completion policy")
         crate_state = self._load_crate_state(crate_name)
         if vendor_name not in crate_state.configs:
             raise VendorUpdateError(
@@ -296,10 +299,13 @@ class VendorUpdater:
             crate_state, config, dossier_dir, plan_path,
             completion_policy=completion_policy,
         )
-        return self._execute_prepared_update(crate_state, config, dossier_dir, state)
+        return self._execute_prepared_update(
+            crate_state, config, dossier_dir, state, implementation_only=implementation_only)
 
     def resume(self, dossier_path: Path, *, implementation_only: bool = False,
                validation_only: bool = False) -> int:
+        if implementation_only and validation_only:
+            raise VendorUpdateError("implementation-only and validation-only are mutually exclusive")
         dossier_dir = dossier_path.resolve()
         if dossier_dir.name == "dossier.md":
             dossier_dir = dossier_dir.parent
@@ -318,10 +324,10 @@ class VendorUpdater:
                 return self._execute_prepared_update(
                     crate_state, crate_state.configs["codex"], dossier_dir, state,
                     implementation_only=implementation_only, validation_only=validation_only)
-            if implementation_only or validation_only:
-                raise VendorUpdateError("split execution is only supported for a coordinated dossier")
             if state["version"] != 1 or state["workspace"] != str(self.workspace_root):
                 raise VendorUpdateError("resume dossier belongs to a different workspace or format")
+            if (implementation_only or validation_only) and state["completion_policy"] != "strict":
+                raise VendorUpdateError("split execution requires strict completion policy")
             if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", state["crate"]):
                 raise VendorUpdateError("invalid resume crate path")
             crate_state = self._load_crate_state(state["crate"])
@@ -333,7 +339,9 @@ class VendorUpdater:
             or not (dossier_dir / "plan.md").is_file()
             or not (dossier_dir / "plan.md").read_text().strip()):
             raise VendorUpdateError("resume requires the saved nonempty plan.md")
-        return self._execute_prepared_update(crate_state, config, dossier_dir, state)
+        return self._execute_prepared_update(
+            crate_state, config, dossier_dir, state,
+            implementation_only=implementation_only, validation_only=validation_only)
 
     def import_prerequisite(
         self, dossier_path: Path, destination_path: Path, commit: str, paths: list[str],
@@ -478,10 +486,6 @@ class VendorUpdater:
             raise VendorUpdateError("prerequisite recovery differs from the imported original")
         self._validate_prerequisite_commit(original, lineage["commit"], lineage["paths"])
         self._validate_prepared_update(crate, config, source, original, expected_head=lineage["commit"])
-        for filename in ("resume.json", "implementation.md", "original-archive.zip"):
-            output = destination / filename
-            if output.is_symlink() or (output.exists() and not output.is_file()):
-                raise VendorUpdateError(f"prerequisite updater output escapes its owner: {filename}")
 
     def coordinate(
         self, dossier_path: Path, vendor_name: str, target_tag: str, plan_path: Path,
@@ -742,6 +746,10 @@ class VendorUpdater:
         state: dict[str, Any],
         *, coordination: bool = False, expected_head: str | None = None,
     ) -> list[str]:
+        for filename in ("resume.json", "implementation.md", "original-archive.zip"):
+            output = dossier_dir / filename
+            if output.is_symlink() or (output.exists() and not output.is_file()):
+                raise VendorUpdateError(f"updater output escapes its owner: {filename}")
         saved_source = dossier_dir / "source-resume.json"
         if ("prerequisite_import" not in state
             and (saved_source.exists() or saved_source.is_symlink())):
@@ -842,11 +850,29 @@ class VendorUpdater:
                 raise VendorUpdateError(f"dirty path outside recorded vendor scope: {path}")
         return sorted(set(changed))
 
+    def _frozen_dossier_inputs(
+        self, dossier: Path, expected: Mapping[str, str] | None = None,
+    ) -> dict[str, str]:
+        inputs = {}
+        for name in PREREQUISITE_INPUTS:
+            path = dossier / name
+            if path.is_symlink() or not path.is_file():
+                raise VendorUpdateError(f"frozen dossier input is not a regular file: {name}")
+            digest = self._sha256(path)
+            if expected is not None and digest != expected[name]:
+                raise VendorUpdateError(f"frozen dossier input changed: {name}")
+            inputs[name] = digest
+        return inputs
+
     def _execute_prepared_update(
         self, crate_state: CrateState, config: VendorConfig, dossier_dir: Path,
         state: dict[str, Any],
         *, implementation_only: bool = False, validation_only: bool = False,
     ) -> int:
+        if implementation_only and validation_only:
+            raise VendorUpdateError("implementation-only and validation-only are mutually exclusive")
+        if (implementation_only or validation_only) and state["completion_policy"] != "strict":
+            raise VendorUpdateError("split execution requires strict completion policy")
         coordinated = state["version"] == 2
         if coordinated:
             self._validate_coordinated_update(crate_state, dossier_dir, state)
@@ -856,6 +882,7 @@ class VendorUpdater:
             self._validate_prepared_update(crate_state, config, dossier_dir, state)
             vendors = {config.name: state}
             recovery_bytes = (dossier_dir / "resume.json").read_bytes()
+            frozen_inputs = self._frozen_dossier_inputs(dossier_dir)
         for vendor in vendors.values():
             for name in ("current", "target"):
                 self._materialize_extract_if_missing(
@@ -873,7 +900,7 @@ class VendorUpdater:
             current_extract = crate_state.vendor_root / vendor["current"]["extracted_dir"]
             archive_backup = dossier_dir / (f"{name}-original-archive.zip" if coordinated else "original-archive.zip")
             shutil.copyfile(current_archive, archive_backup)
-            retained.append((current_archive, current_extract, archive_backup))
+            retained.append((current_archive, current_extract, archive_backup, vendor["current"]["sha256"]))
         committed = False
         primary_error = None
         commit_tree = None
@@ -889,15 +916,17 @@ class VendorUpdater:
                     coordinated_source=Path(state["imports"][name]["path"]) if coordinated else None,
                     prerequisite_source=(Path(state["prerequisite_import"]["source"])
                                          if "prerequisite_import" in state else None),
+                    implementation_only=implementation_only,
                 )
                 if lock_path.read_bytes() != candidate:
                     raise VendorUpdateError("implementation changed the updater-owned candidate lock")
                 if coordinated:
                     self._validate_coordinated_update(
                         crate_state, dossier_dir, state, expected_resume=recovery_bytes)
-                elif "prerequisite_import" in state:
+                else:
                     if (dossier_dir / "resume.json").read_bytes() != recovery_bytes:
-                        raise VendorUpdateError("prerequisite recovery metadata changed")
+                        raise VendorUpdateError("recovery metadata changed during implementation")
+                    self._frozen_dossier_inputs(dossier_dir, frozen_inputs)
                     self._validate_prepared_update(crate_state, config, dossier_dir, state)
             if lock_path.read_bytes() != candidate:
                 raise VendorUpdateError("implementation changed the updater-owned candidate lock")
@@ -926,9 +955,10 @@ class VendorUpdater:
                     )
             if lock_path.read_bytes() != candidate:
                 raise VendorUpdateError("completion gates changed the updater-owned candidate lock")
-            if ("prerequisite_import" in state
-                and (dossier_dir / "resume.json").read_bytes() != recovery_bytes):
-                raise VendorUpdateError("prerequisite recovery metadata changed")
+            if (dossier_dir / "resume.json").read_bytes() != recovery_bytes:
+                raise VendorUpdateError("recovery metadata changed during validation")
+            if not coordinated:
+                self._frozen_dossier_inputs(dossier_dir, frozen_inputs)
             changed = (self._validate_coordinated_update(
                            crate_state, dossier_dir, state, expected_resume=recovery_bytes)
                        if coordinated else self._validate_prepared_update(crate_state, config, dossier_dir, state))
@@ -979,12 +1009,23 @@ class VendorUpdater:
             if not committed:
                 restoration_errors = []
                 try:
+                    if (lock_path.is_symlink()
+                        or lock_path.parent.resolve() != crate_state.vendor_root):
+                        raise OSError("refusing to restore the vendor lock through a redirected path")
                     lock_path.write_bytes(original)
                 except OSError as error:
                     restoration_errors.append(f"restoring the original vendor lock also failed: {error}")
-                for current_archive, current_extract, archive_backup in retained:
+                for current_archive, current_extract, archive_backup, original_sha256 in retained:
                     try:
+                        if any(path.is_symlink() or path.parent.resolve() != crate_state.vendor_root
+                               for path in (current_archive, current_extract)):
+                            raise VendorUpdateError("refusing to restore vendor artifacts through a redirected path")
+                        if (archive_backup.is_symlink() or not archive_backup.is_file()
+                            or archive_backup.parent.resolve() != dossier_dir):
+                            raise VendorUpdateError("retained archive backup escapes its owner")
                         if not current_archive.exists():
+                            if self._sha256(archive_backup) != original_sha256:
+                                raise VendorUpdateError("retained archive backup differs from its original hash")
                             shutil.copyfile(archive_backup, current_archive)
                         self._materialize_extract_if_missing(current_archive, current_extract)
                     except (OSError, VendorUpdateError, zipfile.BadZipFile) as error:
@@ -1604,6 +1645,7 @@ class VendorUpdater:
         completion_policy: str,
         coordinated_source: Path | None = None,
         prerequisite_source: Path | None = None,
+        implementation_only: bool = False,
     ) -> None:
         output_path = dossier_dir / "implementation.md"
         vendor_specific_focus = config.plan_prompt_suffix.strip()
@@ -1627,6 +1669,18 @@ class VendorUpdater:
                 "Keep all frozen inputs unchanged, including copied/original plans, metadata, and lock snapshots. "
                 f"New evidence belongs only under `{dossier_dir}`; implementation edits must stay within "
                 "the coordinated permitted scope and this vendor's adaptation. "
+                "Do not weaken assertions, substitute models, enlarge deadlines, normalize outputs, or retry until pass."
+            )
+        elif implementation_only:
+            policy_guidance += (
+                "\nThis strict single-vendor run pauses after adaptation for independent review. "
+                "Adapt only this vendor and run focused checks. Do not run the full strict-live or "
+                "workspace completion gates inside this implementation: the parent must independently review "
+                "the actual diff and saved candidate lock before invoking resume --validation-only. "
+                "That validation phase runs all configured strict gates and commits on success. "
+                "The updater restores the original lock at the review pause; leave its installed candidate "
+                "unchanged during implementation. This sequencing amendment supersedes advancement "
+                "instructions in retained plans. Keep frozen dossier inputs and recovery metadata unchanged. "
                 "Do not weaken assertions, substitute models, enlarge deadlines, normalize outputs, or retry until pass."
             )
         if prerequisite_source is not None:
@@ -2164,6 +2218,8 @@ def build_parser() -> argparse.ArgumentParser:
         choices=COMPLETION_POLICIES,
         default="strict",
     )
+    update_parser.add_argument("--implementation-only", action="store_true",
+                               help="adapt a strict update, then restore its original lock for review")
     resume_parser = subparsers.add_parser("resume", help="resume a prepared vendor dossier")
     resume_parser.add_argument("--dossier", type=Path, required=True)
     phase = resume_parser.add_mutually_exclusive_group()
@@ -2210,6 +2266,7 @@ def main(
                 args.vendor_name,
                 git_mode=args.git_mode,
                 completion_policy=args.completion_policy,
+                implementation_only=args.implementation_only,
             )
         if args.command == "resume":
             return updater.resume(args.dossier, implementation_only=args.implementation_only,

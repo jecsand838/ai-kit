@@ -26,6 +26,7 @@ local_focus_paths = [
   "agents-kit/ARCHITECTURE.md",
   "agents-kit/docs/STRICT_TESTING.md",
   ".agents/skills/agents-kit-research/references/live-validation.md",
+  "docs/mock-testing-production-bugs.md",
 ]
 plan_prompt_suffix = """Prioritize sourced protocol surface drift, request and approval flow changes, config updates, and strict-live coverage needed to keep the existing portable Codex API honest. Limit production and spec changes to facts changed by this vendor range plus mechanical cleanup in touched paths. Do not audit or implement unrelated agents-kit specification backlog, expose every new upstream operation, or add caller-facing Rust API."""
 preflight_gates = [
@@ -33,9 +34,12 @@ preflight_gates = [
 ]
 completion_gates = [
   ["cargo", "fmt", "--all", "--check"],
-  ["cargo", "clippy", "--locked", "--workspace", "--all-targets", "--all-features", "--exclude", "storage-kit", "--", "-D", "warnings"],
-  ["cargo", "clippy", "--locked", "-p", "storage-kit", "--all-targets", "--", "-D", "warnings"],
+  ["cargo", "clippy", "--locked", "--workspace", "--all-targets", "--all-features", "--exclude", "storage-kit", "--exclude", "app-kit", "--", "-D", "warnings"],
   ["cargo", "clippy", "--locked", "-p", "storage-kit", "--all-targets", "--no-default-features", "--", "-D", "warnings"],
+  ["cargo", "clippy", "--locked", "-p", "storage-kit", "--all-targets", "--no-default-features", "--features", "redb", "--", "-D", "warnings"],
+  ["cargo", "clippy", "--locked", "-p", "storage-kit", "--all-targets", "--no-default-features", "--features", "postgres", "--", "-D", "warnings"],
+  ["cargo", "clippy", "--locked", "-p", "storage-kit", "--all-targets", "--no-default-features", "--features", "surrealdb", "--", "-D", "warnings"],
+  ["cargo", "clippy", "--locked", "-p", "storage-kit", "--all-targets", "--no-default-features", "--features", "sqlite", "--", "-D", "warnings"],
   ["cargo", "clippy", "--locked", "-p", "storage-kit", "--all-targets", "--no-default-features", "--features", "redb,postgres,surrealdb,sqlite", "--", "-D", "warnings"],
   ["bash", "scripts/check_docs_site.sh"],
   ["bash", "-lc", "source agents-kit/strict-tests.env && bash agents-kit/scripts/verify_strict_live.sh"],

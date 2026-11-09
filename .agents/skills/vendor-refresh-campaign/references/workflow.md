@@ -37,6 +37,43 @@ For each queued vendor, run:
 python3 scripts/vendor_update.py update --crate <crate> --vendor <vendor> --git-mode current-branch
 ```
 
+When a strict single-vendor update requires independent review before its local
+commit, use the existing phase boundary:
+
+```bash
+python3 scripts/vendor_update.py update --crate <crate> --vendor <vendor> --git-mode current-branch --implementation-only
+python3 scripts/vendor_update.py resume --dossier <dossier-directory> --validation-only
+```
+
+Run the second command only after reviewing the actual implementation diff and
+the saved candidate lock. The first command installs the candidate for focused
+adaptation, validates the unchanged recovery metadata and frozen inputs, then
+restores the exact original lock for review. It runs no updater acceptance
+gates, archive cleanup, staging, or commit. Both source archives and extracts
+remain available. The second command performs no discovery, planning, or
+implementation: it installs the frozen candidate, runs target preflight and
+every strict completion gate, and **commits on success**. Validation-only is
+therefore a finalization command, not a read-only check.
+
+Each invocation snapshots the fixed dossier inputs, including the saved plan,
+release metadata, and upstream diff files, and rejects changed, missing, or
+symlinked inputs after implementation and gates. Mutable execution evidence is
+excluded from this snapshot. Updater output redirects are rejected before
+writes. Restoration refuses redirected lock, archive, and extraction paths;
+an absent archive requires an owned regular backup matching its original hash.
+These failures remain supplementary, without preventing restoration attempts
+for remaining owned archives.
+
+Use `resume --implementation-only` when the same strict version-1 dossier needs
+review fixes. Both resume phases preserve branch, HEAD, manifest, archive,
+lock, scope, and recovery checks; failure or interruption before commit
+restores the original lock without discarding edits or evidence. The two phase
+flags are mutually exclusive. Split execution is rejected for `no-regression`
+before external work; it does not weaken that policy's baseline requirements.
+Ordinary update/resume and the explicit coordinated workflow keep their
+existing behavior. The parent owns review; a vendor leaf still must not
+delegate work.
+
 If the user explicitly allows pre-existing failures while prohibiting broad
 backlog implementation, use:
 

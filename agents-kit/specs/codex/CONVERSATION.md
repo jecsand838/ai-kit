@@ -330,3 +330,10 @@ Malformed terminal status/error combinations remain Protocol. Error details and
 misalignment steering prose remain private. Recovery uses full `thread/read`
 history for both paginated and legacy native storage, without a storage-mode
 override or a new paging API.
+
+The selected flat item timestamps remain private validation data, not output
+ordering. New model-not-found and policy-capacity failures use the same typed
+normalization in live completion, interrupted causes, and full-history recovery.
+Provider-admission rejection never substitutes a new thread, selected model, or
+provider. Callback retirement cancels only an exact still-pending interaction;
+resolution intent and ambiguous native acceptance remain recovery-owned.

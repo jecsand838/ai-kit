@@ -253,3 +253,25 @@ absolute paths retain supported behavior. Relative or foreign execution-context
 strings are Unsupported rather than locally resolved or called malformed. No
 Kit cwd conversion or remote-path API is introduced. Permission grants remain
 one-turn with the existing denial behavior.
+
+## Required Human Decisions And Callback Disappearance
+
+The selected `humanCommand` kind is valid but Unsupported: the portable resolver
+does not establish fresh human provenance. Initialization omits
+`requiredHumanApproval`. Validate all known fields, then reply once with the exact
+raw ID and no durable Interaction, continuation, or synthetic Process event.
+
+An exact `serverRequest/resolved` can cancel a continuation only while both it
+and its notification are pending. Native network-request termination now emits
+this fact. Cancellation is atomic across the two existing records, retains the
+callback identity until ordinary reclamation, and wakes delivery only after
+commit. It sends no native response. Definite transaction conflicts permit a
+bounded reread/retry; other failures and ambiguous commits do not. A resolving
+notification, including committed intent awaiting observation, and an ambiguous
+continuation retain their existing recovery fence. Disappearance cannot prove
+acceptance or justify resend. Duplicate, foreign, or reclaimed facts have no
+effect; thread identity and raw string/integer request identity must both match.
+Read-only inventory observation and conflict backoff share the original lifecycle
+deadline, including the unmatched-request path. An admitted transaction is still
+settled directly; an elapsed deadline does not abandon its commit or rollback.
+Cleanup failure stays supplementary to the primary failure and prevents retry.

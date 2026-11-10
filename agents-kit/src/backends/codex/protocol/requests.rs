@@ -75,6 +75,7 @@ pub(crate) struct CodexCommandApprovalRequest {
 #[derive(Clone, Copy)]
 pub(crate) enum CodexCommandApprovalKind {
     Command,
+    HumanCommand,
     WriteStdin,
 }
 
@@ -434,6 +435,9 @@ impl CodexServerRequest {
             kind: match params.get("kind") {
                 None => CodexCommandApprovalKind::Command,
                 Some(Value::String(kind)) if kind == "command" => CodexCommandApprovalKind::Command,
+                Some(Value::String(kind)) if kind == "humanCommand" => {
+                    CodexCommandApprovalKind::HumanCommand
+                }
                 Some(Value::String(kind)) if kind == "writeStdin" => {
                     CodexCommandApprovalKind::WriteStdin
                 }

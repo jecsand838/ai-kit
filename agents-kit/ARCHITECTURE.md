@@ -278,3 +278,10 @@ Codex alone persists a private version-4 structured failure snapshot because
 its foreground outcomes are reconstructed from durable prompt records. It
 contains no free-form messages or native diagnostics. Notification record
 version 2 and Custom/OpenCode prompt records retain their existing formats.
+
+Codex callback disappearance is coordinated by its existing event runtime and
+StateStore owner. Exact native thread/request identity selects the existing
+continuation; a backend-neutral pending-only journal operation permits atomic
+cancellation before resolution intent. Resolving or ambiguous interactions retain
+the existing recovery fence. The protocol and notification classifiers do not
+mutate persistence, and no new lifecycle or public owner is introduced.

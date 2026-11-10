@@ -905,7 +905,7 @@ membership. Sourcing the file exports the selection to the verifier and Cargo
 test processes; the workspace wrapper sources this same file before the Agent
 gate. Neither path supplies a fallback.
 
-The template also prepends the selected Codex `0.163.0` and OpenCode `1.19.3`
+The template also prepends the selected Codex `0.167.1` and OpenCode `1.19.3`
 package directories under `target/`. Install those exact packages using its
 commands, and update stale PATH entries in existing local env files. Verify
 `codex --version` and `opencode --version` after sourcing the file: earlier PATH
@@ -1092,3 +1092,23 @@ mainline's extra definite-conflict outcome attempt: reopen remains single-attemp
 while public recovered Abort retains bounded generation-fenced recomputation.
 The integration retains mainline's exact scope, idempotency, rollback, deadline,
 and last-error evidence safeguards without relaxing either acceptance boundary.
+
+The selected Codex 0.167.1 request journeys retain exact initialization identity,
+unadvertised human-only approval support, original string/integer callback
+correlation, actual stdin approval/process readback, and one Unsupported response
+for nonblocking input. Passive capture adds no control RPC or model call.
+All 29 cases, configured model roles, exact output, deadlines, and cleanup remain
+blocking. Section metadata, human-command rejection, new terminal errors, item
+times, and callback retirement races also have source-backed protocol fixtures;
+those fixtures do not prove managed network-proxy execution, same-endpoint native
+prompt serialization, or human-review capability support. Native deferred-tool
+world-state defaults remain enabled. Managed `[permissions.network]` requirements
+are separate from profile network config; no caller-policy migration is supplied.
+
+The `codex_release::payloads` fixtures additionally require structured provider
+rejection details, malformed-known rejection without reader loss, redaction,
+private media migration and input metadata, typed hook summaries, and optional
+drain status. `codex_release::callbacks` preserves the original deadline over
+inventory observation and conflict retries; ambiguous commits and rollback
+failures must retain primary authority without replay. These deterministic
+faults supplement the unchanged native inventory rather than replacing it.

@@ -23,13 +23,13 @@ fn selected_codex_release_has_one_pinned_authority() {
     assert!(
         authority
             .specifications
-            .contains("Codex App Server: `rust-v0.163.0`")
+            .contains("Codex App Server: `rust-v0.167.1`")
     );
     for fact in [
-        "tag = \"rust-v0.163.0\"",
-        "archive = \"codex-0.163.0.zip\"",
-        "extracted_dir = \"codex-0.163.0\"",
-        "sha256 = \"36fda4e61c251d805c2d68203c3a34b0f6881a88846e12776ca02fb13d6e67c7\"",
+        "tag = \"rust-v0.167.1\"",
+        "archive = \"codex-0.167.1.zip\"",
+        "extracted_dir = \"codex-0.167.1\"",
+        "sha256 = \"9c91b35b68674de67e23abd70eb92aedeae0805eb55033f4c6bb256084475489\"",
     ] {
         assert!(
             authority.vendor_lock.contains(fact),
@@ -37,7 +37,7 @@ fn selected_codex_release_has_one_pinned_authority() {
         );
     }
     assert!(
-        !authority.protocol.contains("rust-v0.163.0"),
+        !authority.protocol.contains("rust-v0.167.1"),
         "the protocol contract must defer release selection to SPECIFICATIONS.md"
     );
 }

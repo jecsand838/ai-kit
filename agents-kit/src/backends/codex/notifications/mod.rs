@@ -220,7 +220,8 @@ impl CodexNotificationAction {
             | CodexKnownNotificationKind::RealtimeTranscriptDelta => {
                 Self::Unsupported { thread_id }
             }
-            CodexKnownNotificationKind::ThreadReadStateChanged
+            CodexKnownNotificationKind::ThreadSectionChanged
+            | CodexKnownNotificationKind::ThreadReadStateChanged
             | CodexKnownNotificationKind::ThreadAttachmentUpdated
             | CodexKnownNotificationKind::ProjectChanged
             | CodexKnownNotificationKind::ThreadProjectUpdated

@@ -238,3 +238,12 @@ prompt acceptance and terminalization, abort and timeout ambiguity,
 caller-future loss, interaction acceptance, ordered notification replay,
 process-loss recovery, transaction rollback, cleanup reconciliation, and safe
 delete success boundaries.
+
+For a callback that disappears before resolution intent, the existing continuation
+and notification transition atomically from pending to cancelled. Exact native
+thread and raw request identity are required. The cancelled continuation remains
+until ordinary reclamation, preventing duplicate publication. A resolving journal
+entry or ambiguous continuation is untouched; disappearance is not acceptance.
+No persistence format, version, or migration is added. New native model-not-found
+and policy-capacity classifications use the existing version-4 ResourceMissing
+and ServiceUnavailable details, including interrupted causes.

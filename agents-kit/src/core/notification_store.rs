@@ -1654,6 +1654,51 @@ impl<S: StateStoreBackend> NotificationStore<S> {
         Ok(disposition)
     }
 
+    pub(crate) async fn cancel_pending_interaction_in_transaction(
+        transaction: &mut impl StateTransactionBackend,
+        conversation_id: &ConversationId,
+        notification_id: &NotificationId,
+    ) -> Result<bool, NotificationSettlementError> {
+        let key = NotificationRecord::key(conversation_id)
+            .map_err(NotificationSettlementError::Failure)?;
+        let snapshot = transaction
+            .load(key.clone())
+            .await
+            .map_err(|error| {
+                NotificationSettlementError::storage(error, "interaction state could not be loaded")
+                    .in_phase(crate::error::ErrorPhase::StateRead)
+            })?
+            .ok_or_else(|| {
+                NotificationSettlementError::Failure(KitError::invalid_state(
+                    "notification state is missing",
+                ))
+            })?;
+        let mut record = NotificationRecord::decode(snapshot, conversation_id)
+            .map_err(NotificationSettlementError::Failure)?;
+        if !record
+            .cancel_pending_interaction(notification_id)
+            .map_err(NotificationSettlementError::Failure)?
+        {
+            return Ok(false);
+        }
+        transaction
+            .put(storage_kit::state::record::StateRecord::new(
+                key,
+                record
+                    .encode()
+                    .map_err(NotificationSettlementError::Failure)?,
+            ))
+            .await
+            .map_err(|error| {
+                NotificationSettlementError::storage(
+                    error,
+                    "interaction cancellation could not be stored",
+                )
+                .in_phase(crate::error::ErrorPhase::StateWrite)
+            })?;
+        Ok(true)
+    }
+
     pub(crate) async fn reconcile_native_resolution_in_transaction(
         transaction: &mut impl StateTransactionBackend,
         conversation_id: &ConversationId,
@@ -3960,6 +4005,29 @@ impl NotificationRecord {
             },
         };
         Ok(ResolutionDisposition::Applied(settlement))
+    }
+
+    fn cancel_pending_interaction(&mut self, id: &NotificationId) -> Result<bool, KitError> {
+        let notification = self
+            .pending
+            .iter_mut()
+            .find(|notification| &notification.id == id)
+            .ok_or_else(|| {
+                KitError::invalid_state("pending interaction notification is missing")
+            })?;
+        match notification.state {
+            StoredNotificationState::Pending => {
+                notification.state = StoredNotificationState::Terminal {
+                    outcome: StoredTerminalOutcome::ReconciledCancelled,
+                };
+                Ok(true)
+            }
+            StoredNotificationState::Resolving { .. }
+            | StoredNotificationState::Terminal { .. } => Ok(false),
+            StoredNotificationState::Passive => Err(KitError::invalid_state(
+                "notification is not an interaction",
+            )),
+        }
     }
 
     fn reconcile_native_resolution(

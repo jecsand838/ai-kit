@@ -77,6 +77,7 @@ impl CodexRequestScenario {
         let deadline = tokio::time::Instant::now() + DeliveryScenario::CODEX_TIMEOUT;
         let observed = NativeCleanup::observe(deadline, async {
             let agent = owned_agent.insert(agents_kit::AgentBuilder::create(process.config(), fixture.storage()).build().await.unwrap());
+            input_evidence.lock().unwrap_or_else(std::sync::PoisonError::into_inner).assert_release_initialization();
             let model = StrictFixture::model(agent, StrictBackend::Codex, "TEST_CODEX_MODEL_DEFAULT").await;
             let models = agent.list_models().await.unwrap();
             assert!(models.iter().all(|model| model.personalities().is_empty()), "retired Codex personalities must never be advertised");
@@ -101,6 +102,7 @@ impl CodexRequestScenario {
                     let response = Self::prompt(conversation, input, Some("Terminal input approval"), deadline).await;
                     assert_eq!(response.output(), token);
                     assert_eq!(std::fs::read_to_string(directory.join("stdin-result.txt")).unwrap(), format!("{token}\n"), "the real reviewed process must receive the exact input");
+                    input_evidence.lock().unwrap_or_else(std::sync::PoisonError::into_inner).assert_stdin_approvals();
                 }
                 Self::NonblockingInput => {
                     let request = PromptRequest::new("Stay in Default mode. Call the native request_user_input tool exactly once with one question: id=choice, header=Choice, question=Choose a value?, options=[{label:First,description:First choice},{label:Second,description:Second choice}]. Do not imitate the tool call in text. After the tool returns, including cancellation or unsupported response, reply exactly INPUT_SETTLED. Do not call other tools.").unwrap()

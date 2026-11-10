@@ -1,4 +1,4 @@
-use crate::error::ErrorPhase;
+use crate::error::{ErrorDetail, ErrorPhase};
 use std::collections::BTreeSet;
 use std::time::Duration;
 use tools_kit::ToolsetBackend;
@@ -522,8 +522,31 @@ impl<S: StateStoreBackend> CodexRuntime<S> {
                 thread_id,
                 request_id,
             } => {
-                let _ = (thread_id, request_id);
-                Ok(())
+                let deadline = tools.cancellation_deadline();
+                loop {
+                    match state
+                        .retire_pending_request(&thread_id, &request_id, deadline)
+                        .await
+                    {
+                        Ok(()) => return Ok(()),
+                        Err(error)
+                            if error.detail() == Some(&ErrorDetail::TransactionConflict)
+                                && error.context().phase != ErrorPhase::Cleanup
+                                && error.supplementary().is_empty() =>
+                        {
+                            let remaining =
+                                deadline.saturating_duration_since(tokio::time::Instant::now());
+                            if remaining.is_zero() {
+                                return Err(error);
+                            }
+                            tokio::time::sleep(Duration::from_millis(25).min(remaining)).await;
+                            if tokio::time::Instant::now() >= deadline {
+                                return Err(error);
+                            }
+                        }
+                        Err(error) => return Err(error),
+                    }
+                }
             }
             CodexNotificationAction::ThreadDeleted { thread_id } => {
                 if let Some((conversation, binding)) =

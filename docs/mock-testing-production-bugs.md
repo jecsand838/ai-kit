@@ -6,6 +6,63 @@ cancellation follow-up started at `1de968b3c98015f7fc48255d6ac40ef4593ca44d`.
 Regressions remain enabled; fixture and validation-setup errors are distinguished
 from production defects. Manifests, lockfiles, features, and vendor sources are unchanged.
 
+## Codex 0.167.0 protocol adaptation — vendor update
+
+The separately authorized Codex-only update starts at
+`24a33f54401f502fdcdea776ec64fcf854bca18d`. These regressions exercise the public
+Agent through a WebSocket protocol fixture and real Lance state, outside the
+primary direct-trait mock lane. They establish adapter behavior, not native
+Codex qualification. The updater owns the candidate vendor lock and archive.
+
+Before each production area changed, enabled `codex_prompt_stream` tests
+reproduced the following failures. Receipts, complete logs and source hashes
+are retained under
+`target/vendor-updates/agents-kit/codex/rust-v0.167.0/implementation/`.
+
+| Area | Red receipt | Required regression |
+| --- | --- | --- |
+| Selected runtime identity | `01-identity-red`, `02-previous-identity-red` | Accept exactly 0.167.0; reject the previous 0.163.0 before publication or thread creation |
+| Human-only approval kind | `04-human-command-red` | Recognize valid `humanCommand` as unsupported, preserve malformed-request rejection, and create no interaction or acceptance |
+| Disappeared callback | `06-callback-retirement-red` | `disappeared_callback_cancels_only_exact_pending_identity` requires atomic cancellation of the exact still-pending journal and continuation, with no stale response |
+| Typed errors and metadata | `10-metadata-errors-red`, `11-section-validation-red` | Preserve model-not-found and capacity details, reject malformed known errors and missing section metadata, and route foreign sections privately |
+| Optional item timestamps | `14-item-times-red` | `item_times_reject_wrong_types_and_overflow_in_live_and_history` rejects invalid signed-millisecond values at both decode boundaries |
+| Malformed private payloads | `25-parent-payload-red-network` | `codex_release::payloads` rejects malformed image references, hook summaries and process drain status while valid observed media remains private |
+| Structured provider rejection | `26-parent-provider-error-red` | `structured_rejections_preserve_reader_and_explicit_next_prompt` requires PreconditionFailed/PolicyRejected, safe unknown fallback, malformed-known Protocol and continued reader ownership |
+| Callback inventory deadline | `29-parent-callback-read-red-fixture` | `disappeared_callback_bounds_inventory_observation` requires a held read to fail within the original lifecycle deadline, with no approval response |
+| Media identity consistency | `31-media-identity-red` | The two `selected_media_*identity*` cases reject missing/malformed media IDs in history and non-string live user client IDs, preserving exact existing generation extraction |
+
+The full target passed 147 cases in `15-items-compatibility-green`, including
+callback intent/commit races, definite conflict replay, ambiguity preservation,
+flat item ordering and private media compatibility. Further affected-target
+results belong to the implementation receipt. The failed `05-human-command-green`
+invocation was a new fixture expectation error, and `09-callback-races` failed
+to compile a new test wrapper; both failures remain preserved, not relabeled
+as production evidence or passes.
+
+All regressions remain enabled. The required independent diff review and native
+strict gates are deferred to the parent's validation-only phase. A stale
+upstream-source assertion outside this update's write scope remains a blocking
+failure in `08-authority-coordinates`; repaired source-coordinate checks pass
+separately in `13-authority-coordinates-expanded`. No focused result waives that
+failure or establishes workspace or vendor release qualification.
+
+Parent review identified the omitted typed payload work above. Receipt
+`27-parent-payload-green` passes those five focused cases, including identical
+live/history media validation. The initial parent invocation `24-parent-payload-red`
+could not bind loopback sockets; it is environment evidence only. The structured
+error case in receipt 25 timed out at the existing start-reconciliation boundary
+before its intended assertion. The corrected fixture in receipt 26 reproduces the
+actual wrong error detail through a direct received response; the earlier timeout
+is retained as a fixture failure. These results do not waive the full target or
+native qualification. The stale workspace authority anchor was independently
+reviewed and repaired in prerequisite `4f264e8`; both source versions pass its
+wire-fact assertion without changing either archive.
+The callback inventory deadline regression exposed an unbounded read in the new
+retirement path before its final repair. Definite conflict exhaustion, ambiguous
+commit without replay, and primary staging failure with supplementary rollback
+failure passed as compatibility controls in the same invocation. Receipt 28 was
+a new fixture compile error and remains separate from behavioral red evidence.
+
 ## Surreal column-removal recovery — Storage vendor campaign
 
 The separately authorized `upgrade-vendors` follow-up preserves a real
@@ -608,3 +665,37 @@ observer restriction was applied.
 Current source-specific passes, failures and outstanding qualification belong
 to the PR validation evidence. Reproducing this race and passing a focused
 regression do not establish full App or workspace qualification.
+
+## Codex 0.167.1 compatibility refresh — pending qualification
+
+This refresh is based on the reviewed 33-file Codex 0.167.0 reference.
+The independently reviewed endpoint trees have identical App Server and protocol
+sources. The 11 changed upstream paths concern the release version and native
+incremental tools, including top-level `web_search` placement and foreground and
+background compaction. The new `incremental_tools_legacy` flag is under
+development and disabled by default; regular Responses selects it only for the
+native Bedrock provider IDs, while Responses Lite retains its existing flag.
+These native changes stay private. No feature, provider configuration or public
+API is enabled or added by this adaptation.
+
+The parent recorded tests-first compatibility evidence in
+`target/vendor-campaign-agents-codex-20261109/codex-01671-identity-red-01/receipt.json`:
+the exact initialization-rejection test exited 101 against the reviewed 0.167.0
+reference because the added `codex/0.167.0` control was still accepted. The
+original log, captured source and diff remain at that location. This establishes
+the required selection change, not a retroactive defect in the former selection.
+The new rejection tuple, older and malformed controls, and zero-thread-start
+assertion remain intact.
+
+Relative to the reviewed reference, the sole production change selects 0.167.1.
+Positive fixture identities, source-authority expectations, strict setup and
+research guidance follow the new frozen candidate lock. The parent completed
+the protected guidance installation after the leaf returned; the exact
+postimage and frozen-input verification are recorded in
+`target/vendor-campaign-agents-codex-20261109/protected-guidance-01671-01/receipt.json`.
+All original
+0.167.0 findings, historical receipts and Tools remediation entries remain
+unchanged. Independent implementation review, focused green proof, native
+prerequisites and every fresh acceptance gate remain pending. This note claims
+no new qualification; the retained native suite does not exhaustively qualify
+upstream search, compaction or Bedrock behavior.

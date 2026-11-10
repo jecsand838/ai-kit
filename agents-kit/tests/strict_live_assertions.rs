@@ -161,6 +161,48 @@ fn codex_input_capture_preserves_original_callback_assertions() {
 }
 
 #[test]
+fn codex_release_capture_requires_exact_runtime_and_original_approval_ids() {
+    use codex_input_evidence::CodexInputObservation;
+    for defect in [
+        None,
+        Some("version"),
+        Some("capability"),
+        Some("id"),
+        Some("grant"),
+        Some("duplicate"),
+        Some("forwarding"),
+    ] {
+        let mut observed = CodexInputObservation::default();
+        let mut initialize = json!({"id":1,"method":"initialize","params":{"capabilities":{"experimentalApi":true}}});
+        if defect == Some("capability") {
+            initialize["params"]["capabilities"]["requiredHumanApproval"] = json!(false);
+        }
+        observed.observe_sdk(&initialize);
+        observed.finish_sdk_forwarding(true);
+        observed.observe_native(&json!({"id":1,"result":{"userAgent":if defect == Some("version") { "codex/0.163.0" } else { "codex/0.167.1 native-host" }}}));
+        observed.finish_native_forwarding(true);
+        for (id, kind) in [(json!(9), "command"), (json!("9"), "writeStdin")] {
+            observed.observe_native(
+                &json!({"id":id,"method":"item/commandExecution/requestApproval","params":{
+                "threadId":"thread","turnId":"turn","itemId":"same-item","kind":kind}}),
+            );
+            observed.finish_native_forwarding(true);
+            let response_id = if defect == Some("id") { json!(9) } else { id };
+            let response = json!({"id":response_id,"result":{"decision":if defect == Some("grant") {"acceptForSession"} else {"accept"}}});
+            observed.observe_sdk(&response);
+            observed.finish_sdk_forwarding(defect != Some("forwarding"));
+            if defect == Some("duplicate") {
+                observed.observe_sdk(&response);
+                observed.finish_sdk_forwarding(true);
+            }
+        }
+        let result =
+            std::panic::catch_unwind(AssertUnwindSafe(|| observed.assert_stdin_approvals()));
+        assert_eq!(result.is_err(), defect.is_some(), "{defect:?}");
+    }
+}
+
+#[test]
 fn codex_input_capture_records_passive_identity_and_forwarding() {
     use codex_input_evidence::CodexInputObservation;
     let caller_prompt = "Stay in Default mode. Call the native request_user_input tool exactly once with one question: id=choice, header=Choice, question=Choose a value?, options=[{label:First,description:First choice},{label:Second,description:Second choice}]. Do not imitate the tool call in text. After the tool returns, including cancellation or unsupported response, reply exactly INPUT_SETTLED. Do not call other tools.";
@@ -180,7 +222,7 @@ fn codex_input_capture_records_passive_identity_and_forwarding() {
         ),
         (
             false,
-            json!({"id":1,"result":{"userAgent":"codex/0.163.0"}}),
+            json!({"id":1,"result":{"userAgent":"codex/0.167.1"}}),
         ),
         (
             true,
@@ -311,7 +353,7 @@ fn codex_input_capture_reads_correlated_rollout_without_native_prose() {
             ),
             (
                 false,
-                json!({"id":1,"result":{"userAgent":"codex/0.163.0"}}),
+                json!({"id":1,"result":{"userAgent":"codex/0.167.1"}}),
             ),
             (
                 true,
@@ -369,7 +411,7 @@ fn codex_input_capture_reads_correlated_rollout_without_native_prose() {
     let mut observation = make_observation(false);
     let arguments = json!({"questions":[{"id":"choice","header":"Choice","question":"private question","options":[{"label":"First","description":"one"},{"label":"Second","description":"two"}]}]}).to_string();
     let records = vec![
-        json!({"type":"session_meta","payload":{"id":"thread-a","session_id":"thread-a","cwd":"/owned/cwd","cli_version":"0.163.0","source":"vscode","parent_thread_id":null}}),
+        json!({"type":"session_meta","payload":{"id":"thread-a","session_id":"thread-a","cwd":"/owned/cwd","cli_version":"0.167.1","source":"vscode","parent_thread_id":null}}),
         json!({"type":"turn_context","payload":{"turn_id":"turn-a","model":"gpt-6-luna","cwd":"/owned/cwd","collaboration_mode":{"mode":"default"}}}),
         json!({"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Managed context:\n(none)\n\nUser request:\nunchanged prompt"}]}}),
         json!({"type":"response_item","payload":{"type":"function_call","name":"request_user_input","call_id":"call-a","arguments":arguments}}),

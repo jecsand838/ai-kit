@@ -41,7 +41,7 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tokio_tungstenite::tungstenite::Message;
 
-// Protocol fixture only: the selected rust-v0.163.0 archive's App Server v2
+// Protocol fixture only: the selected rust-v0.167.1 archive's App Server v2
 // AgentMessageDeltaNotification supplies threadId, turnId, itemId and delta.
 // This drives the real Kit WebSocket adapter; it is not live Codex evidence.
 struct CodexPeer {
@@ -113,7 +113,7 @@ impl CodexPeer {
         let reported_models = Arc::clone(&models);
         let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
         let observed_requests = Arc::clone(&requests);
-        let identity = Arc::new(std::sync::Mutex::new(json!("codex/0.163.0")));
+        let identity = Arc::new(std::sync::Mutex::new(json!("codex/0.167.1")));
         let reported_identity = Arc::clone(&identity);
         let hold_initialization = Arc::new(AtomicBool::new(false));
         let held_initialization = Arc::clone(&hold_initialization);
@@ -280,7 +280,7 @@ impl CodexPeer {
                                 if defer_interrupt_terminal || matches!(&first_start, FirstStart::DeferredInterruptTerminal) {
                                     defer_interrupt_terminal = true;
                                     turn["itemsView"] = json!("full");
-                                    turn["items"] = json!([{"type":"userMessage","id":format!("user-{id}"),"clientId":params["clientUserMessageId"]}]);
+                                    turn["items"] = json!([{"type":"userMessage","content":[],"id":format!("user-{id}"),"clientId":params["clientUserMessageId"]}]);
                                     thread["turns"].as_array_mut().unwrap().push(turn.clone());
                                 } else {
                                     thread["turns"] = json!([turn.clone()]);
@@ -293,7 +293,7 @@ impl CodexPeer {
                                         FirstStart::DeferredInterruptTerminal => {}
                                         FirstStart::ThreadObservation(_) => panic!("thread observation must be consumed before a turn starts"),
                                         FirstStart::RecoveredTurn { status, error, mut items } => {
-                                            items.insert(0, json!({"type":"userMessage","clientId":params["clientUserMessageId"]}));
+                                            items.insert(0, json!({"type":"userMessage","id":format!("user-{id}"),"content":[],"clientId":params["clientUserMessageId"]}));
                                             thread["turns"] = json!([{"id":id,"status":status,"itemsView":"full",
                                                 "items":items,"error":error}]);
                                             turn = Value::Null;
@@ -1901,6 +1901,7 @@ async fn codex_process_delivery_reconciles_ambiguous_approval_at_prompt_terminal
                     json!({
                         "threadId":"stream-thread", "turnId":turn, "startedAtMs":1,
                         "item":{"id":"command", "type":"commandExecution", "status":"inProgress",
+                            "startedAtMs":-2,"completedAtMs":null,
                             "command":"printf process; exit 7", "cwd":fixture.root,
                             "commandActions":[], "aggregatedOutput":null, "exitCode":null}
                     }),
@@ -1985,6 +1986,7 @@ async fn codex_process_delivery_reconciles_ambiguous_approval_at_prompt_terminal
                     json!({
                         "threadId":"stream-thread", "turnId":turn, "completedAtMs":2,
                         "item":{"id":"command", "type":"commandExecution", "status":"failed",
+                            "startedAtMs":-2,"completedAtMs":i64::MAX,
                             "command":"printf process; exit 7", "cwd":fixture.root,
                             "commandActions":[], "aggregatedOutput":"process", "exitCode":7}
                     }),
@@ -2118,7 +2120,7 @@ async fn codex_process_delivery_reconciles_ambiguous_approval_at_prompt_terminal
     );
 }
 
-// Pinned rust-v0.163.0: app-server-protocol/schema/typescript/v2/
+// Pinned rust-v0.167.1: app-server-protocol/schema/typescript/v2/
 // CommandExecutionApprovalDecision.ts keeps enum payload field names in snake_case.
 #[tokio::test]
 async fn codex_command_approval_available_decision_execpolicy_amendment() {
@@ -2230,6 +2232,12 @@ async fn codex_file_read_rejection_never_exposes_native_error_prose() {
 #[tokio::test]
 async fn codex_typed_terminal_failures_survive_unary_stream_and_durable_delivery() {
     let cases = [
+        (json!("modelNotFound"), ErrorDetail::ResourceMissing, None),
+        (
+            json!("policyCapacityUnavailable"),
+            ErrorDetail::ServiceUnavailable,
+            None,
+        ),
         (json!("rateLimitExceeded"), ErrorDetail::RateLimited, None),
         (
             json!("flexUnavailable"),
@@ -2383,6 +2391,93 @@ async fn codex_recovered_terminal_failure_retains_typed_history_error() {
     assert_eq!(error.context().operation, Operation::Prompt);
     assert_eq!(error.context().phase, ErrorPhase::ModelGeneration);
     assert!(!format!("{error} {error:?}").contains("secret-token"));
+}
+
+#[tokio::test]
+async fn codex_target_errors_preserve_version_four_failures_and_history() {
+    for (info, detail, stored) in [
+        (
+            "modelNotFound",
+            ErrorDetail::ResourceMissing,
+            "resource_missing",
+        ),
+        (
+            "policyCapacityUnavailable",
+            ErrorDetail::ServiceUnavailable,
+            "service_unavailable",
+        ),
+    ] {
+        for recovered in [false, true] {
+            let captured = Arc::new(std::sync::Mutex::new(None));
+            let store = WaiterFaultStore {
+                inner: StateStore::connect(
+                    StateStoreConfig::Lance(LanceStateStoreConfig::memory()),
+                )
+                .await
+                .unwrap(),
+                armed: Arc::new(AtomicBool::new(true)),
+                attempts: Arc::new(AtomicUsize::new(0)),
+                fault: WaiterFault::TerminalRecord {
+                    patch: json!({}),
+                    captured: Arc::clone(&captured),
+                },
+            };
+            let native_error = json!({"message":"secret-token","codexErrorInfo":info,"additionalDetails":"native-private-path"});
+            let peer = CodexPeer::start_with(if recovered {
+                FirstStart::RecoveredTurn {
+                    status: "failed".into(),
+                    error: native_error,
+                    items: vec![],
+                }
+            } else {
+                FirstStart::Ordinary
+            })
+            .await;
+            let mut fixture = CodexFixture::build_with_store(peer, store).await;
+            let observed = std::panic::AssertUnwindSafe(async {
+                let mut stream = fixture
+                    .conversation
+                    .prompt_stream(PromptRequest::new("stored target error").unwrap())
+                    .await
+                    .unwrap();
+                let turn = fixture.peer.turn().await;
+                if !recovered {
+                    fixture.peer.fail(&turn, json!(info)).await;
+                }
+                let error = tokio::time::timeout(Duration::from_secs(3), stream.recv())
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .unwrap_err();
+                assert_eq!(error.kind(), ErrorKind::Integration);
+                assert_eq!(error.context().operation, Operation::Prompt);
+                assert_eq!(error.context().phase, ErrorPhase::ModelGeneration);
+                assert_eq!(error.detail(), Some(&detail));
+                assert_eq!(error.http_status(), None);
+                assert!(stream.recv().await.is_none());
+                let snapshot = captured
+                    .lock()
+                    .unwrap()
+                    .clone()
+                    .expect("terminal record must persist before delivery");
+                assert_eq!(snapshot["version"], 4);
+                assert_eq!(
+                    snapshot["state"]["outcome"]["error"]["detail"]["kind"],
+                    stored
+                );
+                assert!(snapshot["state"]["outcome"]["error"]["http_status"].is_null());
+                assert!(!snapshot.to_string().contains("secret-token"));
+                assert!(!snapshot.to_string().contains("native-private-path"));
+            })
+            .catch_unwind()
+            .await;
+            let cleanup = fixture.settle().await;
+            cleanup.unwrap();
+            if let Err(panic) = observed {
+                std::panic::resume_unwind(panic);
+            }
+        }
+    }
 }
 
 #[tokio::test]
@@ -4794,6 +4889,8 @@ async fn codex_historical_terminal_rejects_orphaned_matching_continuation() {
 #[tokio::test]
 async fn codex_selected_release_initialization_rejects_old_and_malformed_identity() {
     for (identity, expected) in [
+        (json!("codex/0.167.0"), ErrorKind::InvalidConfig),
+        (json!("codex/0.163.0"), ErrorKind::InvalidConfig),
         (json!("codex/0.162.1"), ErrorKind::InvalidConfig),
         (json!("codex/0.144.1"), ErrorKind::InvalidConfig),
         (Value::Null, ErrorKind::Protocol),
@@ -5811,6 +5908,9 @@ async fn codex_permission_locations_reject_nonlocal_without_actionable_notificat
 #[tokio::test]
 async fn codex_known_error_shapes_cannot_escape_as_unknown_errors() {
     for error in [
+        json!({"message":"secret-token", "codexErrorInfo":{"modelNotFound":{"invalid":true}}}),
+        json!({"message":"secret-token", "codexErrorInfo":{"policyCapacityUnavailable":42}}),
+        json!({"message":"secret-token", "codexErrorInfo":{"modelNotFound":null,"future":null}}),
         json!({"message":"secret-token", "codexErrorInfo":{"rateLimitExceeded":{"invalid":true}}}),
         json!({"message":"secret-token", "codexErrorInfo":{"httpConnectionFailed":{"httpStatusCode":"503"}}}),
         json!({"message":"secret-token", "codexErrorInfo":{"rateLimitExceeded":null,"future":null}}),
@@ -6052,86 +6152,105 @@ async fn codex_reopen_rejects_changed_effective_policy_before_publication() {
 
 #[tokio::test]
 async fn codex_shutdown_rejection_is_private_and_does_not_replay_resume() {
-    let CodexFixture {
-        peer,
-        agent,
-        workspace,
-        conversation,
-        root,
-    } = CodexFixture::build().await;
-    let workspace_id = workspace.id().clone();
-    let conversation_id = conversation.id().clone();
-    let mut workspace = Some(workspace);
-    let mut conversation = Some(conversation);
-    let observed = NativeCleanup::observe(
-        tokio::time::Instant::now() + Duration::from_secs(10),
-        async {
-            workspace.take().unwrap().close().await.unwrap();
-            drop(conversation.take());
-            peer.rejections.lock().unwrap().insert(
-                "thread/resume".to_owned(),
-                json!({
-                    "code":-32600,
-                    "message":"secret-token native-private-path retry after reconnecting",
-                    "data":{"reason":"serverShuttingDown"}
-                }),
-            );
-            let reopened = workspace.insert(agent.get_workspace(workspace_id).await.unwrap());
-            let error = match reopened.get_conversation(conversation_id).await {
-                Err(error) => error,
-                Ok(handle) => {
-                    conversation = Some(handle);
-                    panic!("shutdown rejection must not publish a conversation");
-                }
-            };
-            assert_eq!(error.kind(), ErrorKind::Integration);
-            assert_eq!(error.detail(), Some(&ErrorDetail::InvalidRequest));
-            for text in [
-                error.message().to_owned(),
-                error.to_string(),
-                format!("{error:?}"),
-            ] {
-                for private in [
-                    "secret-token",
-                    "native-private-path",
-                    "retry after reconnecting",
-                    "serverShuttingDown",
+    for (data, detail) in [
+        (
+            json!({"reason":"serverShuttingDown"}),
+            ErrorDetail::InvalidRequest,
+        ),
+        (
+            json!({"type":"modelProviderMismatch","modelProvider":"secret-token","currentModelProvider":"native-private-path"}),
+            ErrorDetail::PreconditionFailed,
+        ),
+        (
+            json!({"type":"modelProviderNotConfigured","modelProvider":"secret-token"}),
+            ErrorDetail::PreconditionFailed,
+        ),
+        (
+            json!({"type":"modelProviderPolicyConflict","modelProvider":"secret-token","requiredModelProvider":"native-private-path"}),
+            ErrorDetail::PolicyRejected,
+        ),
+    ] {
+        let CodexFixture {
+            peer,
+            agent,
+            workspace,
+            conversation,
+            root,
+        } = CodexFixture::build().await;
+        let workspace_id = workspace.id().clone();
+        let conversation_id = conversation.id().clone();
+        let mut workspace = Some(workspace);
+        let mut conversation = Some(conversation);
+        let observed = NativeCleanup::observe(
+            tokio::time::Instant::now() + Duration::from_secs(10),
+            async {
+                workspace.take().unwrap().close().await.unwrap();
+                drop(conversation.take());
+                peer.rejections.lock().unwrap().insert(
+                    "thread/resume".to_owned(),
+                    json!({
+                        "code":-32600,
+                        "message":"secret-token native-private-path retry after reconnecting",
+                        "data":data
+                    }),
+                );
+                let reopened = workspace.insert(agent.get_workspace(workspace_id).await.unwrap());
+                let error = match reopened.get_conversation(conversation_id).await {
+                    Err(error) => error,
+                    Ok(handle) => {
+                        conversation = Some(handle);
+                        panic!("shutdown rejection must not publish a conversation");
+                    }
+                };
+                assert_eq!(error.kind(), ErrorKind::Integration);
+                assert_eq!(error.detail(), Some(&detail));
+                for text in [
+                    error.message().to_owned(),
+                    error.to_string(),
+                    format!("{error:?}"),
                 ] {
-                    assert!(!text.contains(private));
+                    for private in [
+                        "secret-token",
+                        "native-private-path",
+                        "retry after reconnecting",
+                        "serverShuttingDown",
+                    ] {
+                        assert!(!text.contains(private));
+                    }
                 }
-            }
-            tokio::time::sleep(Duration::from_millis(25)).await;
-            let requests = peer.requests.lock().unwrap();
-            assert_eq!(
-                requests
-                    .iter()
-                    .filter(|request| request["method"] == "thread/resume")
-                    .count(),
-                1
-            );
-            assert!(
-                !requests
-                    .iter()
-                    .any(|request| request["method"] == "turn/start")
-            );
-            assert_eq!(peer.thread_starts.load(Ordering::SeqCst), 1);
-        },
-    )
-    .await;
-    peer.rejections.lock().unwrap().clear();
-    let mut cleanup = NativeCleanup::new(Duration::from_secs(10));
-    if let Some(conversation) = conversation {
-        cleanup.settle(conversation.close()).await;
-    }
-    if let Some(workspace) = workspace {
-        cleanup.settle(workspace.close()).await;
-    }
-    cleanup.settle(agent.shutdown()).await;
-    peer.shutdown().await;
-    cleanup
-        .settle(async { std::fs::remove_dir_all(root) })
+                tokio::time::sleep(Duration::from_millis(25)).await;
+                let requests = peer.requests.lock().unwrap();
+                assert_eq!(
+                    requests
+                        .iter()
+                        .filter(|request| request["method"] == "thread/resume")
+                        .count(),
+                    1
+                );
+                assert!(
+                    !requests
+                        .iter()
+                        .any(|request| request["method"] == "turn/start")
+                );
+                assert_eq!(peer.thread_starts.load(Ordering::SeqCst), 1);
+            },
+        )
         .await;
-    cleanup.finish(observed);
+        peer.rejections.lock().unwrap().clear();
+        let mut cleanup = NativeCleanup::new(Duration::from_secs(10));
+        if let Some(conversation) = conversation {
+            cleanup.settle(conversation.close()).await;
+        }
+        if let Some(workspace) = workspace {
+            cleanup.settle(workspace.close()).await;
+        }
+        cleanup.settle(agent.shutdown()).await;
+        peer.shutdown().await;
+        cleanup
+            .settle(async { std::fs::remove_dir_all(root) })
+            .await;
+        cleanup.finish(observed);
+    }
 }
 
 #[tokio::test]
@@ -6352,22 +6471,27 @@ async fn codex_interaction_publication_reloads_settled_duplicate_in_transaction(
 
 #[tokio::test]
 async fn codex_release_interrupted_error_retains_cancelled_primary_and_safe_cause() {
-    for recovered in [false, true] {
-        for streaming in [false, true] {
-            let native_error = json!({"message":"secret-token", "codexErrorInfo":"tooManyDenials",
+    for (info, detail) in [
+        ("tooManyDenials", ErrorDetail::PolicyRejected),
+        ("modelNotFound", ErrorDetail::ResourceMissing),
+        ("policyCapacityUnavailable", ErrorDetail::ServiceUnavailable),
+    ] {
+        for recovered in [false, true] {
+            for streaming in [false, true] {
+                let native_error = json!({"message":"secret-token", "codexErrorInfo":info,
                 "misalignment":{"errorType":"private-classification", "detailedExplanation":"secret-token", "steer":{"message":"secret-token"}}});
-            let peer = CodexPeer::start_with(if recovered {
-                FirstStart::RecoveredTurn {
-                    status: "interrupted".into(),
-                    error: native_error.clone(),
-                    items: vec![],
-                }
-            } else {
-                FirstStart::Ordinary
-            })
-            .await;
-            let mut fixture = CodexFixture::build_with_peer(peer).await;
-            let observed = std::panic::AssertUnwindSafe(async {
+                let peer = CodexPeer::start_with(if recovered {
+                    FirstStart::RecoveredTurn {
+                        status: "interrupted".into(),
+                        error: native_error.clone(),
+                        items: vec![],
+                    }
+                } else {
+                    FirstStart::Ordinary
+                })
+                .await;
+                let mut fixture = CodexFixture::build_with_peer(peer).await;
+                let observed = std::panic::AssertUnwindSafe(async {
                 let error = if streaming {
                     let mut stream = fixture.conversation.prompt_stream(PromptRequest::new("interrupt").unwrap()).await.unwrap();
                     let turn = fixture.peer.turn().await;
@@ -6395,11 +6519,12 @@ async fn codex_release_interrupted_error_retains_cancelled_primary_and_safe_caus
             assert_eq!(cause.kind(), ErrorKind::Integration);
             assert_eq!(cause.context().operation, Operation::Prompt);
             assert_eq!(cause.context().phase, ErrorPhase::ModelGeneration);
-            assert_eq!(cause.detail(), Some(&ErrorDetail::PolicyRejected));
+            assert_eq!(cause.detail(), Some(&detail));
             assert_eq!(cause.http_status(), None);
             assert!(!format!("{error} {error:?}").contains("secret-token"));
             }).catch_unwind().await;
-            fixture.finish_release(observed, None).await;
+                fixture.finish_release(observed, None).await;
+            }
         }
     }
 }

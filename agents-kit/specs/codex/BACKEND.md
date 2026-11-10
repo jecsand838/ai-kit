@@ -89,7 +89,7 @@ active `multi_agent` and `multi_agent_v2` features so a completed root turn is t
 foreground terminal authority rather than the start of hidden descendant work;
 that policy is part of attachment compatibility on reopen. Before publication
 or reopen, the backend pages `experimentalFeature/list` for the loaded thread
-and requires all three to report disabled. An enabled feature is `Unsupported`;
+and requires both to report disabled. An enabled feature is `Unsupported`;
 a missing or malformed effective-state entry is `Protocol`.
 Agent-config instructions are fixed when the bound thread is created. The
 native create request supplies developer instructions, and the private
@@ -117,7 +117,7 @@ tool selection is supported; every narrowing or requirement variant is
 `Unsupported` before native acceptance.
 
 For `Completed`, output is the exact text of the last completion-ordered
-non-whitespace `ThreadItem::AgentMessage` whose phase is `FinalAnswer` or
+non-whitespace `ThreadItemPayload::AgentMessage` whose phase is `FinalAnswer` or
 absent. `Commentary` and `PartialAnswer` are never terminal prompt output, and
 selected text is not trimmed.
 Candidate absence returns `NotYetImplemented` instead of inventing output.
@@ -235,3 +235,17 @@ conversation's one bound root thread before reclaiming its portable record.
 Shutdown seals the runtime, settles descendants through the root lifecycle,
 closes the transport, and terminates only a Kit-owned process. Failed
 post-commit cleanup remains a durable obligation.
+
+The selected human-only approval capability remains unadvertised. Valid
+`humanCommand` callbacks are Unsupported without portable publication. Pending
+callback disappearance can cancel an exact pending interaction atomically;
+admitted resolution and enqueued-response ambiguity retain their recovery fence.
+
+Native `modelNotFound` and `policyCapacityUnavailable` produce Integration at
+Prompt/ModelGeneration with ResourceMissing and ServiceUnavailable respectively,
+without an invented HTTP status. Structured provider-admission rejections use
+PreconditionFailed for mismatch/unconfigured providers and PolicyRejected for
+policy conflicts, with unknown-tag RPC-code fallback. Malformed known data is
+Protocol while the received rejection remains authoritative. None authorizes
+provider switching or replay. Attached-thread
+deletion rejection leaves the existing native cleanup obligation intact.

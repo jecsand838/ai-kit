@@ -21,6 +21,9 @@ pub(crate) struct CodexInputObservation {
     pending_native: Option<usize>,
     requests: BTreeMap<String, (String, Option<bool>)>,
     initialized: bool,
+    human_approval_unadvertised: bool,
+    command_approvals: BTreeMap<String, CommandApprovalObservation>,
+    command_approval_error: bool,
     thread: Option<(String, PathBuf, PathBuf)>,
     turn: Option<String>,
     submitted: Option<Value>,
@@ -33,6 +36,12 @@ pub(crate) struct CodexInputObservation {
     features_complete: bool,
     rollout: Option<Value>,
     failures: BTreeSet<&'static str>,
+}
+
+struct CommandApprovalObservation {
+    kind: String,
+    responses: usize,
+    accepted_once: bool,
 }
 
 impl CodexInputObservation {
@@ -78,7 +87,7 @@ impl CodexInputObservation {
             Value::String(text) if !text.is_empty() && text.len() <= 1_024 => {
                 Some(value.to_string())
             }
-            Value::Number(number) if number.is_i64() || number.is_u64() => Some(value.to_string()),
+            Value::Number(number) if number.is_i64() => Some(value.to_string()),
             _ => None,
         }
     }
@@ -93,6 +102,7 @@ impl CodexInputObservation {
             | "thread/read"
             | "thread/started"
             | "thread/readState/changed"
+            | "thread/section/changed"
             | "thread/status/changed"
             | "experimentalFeature/list"
             | "turn/start"
@@ -101,6 +111,8 @@ impl CodexInputObservation {
             | "item/started"
             | "item/completed"
             | "item/tool/requestUserInput"
+            | "item/commandExecution/requestApproval"
+            | "serverRequest/resolved"
             | "item/agentMessage/delta"
             | "item/reasoning/summaryTextDelta"
             | "item/reasoning/summaryPartAdded"
@@ -158,6 +170,15 @@ impl CodexInputObservation {
         let Some(index) = self.begin_frame(frame, true) else {
             return;
         };
+        if frame.get("method").is_none()
+            && let Some(id) = Self::identity(&frame["id"])
+            && let Some(approval) = self.command_approvals.get_mut(&id)
+        {
+            approval.responses += 1;
+            approval.accepted_once =
+                frame["result"] == json!({"decision":"accept"}) && frame.get("error").is_none();
+            self.frames[index]["command_approval_response"] = json!(true);
+        }
         let Some(method) = frame["method"].as_str() else {
             return;
         };
@@ -179,6 +200,12 @@ impl CodexInputObservation {
         let params = &frame["params"];
         match method {
             "initialize" => {
+                self.human_approval_unadvertised = params["capabilities"].is_object()
+                    && params["capabilities"]
+                        .get("requiredHumanApproval")
+                        .is_none();
+                self.frames[index]["human_approval_unadvertised"] =
+                    json!(self.human_approval_unadvertised);
                 self.frames[index]["experimental_api"] = params["capabilities"]["experimentalApi"]
                     .as_bool()
                     .map(Value::Bool)
@@ -301,6 +328,42 @@ impl CodexInputObservation {
                 }
             }
             match method {
+                "item/commandExecution/requestApproval" => {
+                    self.frames[index]["command_approval"] = json!(true);
+                    let kind = match params.get("kind") {
+                        None => "command",
+                        Some(Value::String(kind)) => kind,
+                        Some(_) => "invalid",
+                    };
+                    let valid_scope = ["threadId", "turnId", "itemId"].iter().all(|field| {
+                        params[*field].as_str().is_some_and(|id| {
+                            !id.is_empty() && id.len() <= 1_024 && id.trim() == id
+                        })
+                    });
+                    if !valid_scope
+                        || !matches!(kind, "command" | "writeStdin")
+                        || self.command_approvals.len() >= 8
+                    {
+                        self.command_approval_error = true;
+                    } else if let Some(id) = Self::identity(&frame["id"]) {
+                        if self
+                            .command_approvals
+                            .insert(
+                                id,
+                                CommandApprovalObservation {
+                                    kind: kind.to_owned(),
+                                    responses: 0,
+                                    accepted_once: false,
+                                },
+                            )
+                            .is_some()
+                        {
+                            self.command_approval_error = true;
+                        }
+                    } else {
+                        self.command_approval_error = true;
+                    }
+                }
                 "turn/completed" => {
                     if self.terminal.is_some() {
                         self.mark_incomplete("duplicate_terminal");
@@ -364,7 +427,12 @@ impl CodexInputObservation {
         let result = &frame["result"];
         match method.as_str() {
             "initialize" => {
-                self.initialized = result.is_object();
+                self.initialized = result["userAgent"]
+                    .as_str()
+                    .and_then(|identity| identity.split_once('/'))
+                    .and_then(|(_, rest)| rest.split_whitespace().next())
+                    == Some("0.167.1");
+                self.frames[index]["selected_runtime"] = json!(self.initialized);
             }
             "thread/start" | "thread/resume" => {
                 let thread = &result["thread"];
@@ -494,6 +562,17 @@ impl CodexInputObservation {
             })
             .unwrap_or("unknown");
         let mut result = json!({"kind":kind,"id":item["id"].as_str().map(Self::facts)});
+        for field in ["startedAtMs", "completedAtMs"] {
+            if let Some(value) = item.get(field) {
+                result[field] = if value.is_null() {
+                    Value::Null
+                } else {
+                    json!(value.as_i64())
+                };
+                result[format!("{field}_valid")] =
+                    json!(value.is_null() || value.as_i64().is_some());
+            }
+        }
         if kind == "agentMessage" {
             result["text"] = item["text"]
                 .as_str()
@@ -684,7 +763,7 @@ impl CodexInputObservation {
                         || payload["id"].as_str() != Some(thread.as_str())
                         || payload["session_id"].as_str() != Some(thread.as_str())
                         || payload["cwd"].as_str() != cwd.to_str()
-                        || payload["cli_version"] != "0.163.0"
+                        || payload["cli_version"] != "0.167.1"
                         || !payload["parent_thread_id"].is_null()
                         || !payload["forked_from_id"].is_null()
                         || !payload["history_base"].is_null()
@@ -933,6 +1012,67 @@ impl CodexInputObservation {
         }
     }
 
+    pub(crate) fn assert_release_initialization(&self) {
+        assert!(
+            self.initialized,
+            "exact selected native initialization is required"
+        );
+        assert!(
+            self.human_approval_unadvertised,
+            "human-only approval must remain unadvertised"
+        );
+        let initialized = self
+            .frames
+            .iter()
+            .filter(|frame| frame["method"] == "initialize")
+            .collect::<Vec<_>>();
+        assert_eq!(initialized.len(), 1);
+        assert_eq!(initialized[0]["experimental_api"], true);
+        assert_eq!(initialized[0]["forwarded"], true);
+        let responses = self
+            .frames
+            .iter()
+            .filter(|frame| frame["response_to"] == "initialize")
+            .collect::<Vec<_>>();
+        assert_eq!(responses.len(), 1);
+        assert_eq!(responses[0]["selected_runtime"], true);
+        assert_eq!(responses[0]["forwarded"], true);
+    }
+
+    pub(crate) fn assert_stdin_approvals(&self) {
+        self.assert_release_initialization();
+        assert!(
+            !self.command_approval_error,
+            "native approval identity must be valid and unique"
+        );
+        assert_eq!(
+            self.command_approvals.len(),
+            2,
+            "original command and stdin callbacks are required"
+        );
+        for kind in ["command", "writeStdin"] {
+            let approvals = self
+                .command_approvals
+                .values()
+                .filter(|approval| approval.kind == kind)
+                .collect::<Vec<_>>();
+            assert_eq!(approvals.len(), 1, "one actual {kind} callback");
+            assert_eq!(approvals[0].responses, 1, "exactly one correlated reply");
+            assert!(
+                approvals[0].accepted_once,
+                "only one-shot acceptance is valid"
+            );
+        }
+        for frame in self.frames.iter().filter(|frame| {
+            frame["command_approval"] == true || frame["command_approval_response"] == true
+        }) {
+            assert_eq!(
+                frame["forwarded"], true,
+                "approval evidence must be forwarded unchanged"
+            );
+        }
+    }
+
     pub(crate) fn assert_nonblocking_response(&self) {
         assert!(
             self.request.is_some(),
@@ -954,6 +1094,7 @@ impl CodexInputObservation {
             && self.pending_native.is_none()
             && self.requests.is_empty()
             && self.initialized
+            && self.human_approval_unadvertised
             && self.features_complete
             && [
                 "default_mode_request_user_input",

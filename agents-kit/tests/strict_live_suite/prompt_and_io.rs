@@ -1588,10 +1588,21 @@ async fn opencode_native_idle_terminal_waiter_reopens_in_one_build() {
     };
     let answer = DeliveryScenario::resolve_opencode_question(conversation, &interaction).await;
 
-    let response = tokio::time::timeout(Duration::from_secs(660), &mut prompt)
-        .await
-        .expect("post-restart OpenCode prompt must reach terminal delivery")
-        .expect("post-restart OpenCode prompt must succeed");
+    let response = std::panic::AssertUnwindSafe(async {
+        tokio::time::timeout(Duration::from_secs(660), &mut prompt)
+            .await
+            .expect("post-restart OpenCode prompt must reach terminal delivery")
+            .expect("post-restart OpenCode prompt must succeed")
+    }).catch_unwind().await;
+    let response = match response {
+        Ok(response) => response,
+        Err(failure) => {
+            let context = native.capture_failure(&session, DeliveryScenario::opencode_question_prompt(),
+                &mut primary_failure, failure).await;
+            eprintln!("post-restart question terminal failure evidence={context}");
+            std::panic::resume_unwind(primary_failure.take().expect("original terminal failure remains owned"));
+        }
+    };
     drop(prompt);
 
     let grade = native.completed(evidence, &session, &answer, response.output()).await;

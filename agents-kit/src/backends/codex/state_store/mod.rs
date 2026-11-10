@@ -3421,6 +3421,126 @@ impl<S: StateStoreBackend> CodexStateStore<S> {
         Ok(notification_id)
     }
 
+    pub(crate) async fn retire_pending_request(
+        &self,
+        thread_id: &str,
+        request_id: &serde_json::Value,
+        deadline: tokio::time::Instant,
+    ) -> Result<(), KitError> {
+        Self::require_interaction_admission(deadline)?;
+        let store = self.storage.store();
+        let continuations = tokio::time::timeout_at(deadline, Self::all_continuations(store))
+            .await
+            .map_err(|_| {
+                KitError::timeout("callback inventory deadline elapsed")
+                    .in_phase(ErrorPhase::StateRead)
+            })??;
+        Self::require_interaction_admission(deadline)?;
+        let mut matches = continuations.into_iter().filter(|(_, continuation)| {
+            continuation.agent_id() == &self.agent_id
+                && continuation.thread_id() == thread_id
+                && continuation.request_id() == request_id
+        });
+        let Some((key, expected)) = matches.next() else {
+            return Ok(());
+        };
+        if matches.next().is_some() {
+            return Err(KitError::invalid_state(
+                "server request identity is duplicated",
+            ));
+        }
+        Self::require_interaction_admission(deadline)?;
+        let mut transaction = store.begin_transaction().await.map_err(|error| {
+            Self::storage_error(
+                error,
+                "callback retirement could not begin",
+                ErrorPhase::StateWrite,
+            )
+        })?;
+        let staged = async {
+            let Some(snapshot) = transaction.load(key.clone()).await.map_err(|error| {
+                Self::storage_error(
+                    error,
+                    "continuation could not be loaded",
+                    ErrorPhase::StateRead,
+                )
+            })?
+            else {
+                return Ok(false);
+            };
+            let actual = Self::decode_continuation(snapshot, expected.conversation_id())?;
+            if !actual.has_same_request(&expected) {
+                return Err(KitError::invalid_state(
+                    "continuation changed during callback retirement",
+                ));
+            }
+            if actual.state() != CodexContinuationState::Pending {
+                return Ok(false);
+            }
+            // Resolution intent lives in the notification journal. Both records
+            // must still be pending in this transaction; disappearance is never
+            // evidence that an admitted or enqueued response was accepted.
+            if !NotificationStore::<S>::cancel_pending_interaction_in_transaction(
+                &mut transaction,
+                actual.conversation_id(),
+                actual.notification_id(),
+            )
+            .await
+            .map_err(NotificationSettlementError::into_reconciliation_sdk)?
+            {
+                return Ok(false);
+            }
+            let cancelled = actual.with_state(CodexContinuationState::Cancelled)?;
+            transaction
+                .put(storage_kit::state::record::StateRecord::new(
+                    key,
+                    serde_json::to_value(cancelled).map_err(|_| {
+                        KitError::invalid_state("continuation could not be encoded")
+                    })?,
+                ))
+                .await
+                .map_err(|error| {
+                    Self::storage_error(
+                        error,
+                        "retired continuation could not be stored",
+                        ErrorPhase::StateWrite,
+                    )
+                })?;
+            Self::require_interaction_admission(deadline)?;
+            Ok(true)
+        }
+        .await;
+        match staged {
+            Ok(true) => {
+                transaction.commit().await.map_err(|error| {
+                    Self::storage_error(
+                        error,
+                        "callback retirement could not commit",
+                        ErrorPhase::StateCommit,
+                    )
+                })?;
+                self.notifications.wake_receivers();
+                Ok(())
+            }
+            Ok(false) => transaction.rollback().await.map_err(|error| {
+                Self::storage_error(
+                    error,
+                    "callback observation could not close",
+                    ErrorPhase::Cleanup,
+                )
+            }),
+            Err(error) => Err(
+                error.with_cleanup_result(transaction.rollback().await.map_err(|cleanup| {
+                    Self::storage_error(
+                        cleanup,
+                        "callback retirement could not close",
+                        ErrorPhase::Cleanup,
+                    )
+                })),
+            ),
+        }
+    }
+
     pub(crate) async fn continuation(
         &self,
         conversation_id: &ConversationId,

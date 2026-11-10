@@ -64,6 +64,22 @@ pub(crate) enum CodexThreadItem {
     Other(CodexOtherThreadItemKind),
 }
 
+impl CodexThreadItem {
+    pub(super) fn validate_times(item: &serde_json::Map<String, Value>) -> Result<(), KitError> {
+        for field in ["startedAtMs", "completedAtMs"] {
+            if item
+                .get(field)
+                .is_some_and(|value| !value.is_null() && value.as_i64().is_none())
+            {
+                return Err(KitError::protocol(
+                    "runtime item lifecycle time is malformed",
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Deserialize)]
 pub(crate) struct CodexAgentMessage {
     text: String,
@@ -139,6 +155,7 @@ pub(crate) enum CodexConnectionProcessNotification {
         _stdout_cap_reached: bool,
         _stderr: String,
         _stderr_cap_reached: bool,
+        _output_drain_timed_out: Option<bool>,
     },
 }
 
@@ -204,6 +221,8 @@ enum CodexErrorInfo {
     UsageLimitExceeded,
     RateLimitExceeded,
     FlexUnavailable,
+    ModelNotFound,
+    PolicyCapacityUnavailable,
     MisalignmentPolicyViolation,
     TooManyDenials,
     ServerOverloaded,
@@ -251,6 +270,8 @@ impl CodexErrorInfo {
                     | "usageLimitExceeded"
                     | "rateLimitExceeded"
                     | "flexUnavailable"
+                    | "modelNotFound"
+                    | "policyCapacityUnavailable"
                     | "serverOverloaded"
                     | "cyberPolicy"
                     | "misalignmentPolicyViolation"
@@ -380,6 +401,7 @@ pub(crate) enum CodexOtherThreadItemKind {
 #[derive(Clone, Copy)]
 pub(crate) enum CodexKnownNotificationKind {
     ThreadReadStateChanged,
+    ThreadSectionChanged,
     ThreadReverted,
     ThreadQueueChanged,
     ThreadAttachmentUpdated,
@@ -466,7 +488,8 @@ pub(crate) enum CodexScope {
 impl CodexServerNotification {
     pub(crate) fn decode(method: String, params: Value) -> Result<Self, KitError> {
         match method.as_str() {
-            "thread/readState/changed"
+            "thread/section/changed"
+            | "thread/readState/changed"
             | "thread/reverted"
             | "thread/queue/changed"
             | "thread/attachment/updated"
@@ -501,14 +524,20 @@ impl CodexServerNotification {
                 CodexScope::started_turn(&params)?,
                 CodexKnownNotificationKind::TurnStarted,
             ),
-            "hook/started" => Self::known(
-                CodexScope::optional_turn(&params)?,
-                CodexKnownNotificationKind::HookStarted,
-            ),
-            "hook/completed" => Self::known(
-                CodexScope::optional_turn(&params)?,
-                CodexKnownNotificationKind::HookCompleted,
-            ),
+            "hook/started" => {
+                super::metadata::CodexHookRun::validate(&params)?;
+                Self::known(
+                    CodexScope::optional_turn(&params)?,
+                    CodexKnownNotificationKind::HookStarted,
+                )
+            }
+            "hook/completed" => {
+                super::metadata::CodexHookRun::validate(&params)?;
+                Self::known(
+                    CodexScope::optional_turn(&params)?,
+                    CodexKnownNotificationKind::HookCompleted,
+                )
+            }
             "error" => {
                 serde_json::from_value::<CodexErrorNotification>(params.clone())
                     .map_err(|_| KitError::protocol("error notification is malformed"))?;
@@ -709,6 +738,7 @@ impl CodexServerNotification {
             .get("item")
             .and_then(Value::as_object)
             .ok_or_else(|| KitError::protocol("runtime event is malformed"))?;
+        CodexThreadItem::validate_times(item)?;
         let item_type = item
             .get("type")
             .and_then(Value::as_str)
@@ -741,7 +771,10 @@ impl CodexServerNotification {
                 }
                 CodexThreadItem::CommandExecution(command)
             }
-            "userMessage" => CodexThreadItem::Other(CodexOtherThreadItemKind::UserMessage),
+            "userMessage" => {
+                super::items::CodexMediaItem::validate(item)?;
+                CodexThreadItem::Other(CodexOtherThreadItemKind::UserMessage)
+            }
             "hookPrompt" => CodexThreadItem::Other(CodexOtherThreadItemKind::HookPrompt),
             "plan" => CodexThreadItem::Other(CodexOtherThreadItemKind::Plan),
             "reasoning" => CodexThreadItem::Other(CodexOtherThreadItemKind::Reasoning),
@@ -756,7 +789,10 @@ impl CodexServerNotification {
             }
             "webSearch" => CodexThreadItem::Other(CodexOtherThreadItemKind::WebSearch),
             "imageView" => CodexThreadItem::Other(CodexOtherThreadItemKind::ImageView),
-            "imageGeneration" => CodexThreadItem::Other(CodexOtherThreadItemKind::ImageGeneration),
+            "imageGeneration" => {
+                super::items::CodexMediaItem::validate(item)?;
+                CodexThreadItem::Other(CodexOtherThreadItemKind::ImageGeneration)
+            }
             "sleep" => CodexThreadItem::Other(CodexOtherThreadItemKind::Sleep),
             "enteredReviewMode" => {
                 CodexThreadItem::Other(CodexOtherThreadItemKind::EnteredReviewMode)
@@ -925,6 +961,15 @@ impl CodexServerNotification {
             .get("stderrCapReached")
             .and_then(Value::as_bool)
             .ok_or_else(|| KitError::protocol("runtime event error bound is malformed"))?;
+        let output_drain_timed_out = params
+            .get("outputDrainTimedOut")
+            .filter(|value| !value.is_null())
+            .map(|value| {
+                value
+                    .as_bool()
+                    .ok_or_else(|| KitError::protocol("runtime event drain status is malformed"))
+            })
+            .transpose()?;
         Ok(CodexConnectionProcessNotification::Exited {
             _process_handle: process_handle,
             _exit_code: exit_code,
@@ -932,6 +977,7 @@ impl CodexServerNotification {
             _stdout_cap_reached: stdout_cap_reached,
             _stderr: stderr,
             _stderr_cap_reached: stderr_cap_reached,
+            _output_drain_timed_out: output_drain_timed_out,
         })
     }
 
@@ -1171,9 +1217,12 @@ impl CodexTurnError {
             Some(CodexErrorInfo::SessionBudgetExceeded) => (ErrorDetail::SessionLimit, None),
             Some(CodexErrorInfo::UsageLimitExceeded) => (ErrorDetail::ResourceExhausted, None),
             Some(CodexErrorInfo::RateLimitExceeded) => (ErrorDetail::RateLimited, None),
-            Some(CodexErrorInfo::FlexUnavailable | CodexErrorInfo::ServerOverloaded) => {
-                (ErrorDetail::ServiceUnavailable, None)
-            }
+            Some(CodexErrorInfo::ModelNotFound) => (ErrorDetail::ResourceMissing, None),
+            Some(
+                CodexErrorInfo::FlexUnavailable
+                | CodexErrorInfo::ServerOverloaded
+                | CodexErrorInfo::PolicyCapacityUnavailable,
+            ) => (ErrorDetail::ServiceUnavailable, None),
             Some(
                 CodexErrorInfo::CyberPolicy
                 | CodexErrorInfo::MisalignmentPolicyViolation

@@ -4,6 +4,167 @@ use std::collections::BTreeMap;
 
 use crate::KitError;
 
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub(super) enum CodexMediaItem {
+    UserMessage {
+        id: String,
+        #[serde(rename = "clientId")]
+        _client_id: Option<String>,
+        #[serde(rename = "content")]
+        _content: Vec<CodexUserInput>,
+    },
+    ImageGeneration {
+        id: String,
+        #[serde(rename = "status")]
+        _status: String,
+        #[serde(rename = "revisedPrompt")]
+        _revised_prompt: Option<String>,
+        #[serde(flatten)]
+        _image: CodexGeneratedImage,
+        #[serde(rename = "transparentBackground")]
+        _transparent_background: Option<bool>,
+        #[serde(rename = "failure")]
+        _failure: Option<CodexImageFailure>,
+        #[serde(rename = "savedPath")]
+        saved_path: Option<std::path::PathBuf>,
+        #[serde(rename = "inputImages", default)]
+        input_images: Vec<CodexImageInput>,
+        #[serde(rename = "generationId")]
+        _generation_id: Option<String>,
+    },
+}
+
+impl CodexMediaItem {
+    pub(super) fn validate(item: &serde_json::Map<String, Value>) -> Result<(), KitError> {
+        let decoded: Self = serde_json::from_value(Value::Object(item.clone()))
+            .map_err(|_| KitError::protocol("native media item is malformed"))?;
+        let id = match &decoded {
+            Self::UserMessage { id, .. } | Self::ImageGeneration { id, .. } => id,
+        };
+        if id.is_empty() || id.trim() != id {
+            return Err(KitError::protocol(
+                "native media item identity is malformed",
+            ));
+        }
+        if let Self::ImageGeneration {
+            saved_path,
+            input_images,
+            ..
+        } = decoded
+            && (saved_path.is_some_and(|path| !path.is_absolute())
+                || input_images.iter().any(|input| !input.path.is_absolute()))
+        {
+            return Err(KitError::protocol("native image path is malformed"));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+pub(super) enum CodexGeneratedImage {
+    // Native migration records may carry both fileId and an empty result.
+    File {
+        #[serde(rename = "fileId")]
+        _file_id: String,
+    },
+    Inline {
+        #[serde(rename = "result")]
+        _result: String,
+    },
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub(super) enum CodexImageFailure {
+    UsageLimitExceeded {
+        #[serde(rename = "limitId")]
+        _limit_id: String,
+        #[serde(rename = "resetsAt")]
+        _resets_at: Option<i64>,
+    },
+}
+
+#[derive(Deserialize)]
+pub(super) struct CodexImageInput {
+    path: std::path::PathBuf,
+    #[serde(rename = "sha256")]
+    _sha256: String,
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub(super) enum CodexUserInput {
+    Text {
+        #[serde(rename = "text")]
+        _text: String,
+        #[serde(rename = "text_elements", default)]
+        _text_elements: Vec<CodexTextElement>,
+    },
+    Image {
+        #[serde(flatten)]
+        _image: CodexInputReference,
+        #[serde(rename = "detail")]
+        _detail: Option<CodexImageDetail>,
+    },
+    LocalImage {
+        #[serde(rename = "path")]
+        _path: std::path::PathBuf,
+        #[serde(rename = "detail")]
+        _detail: Option<CodexImageDetail>,
+    },
+    Audio {
+        #[serde(flatten)]
+        _audio: CodexInputReference,
+    },
+    LocalAudio {
+        #[serde(rename = "path")]
+        _path: std::path::PathBuf,
+    },
+    Skill {
+        #[serde(rename = "name")]
+        _name: String,
+        #[serde(rename = "path")]
+        _path: std::path::PathBuf,
+    },
+    Mention {
+        #[serde(rename = "name")]
+        _name: String,
+        #[serde(rename = "path")]
+        _path: String,
+    },
+}
+
+#[derive(Deserialize)]
+pub(super) struct CodexTextElement {
+    #[serde(rename = "byteRange")]
+    _byte_range: CodexTextRange,
+    #[serde(rename = "placeholder")]
+    _placeholder: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub(super) struct CodexTextRange {
+    #[serde(rename = "start")]
+    _start: usize,
+    #[serde(rename = "end")]
+    _end: usize,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+pub(super) enum CodexInputReference {
+    Inline {
+        #[serde(rename = "url")]
+        _url: String,
+    },
+    File {
+        #[serde(rename = "fileId")]
+        _file_id: String,
+    },
+}
+
 // Selected non-assistant items share the same decoder for live events and history.
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]

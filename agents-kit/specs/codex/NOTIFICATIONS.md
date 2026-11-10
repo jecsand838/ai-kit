@@ -62,13 +62,19 @@ Prompt-returned failure is not duplicated as an Error notification. Typed
 asynchronous warning/error facts unrelated to a prompt result may map to the
 portable kinds when the selected semantics are complete. Selected
 thread-scoped `item/started` and `item/completed` facts carrying
-`ThreadItem::CommandExecution`, with verified conversation ownership, map to
+`ThreadItemPayload::CommandExecution`, with verified conversation ownership, map to
 portable `Process` transitions without native process ids or
 command/environment leakage. The separate connection-scoped `process/spawn`,
 `process/outputDelta`, and `process/exited` family is keyed only by a caller
 process handle and cannot independently acquire a Conversation owner. Progress may
 coalesce only before durable publication; essential message, file, warning,
 error, terminal, and interaction facts are never silently dropped.
+
+Known media, hook and process-drain payload fields receive typed validation even
+when their disposition is private. Valid observed user-message audio does not
+become Unsupported merely because it has no portable notification. Hook paths,
+attachment references and drain status remain opaque native metadata. Malformed
+known fields fail Protocol at their consumed live/history boundaries.
 
 ## Runtime-Only Facts
 
@@ -205,3 +211,13 @@ Interrupted terminal errors remain Cancelled with the normalized Integration
 cause, preserving the same operation, phase, safe detail and redaction as
 recovered history. Prompt failure is not duplicated as a notification; terminal
 publication still follows durable settlement and cleanup.
+
+`thread/section/changed` is typed private thread metadata with a required nullable
+string `sectionId`. Repeated owned or verified-descendant changes neither publish
+notifications nor acknowledge delivery, mutate workspace revisions, or complete
+a prompt. Foreign sections cannot acquire the active conversation.
+
+Flat item-level `startedAtMs`/`completedAtMs` accept omission, null, or signed
+64-bit integers in live and recovered items. Malformed values are Protocol.
+Notification-envelope lifecycle times remain independently required; item times
+are private and cannot reorder completed output or establish terminal authority.

@@ -4,7 +4,7 @@ use std::{borrow::Cow, sync::Arc};
 
 #[cfg(feature = "mcp-server")]
 use rmcp::ErrorData as McpError;
-use rmcp::model::{CallToolResult, Content, RawContent, Tool};
+use rmcp::model::{CallToolResult, ContentBlock, Tool};
 use serde_json::Map;
 
 use crate::{
@@ -129,7 +129,7 @@ impl McpProtocol {
         if content.is_empty()
             && let Some(value) = &structured_content
         {
-            content.push(Content::text(value.to_string()));
+            content.push(ContentBlock::text(value.to_string()));
         }
         let mut mapped = if result.is_error {
             CallToolResult::error(content)
@@ -171,25 +171,24 @@ impl McpProtocol {
         })
     }
 
-    fn tool_content_from_mcp(content: Content) -> Result<ToolContent, ToolError> {
-        let annotations = content.annotations;
-        match content.raw {
-            RawContent::Text(text) => Ok(ToolContent::Text {
-                metadata: Self::content_metadata(text.meta, annotations),
+    fn tool_content_from_mcp(content: ContentBlock) -> Result<ToolContent, ToolError> {
+        match content {
+            ContentBlock::Text(text) => Ok(ToolContent::Text {
+                metadata: Self::content_metadata(text.meta, text.annotations),
                 text: text.text,
             }),
-            RawContent::Image(image) => Ok(ToolContent::Image {
-                metadata: Self::content_metadata(image.meta, annotations),
+            ContentBlock::Image(image) => Ok(ToolContent::Image {
+                metadata: Self::content_metadata(image.meta, image.annotations),
                 mime_type: image.mime_type,
                 data_base64: image.data,
             }),
-            RawContent::Audio(audio) => Ok(ToolContent::Audio {
-                metadata: Self::content_metadata(None, annotations),
+            ContentBlock::Audio(audio) => Ok(ToolContent::Audio {
+                metadata: Self::content_metadata(audio.meta, audio.annotations),
                 mime_type: audio.mime_type,
                 data_base64: audio.data,
             }),
-            RawContent::Resource(resource) => {
-                let metadata = Self::content_metadata(resource.meta.clone(), annotations);
+            ContentBlock::Resource(resource) => {
+                let metadata = Self::content_metadata(resource.meta, resource.annotations);
                 let value = serde_json::to_value(resource.resource).map_err(|error| {
                     ToolError::Protocol {
                         message: format!("failed to serialize MCP embedded resource: {error}"),
@@ -205,17 +204,20 @@ impl McpProtocol {
                     metadata: metadata.unwrap_or(serde_json::Value::Null),
                 })
             }
-            RawContent::ResourceLink(resource) => Ok(ToolContent::ResourceLink {
+            ContentBlock::ResourceLink(resource) => Ok(ToolContent::ResourceLink {
                 uri: resource.uri,
                 title: Some(resource.name),
-                metadata: Self::content_metadata(resource.meta, annotations)
+                metadata: Self::content_metadata(resource.meta, resource.annotations)
                     .unwrap_or(serde_json::Value::Null),
+            }),
+            _ => Err(ToolError::Unsupported {
+                operation: "unrecognized MCP tool content".to_owned(),
             }),
         }
     }
 
     fn content_metadata(
-        meta: Option<rmcp::model::Meta>,
+        meta: Option<rmcp::model::MetaObject>,
         annotations: Option<rmcp::model::Annotations>,
     ) -> Option<serde_json::Value> {
         let mut object = Map::new();
@@ -259,7 +261,7 @@ impl McpProtocol {
             .collect()
     }
 
-    fn meta_to_metadata(meta: rmcp::model::Meta) -> BTreeMap<String, serde_json::Value> {
+    fn meta_to_metadata(meta: rmcp::model::MetaObject) -> BTreeMap<String, serde_json::Value> {
         match serde_json::to_value(meta) {
             Ok(serde_json::Value::Object(object)) => object.into_iter().collect(),
             _ => BTreeMap::new(),
@@ -290,60 +292,50 @@ impl McpProtocol {
     }
 
     #[cfg(feature = "mcp-server")]
-    fn tool_content_to_mcp(content: ToolContent) -> Result<Content, ToolError> {
+    fn tool_content_to_mcp(content: ToolContent) -> Result<ContentBlock, ToolError> {
         use rmcp::model::{
-            RawAudioContent, RawEmbeddedResource, RawImageContent, RawResource, RawTextContent,
-            ResourceContents,
+            AudioContent, EmbeddedResource, ImageContent, Resource, ResourceContents, TextContent,
         };
 
         match content {
-            ToolContent::Text { text, metadata } => Ok(Content::new(
-                RawContent::Text(RawTextContent {
-                    text,
-                    meta: metadata.and_then(Self::metadata_value_to_meta),
-                }),
-                None,
-            )),
-            ToolContent::Json { value, metadata } => Ok(Content::new(
-                RawContent::Text(RawTextContent {
-                    text: value.to_string(),
-                    meta: metadata.and_then(Self::metadata_value_to_meta),
-                }),
-                None,
-            )),
+            ToolContent::Text { text, metadata } => {
+                let mut mapped = TextContent::new(text);
+                mapped.meta = metadata.and_then(Self::metadata_value_to_meta);
+                Ok(ContentBlock::Text(mapped))
+            }
+            ToolContent::Json { value, metadata } => {
+                let mut mapped = TextContent::new(value.to_string());
+                mapped.meta = metadata.and_then(Self::metadata_value_to_meta);
+                Ok(ContentBlock::Text(mapped))
+            }
             ToolContent::Image {
                 mime_type,
                 data_base64,
                 metadata,
-            } => Ok(Content::new(
-                RawContent::Image(RawImageContent {
-                    data: data_base64,
-                    mime_type,
-                    meta: metadata.and_then(Self::metadata_value_to_meta),
-                }),
-                None,
-            )),
+            } => {
+                let mut mapped = ImageContent::new(data_base64, mime_type);
+                mapped.meta = metadata.and_then(Self::metadata_value_to_meta);
+                Ok(ContentBlock::Image(mapped))
+            }
             ToolContent::Audio {
                 mime_type,
                 data_base64,
-                ..
-            } => Ok(Content::new(
-                RawContent::Audio(RawAudioContent {
-                    data: data_base64,
-                    mime_type,
-                }),
-                None,
-            )),
+                metadata,
+            } => {
+                let mut mapped = AudioContent::new(data_base64, mime_type);
+                mapped.meta = metadata.and_then(Self::metadata_value_to_meta);
+                Ok(ContentBlock::Audio(mapped))
+            }
             ToolContent::ResourceLink {
                 uri,
                 title,
                 metadata,
             } => {
                 let name = title.clone().unwrap_or_else(|| uri.clone());
-                let mut resource = RawResource::new(uri, name);
+                let mut resource = Resource::new(uri, name);
                 resource.title = title;
                 resource.meta = Self::metadata_value_to_meta(metadata);
-                Ok(Content::new(RawContent::ResourceLink(resource), None))
+                Ok(ContentBlock::ResourceLink(resource))
             }
             ToolContent::EmbeddedResource {
                 uri,
@@ -358,34 +350,30 @@ impl McpProtocol {
                             ),
                         }
                     })?;
-                Ok(Content::new(
-                    RawContent::Resource(RawEmbeddedResource {
-                        meta: Self::metadata_value_to_meta(metadata).or_else(|| {
-                            Some(rmcp::model::Meta(Map::from_iter([(
-                                "uri".to_owned(),
-                                serde_json::Value::String(uri),
-                            )])))
-                        }),
-                        resource,
-                    }),
-                    None,
-                ))
+                let mut mapped = EmbeddedResource::new(resource);
+                mapped.meta = Self::metadata_value_to_meta(metadata).or_else(|| {
+                    Some(rmcp::model::MetaObject(Map::from_iter([(
+                        "uri".to_owned(),
+                        serde_json::Value::String(uri),
+                    )])))
+                });
+                Ok(ContentBlock::Resource(mapped))
             }
         }
     }
 
     #[cfg(feature = "mcp-server")]
-    fn metadata_to_meta(metadata: &BTreeMap<String, serde_json::Value>) -> rmcp::model::Meta {
-        rmcp::model::Meta(metadata.clone().into_iter().collect())
+    fn metadata_to_meta(metadata: &BTreeMap<String, serde_json::Value>) -> rmcp::model::MetaObject {
+        rmcp::model::MetaObject(metadata.clone().into_iter().collect())
     }
 
     #[cfg(feature = "mcp-server")]
-    fn metadata_value_to_meta(value: serde_json::Value) -> Option<rmcp::model::Meta> {
+    fn metadata_value_to_meta(value: serde_json::Value) -> Option<rmcp::model::MetaObject> {
         match value {
             serde_json::Value::Object(object) if object.is_empty() => None,
-            serde_json::Value::Object(object) => Some(rmcp::model::Meta(object)),
+            serde_json::Value::Object(object) => Some(rmcp::model::MetaObject(object)),
             serde_json::Value::Null => None,
-            other => Some(rmcp::model::Meta(Map::from_iter([(
+            other => Some(rmcp::model::MetaObject(Map::from_iter([(
                 "value".to_owned(),
                 other,
             )]))),

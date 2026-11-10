@@ -1,13 +1,12 @@
-use std::{path::PathBuf, sync::Arc};
+use std::{borrow::Cow, path::PathBuf, sync::Arc};
 
 use rmcp::{
     ErrorData as McpError, RoleServer, ServerHandler,
-    model::AnnotateAble,
     model::{
-        CallToolRequestMethod, CallToolRequestParams, CallToolResult, CancelledNotificationParam,
-        CreateElicitationRequestParams, ElicitationSchema, Icon, JsonObject, ListToolsResult, Meta,
-        RawContent, RawResource, RawTextContent, ServerCapabilities, ServerInfo, TaskSupport, Tool,
-        ToolAnnotations, ToolExecution,
+        Annotations, CallToolRequestMethod, CallToolRequestParams, CallToolResponse,
+        CallToolResult, CancelledNotificationParam, ContentBlock, ElicitRequestParams,
+        ElicitationSchema, Icon, JsonObject, ListToolsResult, MetaObject, ProtocolVersion,
+        Resource, ServerCapabilities, ServerConfig, TextContent, Tool, ToolAnnotations,
     },
     service::{NotificationContext, RequestContext},
 };
@@ -68,9 +67,14 @@ impl RepoManagedMcpServer {
 }
 
 impl ServerHandler for RepoManagedMcpServer {
-    fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+    fn get_info(&self) -> ServerConfig {
+        ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
+            .with_protocol_version(ProtocolVersion::V_2025_11_25)
             .with_instructions("Repo-managed MCP server for tools-kit validation.")
+    }
+
+    fn supported_protocol_versions(&self) -> Cow<'static, [ProtocolVersion]> {
+        Cow::Borrowed(ProtocolVersion::known_up_to(&ProtocolVersion::V_2025_11_25))
     }
 
     async fn list_tools(
@@ -92,8 +96,8 @@ impl ServerHandler for RepoManagedMcpServer {
         &self,
         request: CallToolRequestParams,
         context: RequestContext<RoleServer>,
-    ) -> Result<CallToolResult, McpError> {
-        match request.name.as_ref() {
+    ) -> Result<CallToolResponse, McpError> {
+        let result = match request.name.as_ref() {
             "echo" => {
                 let EchoArgs { message } = parse_arguments(request.arguments)?;
                 Ok(CallToolResult::structured(json!({ "echoed": message })))
@@ -106,16 +110,15 @@ impl ServerHandler for RepoManagedMcpServer {
                     .and_then(Value::as_bool)
                     == Some(true)
                 {
-                    Ok(CallToolResult::success(vec![rmcp::model::Content::text(
-                        "done",
-                    )]))
+                    Ok(CallToolResult::success(vec![ContentBlock::text("done")]))
                 } else {
                     Ok(CallToolResult::structured(json!({ "valid": "no" })))
                 }
             }
             "metadata_echo" => {
                 let EchoArgs { message } = parse_arguments(request.arguments)?;
-                let client_info = context.peer.peer_info().map(|info| &info.client_info);
+                let peer_info = context.peer.peer_info();
+                let client_info = peer_info.as_ref().map(|info| &info.client_info);
                 Ok(
                     CallToolResult::structured(json!({ "echoed": message })).with_meta(Some(
                         meta_object(&[
@@ -135,28 +138,24 @@ impl ServerHandler for RepoManagedMcpServer {
                 result.is_error = None;
                 Ok(result)
             }
-            "content_metadata" => Ok(CallToolResult::success(vec![
-                RawContent::Text(RawTextContent {
-                    text: "content metadata".to_owned(),
-                    meta: Some(meta_object(&[("content_trace", json!("mcp-content"))])),
-                })
-                .with_priority(0.75),
-            ])),
-            "resource_link" => Ok(CallToolResult::success(vec![
-                RawContent::resource_link(
-                    RawResource::new("file:///tools-kit/resource.md", "resource-guide")
-                        .with_title("Resource Guide")
-                        .with_description("A repo-managed resource link.")
-                        .with_mime_type("text/markdown")
-                        .with_size(123)
-                        .with_icons(vec![
-                            Icon::new("https://example.com/tools-kit-resource.png")
-                                .with_mime_type("image/png"),
-                        ])
-                        .with_meta(meta_object(&[("resource_trace", json!("mcp-resource"))])),
-                )
-                .with_priority(0.5),
-            ])),
+            "content_metadata" => Ok(CallToolResult::success(vec![ContentBlock::Text(
+                TextContent::new("content metadata")
+                    .with_meta(meta_object(&[("content_trace", json!("mcp-content"))]))
+                    .with_annotations(Annotations::default().with_priority(0.75)),
+            )])),
+            "resource_link" => Ok(CallToolResult::success(vec![ContentBlock::resource_link(
+                Resource::new("file:///tools-kit/resource.md", "resource-guide")
+                    .with_title("Resource Guide")
+                    .with_description("A repo-managed resource link.")
+                    .with_mime_type("text/markdown")
+                    .with_size(123)
+                    .with_icons(vec![
+                        Icon::new("https://example.com/tools-kit-resource.png")
+                            .with_mime_type("image/png"),
+                    ])
+                    .with_meta(meta_object(&[("resource_trace", json!("mcp-resource"))]))
+                    .with_annotations(Annotations::default().with_priority(0.5)),
+            )])),
             "form_elicitation" => {
                 let schema = ElicitationSchema::builder()
                     .required_string("choice")
@@ -165,7 +164,7 @@ impl ServerHandler for RepoManagedMcpServer {
                     .map_err(|error| McpError::invalid_params(error.to_owned(), None))?;
                 let result = context
                     .peer
-                    .create_elicitation(CreateElicitationRequestParams::FormElicitationParams {
+                    .create_elicitation(ElicitRequestParams::FormElicitationParams {
                         meta: None,
                         message: "Choose a form option".to_owned(),
                         requested_schema: schema,
@@ -184,7 +183,7 @@ impl ServerHandler for RepoManagedMcpServer {
                     .map_err(|error| McpError::invalid_params(error.to_owned(), None))?;
                 let _result = context
                     .peer
-                    .create_elicitation(CreateElicitationRequestParams::FormElicitationParams {
+                    .create_elicitation(ElicitRequestParams::FormElicitationParams {
                         meta: None,
                         message: "Hold until cancellation".to_owned(),
                         requested_schema: schema,
@@ -205,7 +204,8 @@ impl ServerHandler for RepoManagedMcpServer {
                 Ok(CallToolResult::structured(json!({ "tool": name })))
             }
             _ => Err(McpError::method_not_found::<CallToolRequestMethod>()),
-        }
+        };
+        result.map(CallToolResponse::Complete)
     }
 
     async fn on_cancelled(
@@ -215,7 +215,10 @@ impl ServerHandler for RepoManagedMcpServer {
     ) {
         if let Some(path) = &self._state.cancel_marker {
             let reason = notification.reason.unwrap_or_default();
-            let contents = format!("request_id={}\nreason={reason}\n", notification.request_id);
+            let contents = match notification.request_id {
+                Some(request_id) => format!("request_id={request_id}\nreason={reason}\n"),
+                None => format!("cancel_missing_request_identity\nreason={reason}\n"),
+            };
             let _ = std::fs::write(path, contents);
         }
     }
@@ -273,7 +276,6 @@ fn echo_tool() -> Tool {
             .idempotent(true)
             .open_world(false),
     )
-    .with_execution(ToolExecution::new().with_task_support(TaskSupport::Optional))
     .with_icons(vec![
         Icon::new("https://example.com/tools-kit.png").with_mime_type("image/png"),
     ])
@@ -457,12 +459,13 @@ fn schema_object(value: Value) -> Arc<Map<String, Value>> {
     Arc::new(serde_json::from_value(value).expect("tool schemas must be JSON objects"))
 }
 
-fn meta_object(entries: &[(&str, Value)]) -> Meta {
-    let mut meta = Meta::new();
-    for (key, value) in entries {
-        meta.insert((*key).to_owned(), value.clone());
-    }
-    meta
+fn meta_object(entries: &[(&str, Value)]) -> MetaObject {
+    MetaObject(
+        entries
+            .iter()
+            .map(|(key, value)| ((*key).to_owned(), value.clone()))
+            .collect(),
+    )
 }
 
 #[derive(Deserialize)]

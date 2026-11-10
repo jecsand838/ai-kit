@@ -131,18 +131,12 @@ impl SessionManager for Sessions {
         id: &SessionId,
         message: ClientJsonRpcMessage,
     ) -> Result<ServerJsonRpcMessage, Self::Error> {
-        // Native LocalSessionManager keeps a map read lock while awaiting the
-        // handshake response. Clone the public native handle under the lock,
-        // then release it before awaiting, so removal can wake initial receives.
-        let handle = self
-            .native
-            .sessions
-            .read()
+        // The selected native manager clones its session handle and releases
+        // the map guard before awaiting initialization, allowing close to wake it.
+        self.native
+            .initialize_session(id, message)
             .await
-            .get(id)
-            .cloned()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "MCP session not found"))?;
-        handle.initialize(message).await.map_err(io::Error::other)
+            .map_err(io::Error::other)
     }
 
     async fn has_session(&self, id: &SessionId) -> Result<bool, Self::Error> {

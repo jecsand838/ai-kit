@@ -63,6 +63,27 @@ Function and interactive behavior are variants of one registration owner.
 connection initialization, inventory, native-name mapping, form interaction
 correlation, remote call cancellation, and client cleanup.
 
+The exact `rmcp 3.9.0` dependency keeps the initialize lifecycle private. The
+client offers `2025-11-25` and validates the selected revision against the four
+retained initialize revisions before loading inventory. Unsupported selections
+close and join the accepted client service through the existing failed-build
+cleanup owner. The server advertises the same revision ceiling; the SDK's newer
+stateless lifecycle and optional capabilities do not become Kit behavior.
+
+The existing private HTTP policy rejects discovery and inline lifecycle selection
+before native routing. Complete per-request metadata can select the SDK's stateless
+path even with a retained revision and session ID, so revision negotiation alone
+is insufficient. POST inspection uses the same native 4 MiB request-body cap and
+forwards accepted original bytes unchanged. Partial, custom and progress metadata
+retain native validation. Inspection creates no task; the existing HTTP request
+future remains responsible for its bounded body and graceful-close observation.
+
+Native JSON HTTP responses have fixed bounds: 16 MiB for successful JSON and
+64 KiB for error bodies. Declared oversize is rejected before body consumption;
+chunked bodies are bounded while reading. A failed response never resends a
+tool call. Private `ContentBlock`/`MetaObject` conversion preserves portable
+content and metadata, including audio metadata, without exposing native types.
+
 No builder/config/source wrapper layer sits above these two constructors.
 
 ## Independent MCP Server
@@ -96,8 +117,8 @@ The private native session adapter reserves a bounded settlement slot before
 creating a worker. Its separate 64-session capacity does not consume callback
 slots. A unique transport transfers into that retained slot on close or Drop;
 the slot removes and closes the native session handle before awaiting the exact
-WorkerTransport close/join. Initialization releases the native map guard before
-awaiting its response. Losing a request, initialization or shutdown observer
+WorkerTransport close/join. The selected native initializer releases its map
+guard before awaiting its response. Losing a request, initialization or shutdown observer
 cannot drop an admitted native join future.
 
 Serving drops the completed HTTP endpoint future, joins native settlement and

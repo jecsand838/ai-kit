@@ -28,6 +28,36 @@ use tools_kit::{
 
 const IO_TIMEOUT: Duration = Duration::from_secs(3);
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum InlineLifecycle {
+    Inventory,
+    MinimalInventory,
+    InitializedInventory,
+    Discovery,
+}
+
+impl InlineLifecycle {
+    async fn check(self) {
+        let case = StartupCase::start()
+            .await
+            .expect("inline lifecycle control starts");
+        let observed = case.reject_inline_lifecycle(self).await;
+        // Observe usability and finish all owners even when the unsupported
+        // lifecycle returned a successful native response on the red path.
+        let usable = case.raw_session_closed().await;
+        let cleanup = case.finish().await;
+        assert!(
+            observed.is_ok(),
+            "{self:?}: {observed:?}; usable={usable:?}; cleanup={cleanup:?}"
+        );
+        assert!(
+            usable.is_ok(),
+            "{self:?} fresh session={usable:?}; cleanup={cleanup:?}"
+        );
+        assert!(cleanup.is_empty(), "{self:?} cleanup={cleanup:?}");
+    }
+}
+
 struct StartupCase {
     address: SocketAddr,
     tools: Arc<Toolset>,
@@ -113,6 +143,111 @@ impl StartupCase {
             .ok_or("missing initialize response")?;
         drop(wire);
         Ok(reply)
+    }
+
+    async fn protocol_revision_boundary(&self) -> Result<(), String> {
+        let initialize = json!({
+            "jsonrpc":"2.0", "id":1, "method":"initialize", "params": {
+                "protocolVersion":"2026-07-28", "capabilities":{},
+                "clientInfo":{"name":"revision-ceiling-control", "version":"1"}
+            }
+        })
+        .to_string();
+        let mut wire = HttpWire::post(self.address, initialize.len(), false).await?;
+        wire.write(&initialize).await?;
+        let reply = wire
+            .response()
+            .await?
+            .ok_or("missing initialize negotiation")?;
+        reply.validate_initialize()?;
+        drop(wire);
+
+        let modern = json!({"jsonrpc":"2.0", "id":2, "method":"tools/list", "params":{
+            "_meta":{
+                "io.modelcontextprotocol/protocolVersion":"2026-07-28",
+                "io.modelcontextprotocol/clientCapabilities":{},
+                "io.modelcontextprotocol/clientInfo":{"name":"unoffered-lifecycle-control", "version":"1"}
+            }
+        }}).to_string();
+        let mut wire = HttpWire::modern_post(self.address, &modern).await?;
+        let reply = wire
+            .response()
+            .await?
+            .ok_or("missing modern request rejection")?;
+        if !(400..500).contains(&reply.status) {
+            let payload = reply.rpc_message(2)?;
+            if !payload["error"].is_object() || payload.get("result").is_some() {
+                return Err(format!(
+                    "unoffered stateless lifecycle dispatched inventory: {payload:?}"
+                ));
+            }
+        }
+        drop(wire);
+        // The old revision remains usable after rejecting unoffered behavior.
+        self.rejected_then_fresh_session("{").await
+    }
+
+    async fn reject_inline_lifecycle(&self, mode: InlineLifecycle) -> Result<(), String> {
+        let method = if mode == InlineLifecycle::Discovery {
+            "server/discover"
+        } else {
+            "tools/list"
+        };
+        let mut metadata = json!({
+            "io.modelcontextprotocol/protocolVersion":"2025-11-25",
+            "io.modelcontextprotocol/clientCapabilities":{}
+        });
+        if mode != InlineLifecycle::MinimalInventory {
+            metadata["io.modelcontextprotocol/clientInfo"] =
+                json!({"name":"inline-lifecycle-control", "version":"1"});
+        }
+        let body = json!({"jsonrpc":"2.0", "id":25, "method":method,
+            "params":{"_meta":metadata}})
+        .to_string();
+        let session = if mode == InlineLifecycle::InitializedInventory {
+            let session = self.raw_session_initialized().await?;
+            self.raw_session_ready(&session).await?;
+            Some(session)
+        } else {
+            None
+        };
+        let mut wire =
+            HttpWire::inline_post(self.address, method, session.as_deref(), &body).await?;
+        let reply = wire
+            .response()
+            .await?
+            .ok_or("missing inline lifecycle response")?;
+        drop(wire);
+        if !(400..500).contains(&reply.status) {
+            let payload = reply.rpc_message(25)?;
+            if !payload["error"].is_object() || payload.get("result").is_some() {
+                return Err(format!(
+                    "unsupported inline lifecycle returned success: {payload:?}"
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    async fn session_metadata(&self, metadata: Value) -> Result<(), String> {
+        let session = self.raw_session_initialized().await?;
+        self.raw_session_ready(&session).await?;
+        let body = json!({"jsonrpc":"2.0", "id":26, "method":"tools/list",
+            "params":{"_meta":metadata}})
+        .to_string();
+        let mut wire = HttpWire::session_post(self.address, &session, &body).await?;
+        let reply = wire
+            .response()
+            .await?
+            .ok_or("missing ordinary metadata response")?;
+        drop(wire);
+        let result = reply.rpc_result(26)?;
+        if result["tools"] != json!([]) {
+            return Err(format!(
+                "ordinary session metadata changed inventory: {result:?}"
+            ));
+        }
+        Ok(())
     }
 
     async fn raw_session_initialized(&self) -> Result<String, String> {
@@ -549,6 +684,50 @@ impl HttpWire {
         })
     }
 
+    async fn inline_post(
+        address: SocketAddr,
+        method: &str,
+        session: Option<&str>,
+        body: &str,
+    ) -> Result<Self, String> {
+        let mut stream = timeout(IO_TIMEOUT, TcpStream::connect(address))
+            .await
+            .map_err(|error| error.to_string())?
+            .map_err(|error| error.to_string())?;
+        let session = session.map_or_else(String::new, |session| {
+            format!("MCP-Session-Id: {session}\r\n")
+        });
+        let request = format!(
+            "POST /mcp HTTP/1.1\r\nHost: {address}\r\nMCP-Protocol-Version: 2025-11-25\r\nMcp-Method: {method}\r\n{session}Accept: application/json, text/event-stream\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        timeout(IO_TIMEOUT, stream.write_all(request.as_bytes()))
+            .await
+            .map_err(|error| error.to_string())?
+            .map_err(|error| error.to_string())?;
+        Ok(Self {
+            stream: BufReader::new(stream),
+        })
+    }
+
+    async fn modern_post(address: SocketAddr, body: &str) -> Result<Self, String> {
+        let mut stream = timeout(IO_TIMEOUT, TcpStream::connect(address))
+            .await
+            .map_err(|error| error.to_string())?
+            .map_err(|error| error.to_string())?;
+        let request = format!(
+            "POST /mcp HTTP/1.1\r\nHost: {address}\r\nMCP-Protocol-Version: 2026-07-28\r\nMcp-Method: tools/list\r\nAccept: application/json, text/event-stream\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        timeout(IO_TIMEOUT, stream.write_all(request.as_bytes()))
+            .await
+            .map_err(|error| error.to_string())?
+            .map_err(|error| error.to_string())?;
+        Ok(Self {
+            stream: BufReader::new(stream),
+        })
+    }
+
     async fn delete(address: SocketAddr, session: &str) -> Result<Self, String> {
         let mut stream = timeout(IO_TIMEOUT, TcpStream::connect(address))
             .await
@@ -695,6 +874,16 @@ impl HttpReply {
     }
 
     fn rpc_result(&self, id: u64) -> Result<Value, String> {
+        let payload = self.rpc_message(id)?;
+        if payload.get("error").is_none()
+            && let Some(result) = payload.get("result")
+        {
+            return Ok(result.clone());
+        }
+        Err(format!("no JSON-RPC result for request {id}: {payload:?}"))
+    }
+
+    fn rpc_message(&self, id: u64) -> Result<Value, String> {
         let body = self.decoded_body()?;
         let text = std::str::from_utf8(&body).map_err(|error| error.to_string())?;
         let json = self.headers.get("content-type").is_some_and(|value| {
@@ -714,9 +903,7 @@ impl HttpReply {
             .into_iter()
             .find_map(|payload| {
                 let value = serde_json::from_str::<Value>(payload).ok()?;
-                (value["jsonrpc"] == "2.0" && value["id"] == id && value.get("error").is_none())
-                    .then(|| value.get("result").cloned())
-                    .flatten()
+                (value["jsonrpc"] == "2.0" && value["id"] == id).then_some(value)
             })
             .ok_or_else(|| format!("no JSON-RPC result for request {id}: {text:?}"))
     }
@@ -759,6 +946,18 @@ impl HttpReply {
 }
 
 #[tokio::test]
+async fn server_protocol_revision_retains_initialize_without_stateless_expansion() {
+    let case = StartupCase::start().await.expect("revision control starts");
+    let observed = case.protocol_revision_boundary().await;
+    let cleanup = case.finish().await;
+    assert!(
+        observed.is_ok(),
+        "protocol revision: {observed:?}; cleanup={cleanup:?}"
+    );
+    assert!(cleanup.is_empty(), "cleanup={cleanup:?}");
+}
+
+#[tokio::test]
 async fn admitted_initialize_cannot_escape_server_shutdown() {
     let mut case = StartupCase::start().await.expect("startup control starts");
     let observed = case.initialize_during_seal().await;
@@ -792,6 +991,61 @@ async fn wrong_first_method_rejection_preserves_fresh_session() {
     assert!(
         observed.is_ok(),
         "wrong initial method: {observed:?}; cleanup={cleanup:?}"
+    );
+    assert!(cleanup.is_empty(), "cleanup={cleanup:?}");
+}
+
+#[tokio::test]
+async fn inline_metadata_cannot_bypass_initialized_session_owner() {
+    InlineLifecycle::Inventory.check().await;
+}
+
+#[tokio::test]
+async fn minimal_inline_metadata_cannot_bypass_initialized_session_owner() {
+    InlineLifecycle::MinimalInventory.check().await;
+}
+
+#[tokio::test]
+async fn inline_metadata_cannot_override_existing_session_owner() {
+    InlineLifecycle::InitializedInventory.check().await;
+}
+
+#[tokio::test]
+async fn discovery_cannot_bypass_initialized_session_owner() {
+    InlineLifecycle::Discovery.check().await;
+}
+
+#[tokio::test]
+async fn ordinary_metadata_preserves_initialized_session_inventory() {
+    let case = StartupCase::start()
+        .await
+        .expect("legacy metadata control starts");
+    let observed = case
+        .session_metadata(json!({"progressToken":"legacy-progress", "trace":"legacy-metadata"}))
+        .await;
+    let cleanup = case.finish().await;
+    assert!(
+        observed.is_ok(),
+        "legacy metadata: {observed:?}; cleanup={cleanup:?}"
+    );
+    assert!(cleanup.is_empty(), "cleanup={cleanup:?}");
+}
+
+#[tokio::test]
+async fn partial_metadata_preserves_initialized_session_inventory() {
+    let case = StartupCase::start()
+        .await
+        .expect("partial metadata control starts");
+    let observed = case
+        .session_metadata(json!({
+            "progressToken":"legacy-progress", "trace":"legacy-metadata",
+            "io.modelcontextprotocol/protocolVersion":"2025-11-25"
+        }))
+        .await;
+    let cleanup = case.finish().await;
+    assert!(
+        observed.is_ok(),
+        "partial metadata: {observed:?}; cleanup={cleanup:?}"
     );
     assert!(cleanup.is_empty(), "cleanup={cleanup:?}");
 }

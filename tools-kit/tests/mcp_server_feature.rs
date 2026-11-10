@@ -30,7 +30,7 @@ use tokio::net::TcpListener;
 use tools_kit::{
     ToolError, ToolHandlerBackend, Toolset, ToolsetBackend,
     declaration::{ToolInfo, ToolName},
-    execution::{ToolHandlerInput, ToolHandlerOutput, ToolInvocation, ToolResult},
+    execution::{ToolContent, ToolHandlerInput, ToolHandlerOutput, ToolInvocation, ToolResult},
     interaction::{
         ToolInteractionId, ToolInteractionKind, ToolInteractionRequest, ToolInteractionResponse,
     },
@@ -50,6 +50,48 @@ struct EchoArgs {
 #[derive(Serialize, schemars::JsonSchema)]
 struct EchoOutput {
     echoed: String,
+}
+
+#[tokio::test]
+async fn served_audio_content_preserves_portable_metadata() {
+    let source = Arc::new(
+        Toolset::local(vec![ToolRegistration::function(
+            ToolInfo::new(
+                ToolName::new("audio").expect("valid audio name"),
+                JsonSchema::strict(json!({"type":"object", "additionalProperties":false})),
+            ),
+            |_invocation| async {
+                ToolResult::new(vec![ToolContent::Audio {
+                    mime_type: "audio/wav".to_owned(),
+                    data_base64: "YXVkaW8=".to_owned(),
+                    metadata: Some(json!({"trace":"served-audio", "priority":0.5})),
+                }])
+            },
+        )])
+        .expect("audio source"),
+    );
+    let bind = free_loopback_addr().await;
+    let server = McpServer::start(Arc::clone(&source), server_config(bind))
+        .await
+        .expect("audio server");
+    let downstream = downstream_toolset(bind, false).await;
+    let observed =
+        support::invoke_tool(&downstream, "served__audio", Some("audio-call"), json!({})).await;
+    let client_closed = downstream.shutdown().await;
+    let server_closed = server.shutdown().await;
+    let source_closed = source.shutdown().await;
+    let result = observed.expect("served audio result");
+    assert_eq!(
+        result.content,
+        vec![ToolContent::Audio {
+            mime_type: "audio/wav".to_owned(),
+            data_base64: "YXVkaW8=".to_owned(),
+            metadata: Some(json!({"trace":"served-audio", "priority":0.5})),
+        }]
+    );
+    client_closed.expect("audio client cleanup");
+    server_closed.expect("audio server cleanup");
+    source_closed.expect("audio source cleanup");
 }
 
 #[tokio::test]

@@ -1,5 +1,7 @@
 #![cfg(feature = "mcp-server")]
 
+mod http_response_limits;
+
 pub mod support;
 
 use serde_json::json;

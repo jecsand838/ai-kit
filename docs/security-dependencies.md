@@ -36,6 +36,39 @@ target-specific dependencies, so a finding does not by itself prove execution in
 a particular native build. Conversely, a passing build does not prove an
 advisory unreachable.
 
+### Selected rmcp remediation — 2026-11-09
+
+A fresh campaign audit at RustSec commit
+`d9cb059f3217db87aeccd190b81eaffe8cc29cb9` found
+[RUSTSEC-2026-0462](https://rustsec.org/advisories/RUSTSEC-2026-0462.html)
+in `rmcp 1.5.0`. Tools enables the affected Streamable HTTP client. The failed
+raw and qualified scans remain under
+`target/vendor-campaign-agents-codex-20261109/security-preliminary-01/`.
+No exception was added for this finding.
+
+The separately authorized remediation selects exact `rmcp 3.9.0`, with existing
+direct features and disabled defaults preserved. Required native dependencies
+change from `process-wrap 9.1.0` to `10.0.1` and `sse-stream 0.2.2` to `0.2.6`;
+all other package versions remain locked. The selected SDK bounds successful
+HTTP JSON bodies to 16 MiB and error bodies to 64 KiB, including streamed
+responses without a declared length. Private adaptation preserves the existing
+initialize-based protocol revisions through 2025-11-25 rather than exposing the
+new stateless lifecycle.
+
+The resolved graph's fresh two-scan receipt is
+`target/vendor-campaign-agents-codex-20261109/security-tools-resolution-02/report.json`.
+It reports **PASS_WITH_EXCEPTIONS**: the raw scan contains only the existing
+RSA and crypto-bigint findings, and the qualified scan has no blocking findings.
+This is dependency-graph evidence. The subsequent
+`tools-red-04-sdk-lifecycle-and-compatibility/` run passes all 15 HTTP cases,
+including bounded rejection before EOF and no resend. Its server target passes
+58 cases and exposes four stateless-admission regressions. The independently
+reviewed repair subsequently passes all 63 server cases and all 15 HTTP cases in
+`tools-green-05-http-server-lifecycle/`, including the four repaired failures and
+a partial-metadata control. Complete Tools validation, downstream Agent/App
+compatibility, and final-source audits are still required before the selected
+campaign is qualified.
+
 ### Compatible Zstd remediation — 2026-11-08
 
 The Storage vendor campaign updates `zstd 0.13.3` to `0.13.4` and

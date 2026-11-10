@@ -150,3 +150,28 @@ The separate session-capacity case initializes 64 actual sessions, rejects
 excess admission, deletes one selected session, then proves slot reuse and peer
 usability. Every observed session identity is retained for independent cleanup.
 These protocol fixtures remain deterministic evidence, not strict-live results.
+
+The independent HTTP response-limit cases send finite cap-plus-one bodies and
+withhold EOF. They require positive delivery before observing rejection, retain
+the pre-cleanup observation even when a join fails, and join both peer and client
+owners within bounded cleanup. Cases cover declared oversize, streamed initialize
+and tools/call JSON, streamed HTTP error bodies, below-limit success and exact
+JSON-RPC rejection. The call case requires one invocation without resend.
+
+Independent wire controls assert the exact `2025-11-25` client offer, all four
+retained negotiated revisions, and unsupported selection rejection before
+inventory. The server ceiling case proves wire rejection of the newer stateless
+request and subsequent session usability; it does not instrument lower inventory
+callbacks. Content controls retain all five native variants, result metadata,
+structured output and annotations, with separate inbound and served-audio metadata
+coverage. Existing raw `2025-11-25` session, cancellation, capacity and cleanup
+cases remain required against the selected SDK.
+
+Separate lifecycle regressions send complete and minimal inline metadata naming
+`2025-11-25`, with and without an initialized session, and a discovery request.
+They require rejection and a fresh usable session, retaining cleanup before
+asserting any primary failure. Ordinary progress/custom metadata and partial
+protocol metadata are positive controls. The HTTP policy shares the native
+4 MiB request-body cap and forwards original bytes. Header validation still
+belongs to the native transport; these tests do not claim an exact rejection
+timing for malformed Accept or Content-Type headers after body inspection.

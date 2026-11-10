@@ -9,7 +9,7 @@ use std::{
 
 use rmcp::{
     ServiceExt,
-    model::{CallToolRequestParams, ClientRequest, Content, Request, ServerResult},
+    model::{CallToolRequestParams, ClientRequest, ContentBlock, Request, ServerResult},
     service::{PeerRequestOptions, RequestHandle, RoleClient, RunningService, ServiceError},
     transport::{
         StreamableHttpClientTransport, streamable_http_client::StreamableHttpClientTransportConfig,
@@ -221,7 +221,7 @@ impl CapacityCase {
 
     fn completed(id: usize, result: &ServerResult) -> bool {
         matches!(result, ServerResult::CallToolResult(result)
-            if result.is_error != Some(true) && result.content == vec![Content::text(format!("done:{id}"))])
+            if result.is_error != Some(true) && result.content == vec![ContentBlock::text(format!("done:{id}"))])
     }
 
     async fn drain(&mut self) -> Vec<String> {

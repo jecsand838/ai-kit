@@ -361,6 +361,92 @@ fixture, and documentation diffs.
 independent of this defect. This repair promotes required regression coverage
 and does not claim native Codex/OpenCode or full strict-live qualification.
 
+## MOCK-TOOL-001 — unbounded native HTTP response buffering
+
+**Affected crate/status:** Tools MCP HTTP client through rmcp 1.5.0;
+RUSTSEC-2026-0462 remediation and qualification are in progress.
+
+The independent finite-body fixtures in
+[http_response_limits/mod.rs](../tools-kit/tests/http_response_limits/mod.rs)
+exercise declared oversized initialization, streamed initialization and tool
+responses, and the smaller non-success response limit. Each withholds EOF,
+positively observes the bounded payload delivery, counts native operations,
+and joins the client and peer. On the old dependency,
+`tools-red-01-response-limits/` records one passing control and four failures:
+three directly wait for withheld EOF rather than rejecting the oversized body;
+the streamed tool-response case also requires an abort fallback during bounded
+cleanup, which masks its earlier rejection assertion and is retained separately.
+It is not claimed as a clean assertion-only red. The corrected fixture now
+reports early completion before cleanup assertions.
+
+Select the published fixed SDK instead of adding an exception or a parallel
+transport. Existing success, correlated JSON-RPC rejection, no-resend, shared
+shutdown, and session-worker ownership controls remain required. Source and
+command receipts live beneath
+`target/vendor-campaign-agents-codex-20261109/`; fresh dependency security proof
+alone does not establish behavioral completion. On the independently reviewed
+repair, `tools-green-05-http-server-lifecycle/` passes all 15 HTTP cases,
+including all four oversized-response cases. Complete crate and live gates
+remain required.
+
+## MOCK-TOOL-002 — unsupported selected protocol proceeds to inventory
+
+**Affected crate/status:** Tools MCP client; reproduced before the SDK update.
+`tools-baseline-02-protocol/` records that a peer selecting 2026-07-28 after the
+client offered 2025-11-25 still receives `tools/list`, and construction succeeds.
+The independent raw-peer regression
+`client_protocol_revision_rejects_new_lifecycle_before_inventory` requires
+rejection and joined native cleanup before inventory or tool execution.
+The four retained revision negotiations and existing server's revision ceiling
+pass in that same baseline and remain compatibility controls.
+
+The selected update keeps private client/server revision boundaries through
+2025-11-25. New stateless discovery, execution, and capability families are not
+implicitly enabled by adopting the security fix. The selected-revision rejection
+and all four retained-version controls pass in
+`tools-green-05-http-server-lifecycle/`; complete validation remains required.
+
+## MOCK-TOOL-003 — audio content metadata is discarded
+
+**Affected crate/status:** Tools native content adaptation with rmcp 1.5.0;
+selected-source repair and qualification are in progress.
+`tools-baseline-03-content/` records that audio annotations survive but the
+native audio `_meta` entry is dropped. The exact comparison in
+`audio_content_metadata_is_preserved_with_annotations` fails; all five existing
+content variants, their previously supported metadata, and output-schema
+rejection controls pass. The new SDK represents this metadata explicitly;
+retain it through the existing portable Audio metadata field without adding a
+public content type. Inbound proof does not by itself establish outbound
+roundtrip preservation; the served-audio regression is also required. Both
+directions pass in `tools-green-05-http-server-lifecycle/` on the reviewed repair.
+
+## MOCK-TOOL-004 — SDK upgrade admits an unowned stateless lifecycle
+
+**Affected crate/status:** Candidate rmcp 3.9.0 adaptation; regression found
+during independent review before the upgrade's acceptance. This is not claimed
+as a defect in the previous selected SDK.
+
+The selected SDK treats complete inline client metadata as stateless routing
+even when it names retained protocol revision 2025-11-25. Its discovery route
+also bypasses initialization. A version ceiling alone therefore fails to
+preserve the supplied server's existing session and worker ownership.
+`tools-red-04-sdk-lifecycle-and-compatibility/` records four genuine failures:
+full and minimal inline metadata return inventory without initialization,
+inline metadata overrides an initialized session, and sessionless discovery
+returns success. The tests use raw HTTP, retain fresh-session usability and
+joined cleanup, and preserve an ordinary request-metadata success control.
+
+The repair belongs in the existing private HTTP admission policy, before native
+routing can allocate stateless work. It must preserve bounded request bodies,
+ordinary initialized requests, native session ownership, and shutdown. The
+enabled regressions live in
+[server_startup_regressions/mod.rs](../tools-kit/tests/server_startup_regressions/mod.rs).
+All 58 other server cases and all 15 HTTP client cases passed in that red run.
+The independently reviewed repair passes all 63 server cases, including an
+additional partial-metadata control, and all 15 HTTP cases in
+`tools-green-05-http-server-lifecycle/`. Complete crate and live gates remain
+required; the original four failures remain retained.
+
 ## MOCK-APP-001 — a conflicting read observation permanently fails shutdown
 
 **Affected crate/status:** App; independently reproduced and repaired in the

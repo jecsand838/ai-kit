@@ -13,8 +13,8 @@ use std::{
 use rmcp::{
     ClientHandler, ServiceExt,
     model::{
-        CallToolRequestParams, ClientCapabilities, ClientInfo, ClientRequest,
-        CreateElicitationRequestParams, CreateElicitationResult, ElicitationAction,
+        CallToolRequestParams, ClientCapabilities, ClientConfig, ClientRequest,
+        ElicitRequestParams, ElicitResult, ElicitationAction, ProtocolVersion,
     },
     service::{PeerRequestOptions, RequestContext, RoleClient},
     transport::{
@@ -354,17 +354,17 @@ struct GatedClient {
 }
 
 impl ClientHandler for GatedClient {
-    fn get_info(&self) -> ClientInfo {
-        let mut info = ClientInfo::default();
+    fn get_info(&self) -> ClientConfig {
+        let mut info = ClientConfig::default().with_protocol_version(ProtocolVersion::V_2025_11_25);
         info.capabilities = ClientCapabilities::builder().enable_elicitation().build();
         info
     }
 
     async fn create_elicitation(
         &self,
-        _request: CreateElicitationRequestParams,
+        _request: ElicitRequestParams,
         context: RequestContext<RoleClient>,
-    ) -> Result<CreateElicitationResult, rmcp::ErrorData> {
+    ) -> Result<ElicitResult, rmcp::ErrorData> {
         self.observation
             .state
             .send_replace(InvocationState::Eliciting);
@@ -373,11 +373,9 @@ impl ClientHandler for GatedClient {
             _ = self.observation.elicitation_release.notified() => ElicitationAction::Accept,
         };
         self.observation.elicitation_settled.send_replace(true);
-        Ok(CreateElicitationResult {
-            action,
-            content: self.response.content(),
-            meta: None,
-        })
+        let mut result = ElicitResult::new(action);
+        result.content = self.response.content();
+        Ok(result)
     }
 }
 
@@ -589,7 +587,7 @@ impl FormResponse {
                     matches!(&result,
                         Some(Ok(rmcp::model::ServerResult::CallToolResult(output)))
                             if output.is_error != Some(true)
-                                && output.content == vec![rmcp::model::Content::text("confirmed")]),
+                                && output.content == vec![rmcp::model::ContentBlock::text("confirmed")]),
                     "valid accepted response did not complete; {diagnostic}"
                 );
             }
@@ -768,7 +766,7 @@ impl ServerOwnership {
                     timeout(Duration::from_secs(5), request.await_response()).await,
                     Ok(Ok(rmcp::model::ServerResult::CallToolResult(result)))
                         if result.is_error != Some(true)
-                            && result.content == vec![rmcp::model::Content::text("probe")]
+                            && result.content == vec![rmcp::model::ContentBlock::text("probe")]
                 );
                 shutdown_ok = matches!(
                     timeout(Duration::from_secs(10), server.take().unwrap().shutdown()).await,
@@ -906,7 +904,7 @@ impl ServerOwnership {
                 )
                 .await,
                 Ok(Ok(result)) if result.is_error != Some(true)
-                    && result.content == vec![rmcp::model::Content::text("probe")]
+                    && result.content == vec![rmcp::model::ContentBlock::text("probe")]
             );
         }
         let existing_session_closed = if matches!(
@@ -1772,7 +1770,10 @@ impl DeclarationBoundary {
             Self::ModelVisibleError => {
                 let output = result.expect("model-visible error exemption");
                 assert_eq!(output.is_error, Some(true));
-                assert_eq!(output.content, vec![rmcp::model::Content::text("failed")]);
+                assert_eq!(
+                    output.content,
+                    vec![rmcp::model::ContentBlock::text("failed")]
+                );
             }
             _ => {
                 let expected = if matches!(self, Self::InvalidInput | Self::UnknownTool) {

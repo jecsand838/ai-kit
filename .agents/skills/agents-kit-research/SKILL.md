@@ -83,13 +83,31 @@ or strict-live assumptions.
     independent Agent parameters. No Provider,
     Model, Session, Toolset, Database,
     credential, callback, or live continuation is durable.
-11. Feed confirmed behavior into explicit structs, private exhaustive enums,
+11. Ground Codex/Custom bounded prompt progress in
+    [`specs/NOTIFICATIONS.md`](../../../agents-kit/specs/NOTIFICATIONS.md) and
+    the owning backend notification specs. Preparing requires validated durable
+    Kit admission; Tool requires the first fully validated nonempty Custom call
+    batch or a supported live Codex trigger for the exact root thread and
+    accepted native turn. Distinguish those milestones from native acceptance,
+    current activity, tool completion, and prompt success. Never infer missing
+    attribution from early, descendant, completed-only, historical, or recovered
+    observations, or backfill a milestone during recovery. Preserve at most two
+    immutable facts per original live prompt, finite unread backlog, publication
+    before the next effect, one lifecycle deadline capped by the original prompt
+    deadline when present, owned commit settlement through cancellation or
+    caller loss, and cancellation/deadline checks before another effect. Custom
+    cancellation must keep polling the execution so an exclusive writer can
+    settle. A publication failure cannot disappear behind native success or
+    authorize effect replay.
+    No timer, producer task, public configuration, kind, persistence version, or
+    OpenCode mapping change follows from these facts.
+12. Feed confirmed behavior into explicit structs, private exhaustive enums,
     typed spec data, receiver methods, and the owning public-or-private trait
     contracts. Agent, Workspace, and Conversation traits use associated child
     types. Caller hierarchies remain direct or caller-owned exhaustive enums;
     supplied dispatchers stay closed over Codex, OpenCode, and Custom. Reject
     erasure, generated dispatch/routes, macro protocol abstraction, and shims.
-12. After context compaction, resume, or long implementation phases, reload the
+13. After context compaction, resume, or long implementation phases, reload the
     active workflow's complete owning process and artifacts before making
     protocol claims. In the development workflow, reread
     `agents-kit/.codex/development/PROCESS.md`, the complete generated plan,

@@ -64,8 +64,11 @@ provide current backend or validation coverage.
   services nor provide a shared 60-second readiness gate. The verifier performs
   readiness checks after startup. Each HTTP endpoint permits 60 attempts with
   a 2-second connection limit, 10-second transfer limit and 1-second failure
-  delay: about 660 seconds for a persistently stalled endpoint, plus scheduling
-  overhead. This does not bound Compose commands or the whole verifier. The
+  delay. Owned readiness and version-inspection commands have a 15-second
+  execution deadline; Compose startup and cleanup each have a 120-second
+  execution deadline. Every owned command has a 30-second graceful process-group
+  cleanup bound before termination is required and reported as failure. These
+  per-command bounds do not establish a whole-verifier deadline. The
   [testing guide](../../../../storage-kit/docs/testing.md#strict-live) owns
   readiness and orchestration details.
 - Selected strict-live lanes use explicit compatible features; the default

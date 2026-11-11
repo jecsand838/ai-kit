@@ -28,9 +28,21 @@ continues to reuse returned messages.
 use providers_kit::{ModelBackend, ModelId, Provider, ProviderBackend};
 
 let provider = Provider::from_config(config)?;
-let model = provider.model(ModelId::new("exact-provider-model-id")?)?;
-let response = model.generate(&request).await?;
+let work = async {
+    let model = provider.model(ModelId::new("exact-provider-model-id")?)?;
+    model.generate(&request).await
+}.await;
+let shutdown = provider.shutdown().await;
+let response = match (work, shutdown) {
+    (Ok(response), Ok(())) => Ok(response),
+    (Err(primary), Err(cleanup)) => Err(primary.with_supplementary(cleanup)),
+    (Err(error), Ok(())) | (Ok(_), Err(error)) => Err(error),
+}?;
 ```
+
+The canonical [generation Rustdoc source](https://github.com/jecsand838/ai-kit/blob/main/providers-kit/src/lib.rs) includes complete setup
+and service prerequisites. Settle shutdown before propagating an operation
+failure, preserving any cleanup failure alongside the primary error.
 
 The three public backend traits are also the caller implementation system.
 `ProviderBackend` returns its own associated `Model: ModelBackend`. That model
@@ -54,22 +66,33 @@ Choose the profile explicitly, borrow the two halves, submit typed commands and
 observe correlated events, then release both halves before consuming close:
 
 ```rust,ignore
-use providers_kit::{ModelBackend, SessionBackend};
+use providers_kit::{KitError, ModelBackend, SessionBackend};
 use providers_kit::session::{
     SessionCommands, SessionConfig, SessionEvents, SessionProfile,
 };
 
 let config = SessionConfig::new(SessionProfile::Conversation);
 let mut session = model.open_session(config).await?;
-{
+let work = async {
     let (mut commands, mut events) = session.split();
     let accepted = commands.submit(command).await?;
     // Drive events while submitting subsequent commands through the other half.
     // Match correlated response/control outcomes; None means permanent drain.
     let event = events.recv().await;
-}
-session.close().await?;
+    Ok::<_, KitError>((accepted, event))
+}.await;
+let close = session.close().await;
+let (accepted, event) = match (work, close) {
+    (Ok(observed), Ok(())) => Ok(observed),
+    (Err(primary), Err(cleanup)) => Err(primary.with_supplementary(cleanup)),
+    (Err(error), Ok(())) | (Ok(_), Err(error)) => Err(error),
+}?;
 ```
+
+This excerpt shows the borrowed-half and consuming-close transitions. The
+canonical [Session Rustdoc source](https://github.com/jecsand838/ai-kit/blob/main/providers-kit/src/session.rs) observes a correlated response
+under a deadline and settles both Session close and the caller-owned Provider
+shutdown, including failure paths.
 
 Submission acceptance is local ownership, not remote acknowledgement. Realtime
 uses the same command/event boundary with `SessionProfile::Realtime`; unsupported

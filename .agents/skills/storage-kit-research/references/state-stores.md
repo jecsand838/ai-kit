@@ -250,7 +250,7 @@ State-store research output must include:
 
 ## Integrated Lance dependency boundary
 
-The approved vendor refresh targets LanceDB 0.41.0 and the exact
+The selected native family is LanceDB 0.41.0 and the exact
 Lance/lance-io/lance-table 14.0.2 family for both Database and StateStore, retaining
 ObjectStore 0.14.2 and the compatible Arrow 58 family. Bind source research to the
 resolved registry checksums; prerelease tags are not selected. Keep defaults
@@ -261,8 +261,9 @@ configuration or the `aws`, `gcs`, `azure` and `oss` features. Verify filesystem
 paths stay local before native URI dispatch. Preserve StateStore schema 1,
 file format 2.0 and disabled stable row IDs. Only the direct Lance 14 StateStore
 is in scope; do not add an older-engine implementation, cross-version harness
-or support promise. The target requires fresh native-source and behavioral
-qualification; prior Lance 13 receipts retain their original scope.
+or support promise. Qualification requires native-source and behavioral evidence
+for the selected source and invocation; prior Lance 13 receipts retain their
+original scope.
 Current-engine cold reopen, exact revisions/tombstones, namespace isolation and
 retained-reference cleanup require executable proof. Use the current supported
 native CommitHandler, ObjectStore and cleanup APIs: the local/memory resolver's
@@ -272,10 +273,14 @@ finalization; the existing StateStore owner retains completion and reconciliatio
 authority. The positive-timeout versus disabled-timeout native control establishes
 that cancellation policy, not a reproduction of the default 1,800-second expiry.
 Caller admission, scenario and cleanup deadlines remain unchanged. Native cleanup
-retains reference/manifest authority, and
-the StateStore's owned-file boundary must protect unknown payloads. Native 13
-already scanned all data with `delete_unverified`, leaving transaction/deletion
-listings to the timestamp-independent orphan supplement. Revalidate that native
-behavior and every retained-reference/layout assumption against Lance 14 before
-changing the supplement. Readable manifests alone do not prove safe mutation
-or maintenance.
+retains reference/manifest authority. Validate all retained references before
+reclamation; unsupported overlays, foreign bases, and new file layouts fail
+closed. Refresh surviving references after full GC, retain exclusive snapshot
+protection through owned joining, and delete only supported unreferenced files
+through the existing durable owner. Do not infer general preservation of foreign
+files inside the reserved native table directories. Native 13 already scanned
+all data with `delete_unverified`, leaving transaction/deletion listings to the
+timestamp-independent orphan supplement. Revalidate that native behavior and
+every retained-reference/layout assumption against the selected Lance 14 source
+before changing the supplement. Readable manifests alone do not prove safe
+mutation or maintenance.

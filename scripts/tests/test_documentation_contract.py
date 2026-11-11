@@ -88,6 +88,7 @@ class DocumentationContractTests(unittest.TestCase):
             expected.update((root / "docs").rglob("*.md"))
             expected.update((root / "specs").rglob("*.md"))
         expected.add(self.workspace / "providers-kit/CONTRIBUTING.md")
+        expected.add(self.workspace / "storage-kit/vendor/vendors.toml")
         expected.update((self.workspace / ".agents/skills").glob("*/SKILL.md"))
         expected.update((self.workspace / ".agents/skills").glob("*/references/*.md"))
         expected.update((self.workspace / ".agents/skills").glob("*/agents/openai.yaml"))
@@ -374,6 +375,30 @@ class DocumentationContractTests(unittest.TestCase):
             if f"`{name[1]}`" not in catalog:
                 missing.append(name[1])
         self.assertEqual(missing, [], "current skills missing from SKILLS.md")
+
+    def test_reusable_vendor_prompt_inventory_excludes_archives(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = Path(temporary)
+            manifest = Path("storage-kit/vendor/vendors.toml")
+            (workspace / manifest).parent.mkdir(parents=True)
+            (workspace / manifest).write_text("[vendors]\n", encoding="utf-8")
+            neighbors = [Path("storage-kit/vendor/source.zip"), Path("storage-kit/vendor/history.md")]
+            for neighbor in neighbors:
+                (workspace / neighbor).write_text("historical artifact\n", encoding="utf-8")
+            ledger = {
+                "canonical_owners": {},
+                "document_sets": {"active": [str(manifest)], "excluded": ["**/vendor/**"]},
+            }
+            with patch.object(self, "workspace", workspace), patch.object(self, "ledger", ledger):
+                self.assertEqual(self.active_paths(), {workspace / manifest})
+                self.assertNotIn(str(manifest), self.missing_current_documents())
+                for neighbor in neighbors:
+                    self.assertNotIn(str(neighbor), self.missing_current_documents())
+                without_manifest = {**ledger, "document_sets": {"excluded": ["**/vendor/**"]}}
+                with patch.object(self, "ledger", without_manifest):
+                    self.assertIn(str(manifest), self.missing_current_documents())
+                    for neighbor in neighbors:
+                        self.assertNotIn(str(neighbor), self.missing_current_documents())
 
     def agent_skill_failures(self) -> list[str]:
         failures = []

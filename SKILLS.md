@@ -60,8 +60,8 @@ invocation.
   and scoped expansion.
 - `refresh-workspace-agentic-documentation`: root/crate docs, skill/agent
   guidance and metadata, ledger, and docs-contract refresh.
-- `refresh-workspace-rustdocs`: focused canonical workflow rustdoc and
-  doctest refresh.
+- `refresh-workspace-rustdocs`: coordinated workspace public Rustdoc and
+  canonical-workflow doctest refresh; use `rust-public-api-docs` for focused work.
 - `vendor-refresh-campaign` / `vendor-release-update`: pinned vendor source
   maintenance.
 

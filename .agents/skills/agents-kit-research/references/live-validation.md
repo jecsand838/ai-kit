@@ -46,8 +46,11 @@ bash agents-kit/scripts/precheck_strict_live.sh
 bash agents-kit/scripts/verify_strict_live.sh
 ```
 
-Documentation-only work runs the non-live gates specified in
-`agents-kit/AGENTS.md` and does not claim runtime proof.
+Documentation-only work follows the non-live scope and gates selected by its
+active workflow. [`agents-kit/AGENTS.md`](../../../../agents-kit/AGENTS.md) sets
+crate rules; [`docs/STRICT_TESTING.md`](../../../../agents-kit/docs/STRICT_TESTING.md)
+owns the crate's proof lanes. These references do not activate the separate
+development workflow or establish runtime qualification.
 
 ## Protocol Proof Rules
 

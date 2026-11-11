@@ -119,9 +119,13 @@ process-recovery assertions remain required.
 The [documentation tests](../tests/docs_examples.rs) check required guide and
 executable navigation, ordinary local file links and parsing of the complete
 JSON workflow corpus. Behavioral cases execute the documented linear State
-workflow, numeric loop, timer, join, child, map and synchronous Pipeline against real in-memory LanceDB
-storage and assert their explained results. These checks do not prove Markdown anchor
-validity, prose accuracy, example compilation or real-service journeys.
+workflow, numeric loop, timer, join, child, map and synchronous Pipeline against
+real in-memory LanceDB storage and assert their explained results. The case
+`documented_halts_and_step_limits_preserve_session_and_wave_boundaries` also
+checks fresh and resumed session halt behavior, counting of committed activations,
+and a complete parallel wave exceeding the caller's step limit. These checks
+do not prove Markdown anchor validity, prose accuracy, example compilation or
+real-service journeys.
 Compile the examples with `cargo check --locked -p app-kit --examples`, and run the short
 service-free executables to verify their assertions; `multi_agent` needs the
 configured real services described in its source. The long performance consumer

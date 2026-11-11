@@ -22,7 +22,12 @@ outputs, retries, source identities, or successful cleanup.
 
 Once an invocation is accepted, tool-authored success or failure is a
 Completed ToolResult. `is_error` distinguishes model-visible failure. Outer
-ToolError means the handler could not carry out a valid invocation step.
+ToolError reports input/output validation, state, protocol, transport,
+cancellation, timeout, unsupported behavior, or lifecycle failure.
+`ToolError::InvalidOutput` may follow completed execution, so an outer error
+does not prove that no side effects occurred. Completed model-visible errors
+remain exempt from output-schema validation. The
+[portable execution contract](PORTABLE_API.md#execution) owns the exact boundary.
 
 Interaction requests remain source-neutral and resume the same unique Handler.
 Form validation is explicit. URL elicitation remains unsupported unless a

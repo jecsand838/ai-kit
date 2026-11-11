@@ -126,9 +126,13 @@ MCP content maps native metadata and annotations into the existing portable
 content metadata, including audio. Serving serializes portable content metadata
 as native metadata; it does not infer new executable behavior from those values.
 
-Outer ToolError represents rejected input/state transitions, protocol or
-transport failure, cancellation, timeout, unsupported behavior, or closed
-runtime. A completed model-visible error is not duplicated inside ToolError.
+Outer ToolError represents input/output validation failures, invalid state
+transitions, protocol or transport failure, cancellation, timeout, unsupported
+behavior, or closed runtime. `ToolError::InvalidOutput` can follow execution
+when the completed result violates its declared output schema; an outer error
+does not establish that no side effects occurred. A completed model-visible
+error is not duplicated inside ToolError and remains exempt from output-schema
+validation.
 When serving over MCP, only `Completed(ToolResult)` becomes a successful
 `tools/call` response (including `isError = true`); outer ToolError values map
 to MCP errors, with caller/request-shape failures using invalid params.

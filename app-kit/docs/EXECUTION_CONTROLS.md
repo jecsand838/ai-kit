@@ -70,11 +70,12 @@ selectors before effects; tags expand to matching nodes, and duplicates retain
 their first occurrence. Selector order does not override canonical sibling
 selection.
 
-Both lanes execute the first action of the **current execution session** before
-testing halts against prior position. A selector naming the entry node therefore
-does not turn a fresh session into a zero-step pause. After reopen or explicit
-resume, an old committed action does not count as this session's first commit.
-Partial output and no-output EOF also do not enable halt checks.
+Both lanes execute the first action of the **current execution session**, or
+the complete first wave for parallel work, before testing halts against prior
+position. A selector naming the entry node therefore does not turn a fresh
+session into a zero-step pause. After reopen or explicit resume, an old
+committed action does not count as this session's first commit. Partial output
+and no-output EOF also do not enable halt checks.
 
 The method that commits a boundary selects its halt precedence:
 
@@ -107,10 +108,12 @@ failed and suppressed work is not a successful halt candidate. These BSP rules
 are App extensions of the serial rurr contract.
 
 `max_steps` counts successfully committed named activations in the current
-execution. The limit is checked after the complete wave commits, so a parallel
-wave can carry the count past that limit; it is never split to meet the count.
-Partials and control checkpoints do not count. The App's finite runtime bounds
-still apply when this optional caller limit is absent.
+execution session, with each sibling counted separately. The limit is checked
+after the complete wave commits, so a parallel wave can carry the count past
+that limit; it is never split to meet the count. Historical commits do not
+consume the new session's count. Partials and control checkpoints do not count.
+The App's finite runtime bounds still apply when this optional caller limit is
+absent.
 
 ## Resume a caller control
 

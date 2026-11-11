@@ -1,7 +1,7 @@
 # Workspace dependency security
 
-All Kit dependencies now resolve from crates.io without local source patches.
-The vendor refresh selects LanceDB 0.41.0 and Lance 14.0.2. Its compatible
+All Kit dependencies resolve from crates.io without local source patches.
+Storage selects LanceDB 0.41.0 and Lance 14.0.2. Its compatible
 Zstd backports remove 13 advisory exceptions, as recorded below; every later
 resolved graph requires a fresh two-scan audit before qualification. The approved
 SurrealDB security migration selects exact client/Core 4.0.0. Its scoped qualification
@@ -14,8 +14,10 @@ lockfile with `--locked`.
 ## Temporary accepted advisories
 
 The current policy retains exactly two exceptions: `RUSTSEC-2023-0071` for
-`rsa 0.9.10` and `RUSTSEC-2026-0387` for `crypto-bigint 0.5.5`. The current
-scan still reports both vulnerabilities and remains **`PASS_WITH_EXCEPTIONS`**.
+`rsa 0.9.10` and `RUSTSEC-2026-0387` for `crypto-bigint 0.5.5`. The
+recorded Storage campaign scan reports both vulnerabilities and is
+**`PASS_WITH_EXCEPTIONS`**. This is dated evidence for its recorded graph,
+not a fresh audit of each subsequent checkout.
 RustSec lists `rsa >=0.10.0` as patched, but locked `jsonwebtoken 10.4.0`
 requires `rsa ^0.9.6`. The fixed `crypto-bigint >=0.7.6` does not satisfy
 the locked JWT chain's `elliptic-curve` requirement `^0.5`. The final raw
@@ -65,9 +67,19 @@ including bounded rejection before EOF and no resend. Its server target passes
 58 cases and exposes four stateless-admission regressions. The independently
 reviewed repair subsequently passes all 63 server cases and all 15 HTTP cases in
 `tools-green-05-http-server-lifecycle/`, including the four repaired failures and
-a partial-metadata control. Complete Tools validation, downstream Agent/App
-compatibility, and final-source audits are still required before the selected
-campaign is qualified.
+a partial-metadata control. These intermediate runs alone did not complete
+Tools validation, downstream Agent/App compatibility, or final-source audits.
+
+The subsequent selected campaign completed at `ed4e34b`. Its retained
+`target/vendor-campaign-agents-codex-20261109/final-campaign-state-01/receipt.json`
+records selected Codex/Custom qualification, App routine consumer evidence,
+and the separately authorized Tools remediation. It records all 29 Agent
+native scenarios and final-source **PASS_WITH_EXCEPTIONS** with only the two
+IDs above. App routine coverage retains the ten workflow and one worker
+capacity exclusions in its owning strict guide. Earlier failed runs remain
+failed historical evidence. This source-qualified result neither establishes
+full workspace release qualification nor substitutes for a new audit or gate
+required by a later change.
 
 ### Compatible Zstd remediation — 2026-11-08
 

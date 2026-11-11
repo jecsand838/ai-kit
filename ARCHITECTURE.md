@@ -213,8 +213,9 @@ idempotent, exactly once across clones, and seals future listing/handler
 admission.
 
 Accepted model-visible execution failures are completed error results. Outer
-errors describe invalid input/state, transport, protocol, cancellation, or
-lifecycle failure.
+errors describe input/output validation, invalid state, transport, protocol,
+cancellation, or lifecycle failure. Output validation may fail after execution;
+an outer error does not imply the absence of tool effects.
 
 MCP serving is a separate non-Clone `McpServer`. It accepts an `Arc<T>` for any
 `T: ToolsetBackend`, starts eagerly, owns and joins its task,
@@ -409,10 +410,10 @@ and Session-half dispatchers and require exact absence of deleted public symbols
 - `scripts/vendor_update.py` and crate-local vendor metadata own pinned-source
   refreshes.
 
-The approved vendor refresh targets LanceDB 0.41.0 and the exact Lance 14.0.2
+Storage selects LanceDB 0.41.0 and the exact Lance 14.0.2
 family for the local Database and StateStore products, while retaining exact
 SurrealDB SDK/Core 4.0.0. The committed Cargo lock records the resolved graph;
-the target requires fresh qualification of both Lance products.
+each subsequent change requires its applicable fresh qualification of both Lance products.
 External Rust dependencies come
 from crates.io; Cargo patches, replacements and external path overrides are
 forbidden. The path and alias guards have no upstream source exemptions.

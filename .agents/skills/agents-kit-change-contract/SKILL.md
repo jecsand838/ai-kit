@@ -121,6 +121,24 @@ backend behavior, protocol, persistence, or validation.
   preserving quiescent records. Conversation close is terminal.
 - Notification delivery is one exclusive durable at-least-once receiver with
   one interaction resolution path.
+- Preserve at most two historical Progress milestones for original live
+  Codex/Custom prompts. Preparing follows complete validation and durable Kit
+  admission; Tool follows the first fully validated nonempty Custom call batch
+  or an eligible Codex trigger bound to the exact root thread and accepted
+  native turn. Early, descendant, completed-only, historical, and recovered
+  facts cannot invent missing attribution; recovery cannot backfill milestones.
+  The existing owner and journal retain one publication identity and deadline,
+  capped by the original prompt deadline when present. Settle admitted
+  publication through cancellation or caller loss, then recheck cancellation
+  and deadline before the next effect. Keep Custom execution polled while
+  cancellation bookkeeping settles an exclusive writer. Publication failure
+  remains primary despite successful native completion; never replay Model,
+  native-turn, Tool, or callback effects. Published facts are immutable, unread
+  facts cannot be evicted, and finite backlog may reject publication. Add no
+  timer, producer task, public configuration, kind, persistence version, or
+  OpenCode mapping change. Exact labels, eligibility, ordering, and retention
+  belong to the
+  [notification contract](../../../agents-kit/specs/NOTIFICATIONS.md).
 - Workspace updates are atomic and revision-checked; durable commit precedes
   stale-handle invalidation.
 - Preserve exact storage conflicts. Retry/reconcile only safe operations within

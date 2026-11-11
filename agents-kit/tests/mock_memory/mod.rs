@@ -115,6 +115,16 @@ impl CommitGate {
             .forget();
     }
 
+    pub(super) fn assert_conflicted(&self) {
+        assert!(
+            matches!(
+                self.result.lock().expect("commit result").as_ref(),
+                Some(Err(StateStoreError::TransactionConflict { .. }))
+            ),
+            "the retained transaction must report an exact revision conflict"
+        );
+    }
+
     async fn wait(&self) -> Result<(), StateStoreError> {
         loop {
             let ready = self.ready.notified();

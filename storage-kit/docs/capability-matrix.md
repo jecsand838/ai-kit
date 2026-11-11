@@ -50,9 +50,13 @@ single-native-writer admission is an implementation detail, not a public
 capability difference.
 
 The explicitly selected embedded Lance StateStore uses that same fixed
-contract; it adds no capability projection or trait method. Its accepted
-transaction design, native-version fencing, measured capacity and actual
-platform receipts live in the [evidence ledger](lancedb-state-store-prototype.md).
+contract; it adds no capability projection or trait method. The
+[portable API](PORTABLE_API.md#statestore-and-associated-transaction) owns its
+transaction guarantees, and [architecture](../ARCHITECTURE.md) owns native
+version fencing and resource management. The
+[evidence ledger](lancedb-state-store-prototype.md) retains historical capacity
+and platform receipts at their recorded source identities; those receipts do
+not establish qualification of the current native family.
 Lance is always compiled for both products, and Cargo's default feature set is
 empty. Alternatives require explicit `redb`, `postgres`, `surrealdb`, and `sqlite` features. Redb, PostgreSQL and
 SurrealDB configuration values remain available without their native features;

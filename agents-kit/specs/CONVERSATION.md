@@ -27,6 +27,24 @@ instructions, knowledge policy, structured schema, and tool selection before
 native/provider acceptance. It admits against the Agent-wide limit and the
 Conversation's single slot.
 
+Kit execution admission and remote Model acceptance are distinct. Custom
+registers one tracked execution owner before its first poll, but its private
+release gate prevents publication, generation, and tool work until durable Kit
+admission succeeds. Failed admission closes that gate and joins the unreleased
+execution; cleanup never releases it. An immediate `InvalidInput` or
+`Unsupported` from the first Provider generation may consequently follow Kit
+admission. It retains the same
+normalized terminal error, adds no successful transcript turn, performs no tool
+effect, and releases admission only after settlement.
+
+The bounded advisory milestones in [`NOTIFICATIONS.md`](NOTIFICATIONS.md)
+share that accepted owner. A publication failure before native dispatch performs
+no native turn. After native acceptance, Codex preserves the publication failure
+as primary while its original prompt owner drives interruption and native
+reconciliation; the inbound reader remains available. Successful terminal
+output cannot overtake pending publication. Unproved settlement retains durable
+uncertainty and blocks further admission.
+
 After acceptance, runtime—not the caller future—owns terminalization. Dropping
 the future records waiter loss and discards exact terminal output only after a
 durable terminal transition; it does not cancel or free the slot early. Prompt

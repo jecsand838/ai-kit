@@ -28,8 +28,87 @@ struct CodexPendingRequests {
 
 pub(crate) enum CodexRequestError {
     Rejected(KitError),
-    ServerRejected { code: i64, message: String },
+    ServerRejected {
+        code: i64,
+        message: String,
+        data: CodexRejectionData,
+    },
     Ambiguous(KitError),
+}
+
+pub(crate) enum CodexRejectionData {
+    Fallback,
+    Provider(CodexProviderRejection),
+    Malformed,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub(crate) enum CodexProviderRejection {
+    #[serde(rename = "modelProviderMismatch")]
+    Mismatch {
+        #[serde(rename = "modelProvider")]
+        _model_provider: String,
+        #[serde(rename = "currentModelProvider")]
+        _current_model_provider: String,
+    },
+    #[serde(rename = "modelProviderNotConfigured")]
+    NotConfigured {
+        #[serde(rename = "modelProvider")]
+        _model_provider: String,
+    },
+    #[serde(rename = "modelProviderPolicyConflict")]
+    PolicyConflict {
+        #[serde(rename = "modelProvider")]
+        _model_provider: String,
+        #[serde(rename = "requiredModelProvider")]
+        _required_model_provider: String,
+    },
+}
+
+impl CodexRejectionData {
+    fn decode(data: Option<&Value>) -> Self {
+        match data
+            .and_then(|data| data.get("type"))
+            .and_then(Value::as_str)
+        {
+            Some(
+                "modelProviderMismatch"
+                | "modelProviderNotConfigured"
+                | "modelProviderPolicyConflict",
+            ) => match serde_json::from_value(data.cloned().unwrap_or(Value::Null)) {
+                Ok(data) => Self::Provider(data),
+                Err(_) => Self::Malformed,
+            },
+            _ => Self::Fallback,
+        }
+    }
+
+    fn into_error(self, code: i64) -> KitError {
+        let detail = match self {
+            Self::Malformed => {
+                return KitError::protocol("server rejection data is malformed")
+                    .with_context(Operation::Unspecified, ErrorPhase::ResponseDecode)
+                    .with_detail(ErrorDetail::MalformedData);
+            }
+            Self::Provider(
+                CodexProviderRejection::Mismatch { .. }
+                | CodexProviderRejection::NotConfigured { .. },
+            ) => ErrorDetail::PreconditionFailed,
+            Self::Provider(CodexProviderRejection::PolicyConflict { .. }) => {
+                ErrorDetail::PolicyRejected
+            }
+            Self::Fallback => match code {
+                -32600 | -32602 => ErrorDetail::InvalidRequest,
+                -32603 => ErrorDetail::RemoteInternal,
+                -32001 => ErrorDetail::ServiceUnavailable,
+                _ => ErrorDetail::RemoteRejected,
+            },
+        };
+        KitError::integration("server request was rejected")
+            .with_context(Operation::Unspecified, ErrorPhase::ResponseRead)
+            .with_detail(detail)
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -556,17 +635,7 @@ impl CodexRequestError {
     pub(crate) fn into_sdk_error(self) -> KitError {
         match self {
             Self::Rejected(error) | Self::Ambiguous(error) => error,
-            Self::ServerRejected { code, .. } => {
-                let detail = match code {
-                    -32600 | -32602 => ErrorDetail::InvalidRequest,
-                    -32603 => ErrorDetail::RemoteInternal,
-                    -32001 => ErrorDetail::ServiceUnavailable,
-                    _ => ErrorDetail::RemoteRejected,
-                };
-                KitError::integration("server request was rejected")
-                    .with_context(Operation::Unspecified, ErrorPhase::ResponseRead)
-                    .with_detail(detail)
-            }
+            Self::ServerRejected { code, data, .. } => data.into_error(code),
         }
     }
 }
@@ -643,6 +712,7 @@ impl CodexInbound {
                 Err(CodexRequestError::ServerRejected {
                     code,
                     message: message.to_owned(),
+                    data: CodexRejectionData::decode(error.get("data")),
                 })
             }
             _ => return Err(CodexTransportFailure::Protocol),

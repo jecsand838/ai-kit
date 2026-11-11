@@ -94,7 +94,10 @@ class AgentKitProtocolAuthorityTests(unittest.TestCase):
                 ("app-server-transport/src/transport/websocket.rs", [
                     "IncomingWebSocketMessage::Text(text)",
                 ]),
-                ("app-server-client/src/remote.rs", ["Message::Text(payload.into())"]),
+                ("app-server-client/src/remote.rs", [
+                    "serde_json::to_string(&message)",
+                    "Some(Ok(Message::Text(text)))",
+                ]),
                 ("app-server-protocol/src/protocol/v1.rs", [
                     "pub experimental_api: bool",
                     "pub opt_out_notification_methods: Option<Vec<String>>",
@@ -469,6 +472,29 @@ class VendorUpdateCliTests(unittest.TestCase):
                 exclusions = [clippy[index + 1] for index, arg in enumerate(clippy)
                               if arg == "--exclude"]
                 self.assertEqual(exclusions, ["storage-kit", "app-kit"])
+
+    def test_codex_manifest_gates_match_current_baseline_and_ledger_scope(self) -> None:
+        manifest = tomllib.loads(
+            (SCRIPT_PATH.parents[1] / "agents-kit/vendor/vendors.toml").read_text()
+        )["vendors"]["codex"]
+        clippy = [gate for gate in manifest["completion_gates"]
+                  if gate[:2] == ["cargo", "clippy"]]
+        workspace = clippy[0]
+        self.assertIn("--workspace", workspace)
+        self.assertIn("--locked", workspace)
+        self.assertEqual([workspace[index + 1] for index, arg in enumerate(workspace)
+                          if arg == "--exclude"], ["storage-kit", "app-kit"])
+        expected = [None, "redb", "postgres", "surrealdb", "sqlite",
+                    "redb,postgres,surrealdb,sqlite"]
+        lanes = []
+        for gate in clippy[1:]:
+            self.assertEqual(gate[gate.index("-p") + 1], "storage-kit")
+            self.assertIn("--locked", gate)
+            self.assertIn("--no-default-features", gate)
+            self.assertNotIn("--all-features", gate)
+            lanes.append(gate[gate.index("--features") + 1] if "--features" in gate else None)
+        self.assertEqual(lanes, expected)
+        self.assertIn("docs/mock-testing-production-bugs.md", manifest["local_focus_paths"])
 
     def test_storage_manifest_allows_scoped_cargo_lock_but_rejects_unrelated_edits(self) -> None:
         manifest = tomllib.loads(
@@ -1696,6 +1722,444 @@ class VendorUpdateCliTests(unittest.TestCase):
         self.assertEqual(gate["lock_tag"], "v2.0.0")
         self.assertLess(calls.index(target_preflight[0]), calls.index(gate))
 
+    def test_single_vendor_review_pause_then_validation_commits_frozen_target(self) -> None:
+        original_implementation = self.module.VendorUpdater._run_codex_implementation
+
+        def implement(updater, *args, **kwargs):
+            original_implementation(updater, *args, **kwargs)
+            (self.workspace / "demo-sdk/src/lib.rs").write_text("// reviewed adaptation\n")
+            config = json.loads(self.config_path.read_text())
+            config["git"]["status_nul"] = " M demo-sdk/src/lib.rs\0"
+            self._write_tool_config(config)
+
+        with mock.patch.object(self.module.VendorUpdater, "_run_codex_implementation", implement):
+            result = self._run_no_regression_update(
+                completion_policy="strict", gate_sequence=[{"exit_code": 0}],
+                implementation_only=True,
+            )
+        self.assertEqual(result["exit_code"], 0, result["stderr"])
+        self.assertIn("original lock restored for review", result["stdout"])
+        vendor = result["crate"] / "vendor"
+        self.assertEqual((vendor / "vendor-lock.toml").read_bytes(), result["original_lock_bytes"])
+        for name in ["demo-v1.0.0.zip", "demo-v2.0.0.zip", "demo-v1.0.0", "demo-v2.0.0"]:
+            self.assertTrue((vendor / name).exists(), name)
+        calls = self._read_logs()
+        implementation = next(call for call in calls if call["tool"] == "codex"
+                              and "workspace-write" in call["argv"])
+        self.assertEqual(implementation["lock_tag"], "v2.0.0")
+        self.assertIn("run focused checks", implementation["argv"][-1])
+        self.assertIn("parent must independently review", implementation["argv"][-1])
+        self.assertIn("--validation-only", implementation["argv"][-1])
+        self.assertFalse(any(call["tool"] in {"preflight-gate", "gate-sequence"}
+                             or (call["tool"] == "git" and call["argv"][0] in {"add", "commit", "push"})
+                             for call in calls))
+        before = len(calls)
+        code, error = self._resume(result["dossier"], validation_only=True)
+        self.assertEqual(code, 0, error)
+        calls = self._read_logs()[before:]
+        self.assertFalse(any(call["tool"] in {"gh", "codex"} for call in calls))
+        gates = [call for call in calls if call["tool"] in {"preflight-gate", "gate-sequence"}]
+        self.assertEqual([call["tool"] for call in gates], ["preflight-gate", "gate-sequence"])
+        self.assertTrue(all(call["lock_tag"] == "v2.0.0" for call in gates))
+        self.assertFalse((vendor / "demo-v1.0.0.zip").exists())
+        self.assertFalse((vendor / "demo-v1.0.0").exists())
+        self.assertTrue((vendor / "demo-v2.0.0.zip").is_file())
+        self.assertEqual((vendor / "vendor-lock.toml").read_bytes(),
+                         (result["dossier"] / "candidate-vendor-lock.toml").read_bytes())
+        stage = next(call for call in calls if call["tool"] == "git" and call["argv"][0] == "add")
+        self.assertIn("demo-sdk/src/lib.rs", stage["argv"])
+        commits = [call for call in calls if call["tool"] == "git" and call["argv"][0] == "commit"]
+        self.assertEqual(len(commits), 1)
+        self.assertLess(calls.index(gates[-1]), calls.index(commits[0]))
+        self.assertFalse(any(call["tool"] == "git" and call["argv"][0] == "push" for call in calls))
+
+    def test_single_vendor_repeated_adaptation_uses_saved_plan_without_discovery(self) -> None:
+        result = self._run_no_regression_update(
+            completion_policy="strict", gate_sequence=[{"exit_code": 7}],
+        )
+        self.assertEqual(result["exit_code"], 1)
+        plan = result["dossier"] / "plan.md"
+        plan.write_text("# Retain reviewed target plan\n")
+        before = len(self._read_logs())
+        for _ in range(2):
+            code, error = self._resume(result["dossier"], implementation_only=True)
+            self.assertEqual(code, 0, error)
+            self.assertEqual((result["crate"] / "vendor/vendor-lock.toml").read_bytes(),
+                             result["original_lock_bytes"])
+        calls = self._read_logs()[before:]
+        implementations = [call for call in calls if call["tool"] == "codex"]
+        self.assertEqual(len(implementations), 2)
+        self.assertTrue(all("workspace-write" in call["argv"] for call in implementations))
+        self.assertEqual(plan.read_text(), "# Retain reviewed target plan\n")
+        self.assertFalse(any(call["tool"] in {"gh", "preflight-gate", "gate-sequence"}
+                             or (call["tool"] == "git" and call["argv"][0] in {"add", "commit", "push"})
+                             for call in calls))
+
+    def test_single_vendor_validation_failure_retains_review_edits_and_archives(self) -> None:
+        result = self._run_no_regression_update(
+            completion_policy="strict", gate_sequence=[{"exit_code": 23}],
+            implementation_only=True,
+        )
+        self.assertEqual(result["exit_code"], 0, result["stderr"])
+        edit = result["crate"] / "src/lib.rs"
+        edit.write_text("// retained reviewed edit\n")
+        config = json.loads(self.config_path.read_text())
+        config["git"]["status_nul"] = " M demo-sdk/src/lib.rs\0"
+        self._write_tool_config(config)
+        before = len(self._read_logs())
+        code, error = self._resume(result["dossier"], validation_only=True)
+        self.assertEqual(code, 1)
+        self.assertIn("23", error)
+        self.assertEqual(edit.read_text(), "// retained reviewed edit\n")
+        self.assertEqual((result["crate"] / "vendor/vendor-lock.toml").read_bytes(),
+                         result["original_lock_bytes"])
+        for name in ["demo-v1.0.0.zip", "demo-v2.0.0.zip", "demo-v1.0.0", "demo-v2.0.0"]:
+            self.assertTrue((result["crate"] / "vendor" / name).exists(), name)
+        calls = self._read_logs()[before:]
+        self.assertFalse(any(call["tool"] in {"gh", "codex"}
+                             or (call["tool"] == "git" and call["argv"][0] in {"add", "commit", "push"})
+                             for call in calls))
+
+    def test_single_vendor_validation_interruption_restores_original_lock(self) -> None:
+        result = self._run_no_regression_update(
+            completion_policy="strict", gate_sequence=[{"exit_code": 0}],
+            implementation_only=True,
+        )
+        self.assertEqual(result["exit_code"], 0, result["stderr"])
+        with mock.patch.object(self.module.VendorUpdater, "_run_preflight_gates",
+                               side_effect=KeyboardInterrupt("interrupted validation")):
+            with self.assertRaises(KeyboardInterrupt):
+                self._resume(result["dossier"], validation_only=True)
+        self.assertEqual((result["crate"] / "vendor/vendor-lock.toml").read_bytes(),
+                         result["original_lock_bytes"])
+        for name in ["demo-v1.0.0.zip", "demo-v2.0.0.zip", "demo-v1.0.0", "demo-v2.0.0"]:
+            self.assertTrue((result["crate"] / "vendor" / name).exists(), name)
+        self.assertFalse(any(call["tool"] == "git" and call["argv"][0] in {"add", "commit", "push"}
+                             for call in self._read_logs()))
+
+    def test_single_vendor_review_pause_revalidates_implementation_mutations(self) -> None:
+        result = self._run_no_regression_update(
+            completion_policy="strict", gate_sequence=[{"exit_code": 7}],
+        )
+        self.assertEqual(result["exit_code"], 1)
+        dossier = result["dossier"]
+        vendor = result["crate"] / "vendor"
+        mutations = [
+            (dossier / "resume.json", b" ", "recovery metadata"),
+            (dossier / "metadata.json", b" ", "metadata.json"),
+            (dossier / "original-vendor-lock.toml", b"# changed\n", "original-vendor-lock.toml"),
+            (dossier / "candidate-vendor-lock.toml", b"# changed\n", "candidate-vendor-lock.toml"),
+            (vendor / "vendors.toml", b"\n# changed\n", "vendors.toml"),
+            (vendor / "demo-v2.0.0.zip", b"changed", "archive"),
+        ]
+        for path, suffix, message in mutations:
+            with self.subTest(path=path.name):
+                saved = path.read_bytes()
+                def mutate(*_args, **_kwargs):
+                    path.write_bytes(saved + suffix)
+                before = len(self._read_logs())
+                with mock.patch.object(self.module.VendorUpdater, "_run_codex_implementation",
+                                       side_effect=mutate):
+                    code, error = self._resume(dossier, implementation_only=True)
+                self.assertEqual(code, 1, error)
+                self.assertIn(message, error)
+                self.assertEqual((vendor / "vendor-lock.toml").read_bytes(), result["original_lock_bytes"])
+                self.assertFalse(any(call["tool"] in {"preflight-gate", "gate-sequence"}
+                                     or (call["tool"] == "git" and call["argv"][0] in {"add", "commit", "push"})
+                                     for call in self._read_logs()[before:]))
+                path.write_bytes(saved)
+
+    def test_review_executor_rejects_recovery_mutation_before_reporting_success(self) -> None:
+        result = self._run_no_regression_update(
+            completion_policy="strict", gate_sequence=[{"exit_code": 7}],
+        )
+        dossier = result["dossier"]
+        recovery = dossier / "resume.json"
+        state = json.loads(recovery.read_text())
+        updater = self.module.VendorUpdater(self.workspace, env=self._env(), stdout=io.StringIO())
+        crate = updater._load_crate_state("demo-sdk")
+
+        def mutate(*_args, **_kwargs):
+            recovery.write_bytes(recovery.read_bytes() + b" ")
+
+        with mock.patch.object(updater, "_run_codex_implementation", side_effect=mutate):
+            with self.assertRaisesRegex(self.module.VendorUpdateError, "recovery metadata"):
+                updater._execute_prepared_update(
+                    crate, crate.configs["demo"], dossier, state, implementation_only=True,
+                )
+        self.assertEqual((result["crate"] / "vendor/vendor-lock.toml").read_bytes(),
+                         result["original_lock_bytes"])
+
+    def test_review_pause_rejects_changed_missing_or_redirected_frozen_inputs(self) -> None:
+        result = self._run_no_regression_update(
+            completion_policy="strict", gate_sequence=[{"exit_code": 0}], implementation_only=True,
+        )
+        self.assertEqual(result["exit_code"], 0, result["stderr"])
+        for name in ("dossier.md", "plan.md", "release.json", "upstream_diff_stat.txt",
+                     "upstream_changed_files.txt"):
+            path = result["dossier"] / name
+            saved = path.read_bytes()
+            for mode in ("changed", "missing", "redirected"):
+                with self.subTest(name=name, mode=mode), tempfile.TemporaryDirectory() as other:
+                    outside = Path(other) / name
+                    outside.write_bytes(saved)
+
+                    def mutate(*_args, **_kwargs):
+                        if mode == "changed":
+                            path.write_bytes(saved + b"\nchanged\n")
+                        else:
+                            path.unlink()
+                            if mode == "redirected":
+                                path.symlink_to(outside)
+
+                    before = len(self._read_logs())
+                    try:
+                        with mock.patch.object(self.module.VendorUpdater, "_run_codex_implementation",
+                                               side_effect=mutate):
+                            code, error = self._resume(result["dossier"], implementation_only=True)
+                        self.assertEqual(code, 1, error)
+                        self.assertIn(name, error)
+                        self.assertEqual((result["crate"] / "vendor/vendor-lock.toml").read_bytes(),
+                                         result["original_lock_bytes"])
+                        self.assertEqual(outside.read_bytes(), saved)
+                        self.assertFalse(any(call["tool"] in {"preflight-gate", "gate-sequence"}
+                                             or (call["tool"] == "git" and call["argv"][0] in {"add", "commit"})
+                                             for call in self._read_logs()[before:]))
+                    finally:
+                        if path.is_symlink():
+                            path.unlink()
+                        path.write_bytes(saved)
+
+    def test_validation_rejects_mutated_frozen_plan_before_finalization(self) -> None:
+        result = self._run_no_regression_update(
+            completion_policy="strict", gate_sequence=[{"exit_code": 0}], implementation_only=True,
+        )
+        self.assertEqual(result["exit_code"], 0, result["stderr"])
+        plan = result["dossier"] / "plan.md"
+        original = plan.read_bytes()
+
+        def mutate(*_args):
+            plan.write_bytes(original + b"\nchanged by completion gate\n")
+
+        with mock.patch.object(self.module.VendorUpdater, "_run_completion_gates", side_effect=mutate):
+            code, error = self._resume(result["dossier"], validation_only=True)
+        self.assertEqual(code, 1, error)
+        self.assertIn("plan.md", error)
+        self.assertEqual((result["crate"] / "vendor/vendor-lock.toml").read_bytes(),
+                         result["original_lock_bytes"])
+        self.assertFalse(any(call["tool"] == "git" and call["argv"][0] in {"add", "commit", "push"}
+                             for call in self._read_logs()))
+
+    def test_single_vendor_split_resumes_reject_redirected_updater_outputs_before_writes(self) -> None:
+        result = self._run_no_regression_update(
+            completion_policy="strict", gate_sequence=[{"exit_code": 0}], implementation_only=True,
+        )
+        self.assertEqual(result["exit_code"], 0, result["stderr"])
+        for phase in ("implementation_only", "validation_only"):
+            for name in ("original-archive.zip", "implementation.md"):
+                with self.subTest(phase=phase, name=name), tempfile.TemporaryDirectory() as other:
+                    outside = Path(other) / "caller-owned.txt"
+                    outside.write_bytes(b"preserve caller-owned content\n")
+                    path = result["dossier"] / name
+                    saved = path.read_bytes()
+                    path.unlink()
+                    path.symlink_to(outside)
+                    before = len(self._read_logs())
+                    try:
+                        with mock.patch.object(
+                            self.module.VendorUpdater, "_run_completion_gates",
+                            side_effect=self.module.VendorUpdateError("gate ran before output guard"),
+                        ):
+                            code, error = self._resume(result["dossier"], **{phase: True})
+                        self.assertEqual(code, 1, error)
+                        self.assertIn(name, error)
+                        self.assertEqual(outside.read_bytes(), b"preserve caller-owned content\n")
+                        self.assertEqual((result["crate"] / "vendor/vendor-lock.toml").read_bytes(),
+                                         result["original_lock_bytes"])
+                        self.assertTrue(all(call["tool"] == "git" for call in self._read_logs()[before:]))
+                    finally:
+                        path.unlink()
+                        path.write_bytes(saved)
+
+    def test_lock_restoration_never_follows_an_inflight_symlink(self) -> None:
+        result = self._run_no_regression_update(
+            completion_policy="strict", gate_sequence=[{"exit_code": 0}], implementation_only=True,
+        )
+        self.assertEqual(result["exit_code"], 0, result["stderr"])
+        lock = result["crate"] / "vendor/vendor-lock.toml"
+        candidate = (result["dossier"] / "candidate-vendor-lock.toml").read_bytes()
+        for method, phase in (("_run_codex_implementation", "implementation_only"),
+                              ("_run_completion_gates", "validation_only")):
+            with self.subTest(phase=phase), tempfile.TemporaryDirectory() as other:
+                outside = Path(other) / "caller-owned-lock.toml"
+                outside.write_bytes(candidate)
+
+                def redirect(*_args, **_kwargs):
+                    lock.unlink()
+                    lock.symlink_to(outside)
+
+                try:
+                    with mock.patch.object(self.module.VendorUpdater, method, side_effect=redirect):
+                        code, error = self._resume(result["dossier"], **{phase: True})
+                    self.assertEqual(code, 1, error)
+                    self.assertIn("vendor lock must not be a symlink", error)
+                    self.assertEqual(outside.read_bytes(), candidate)
+                    self.assertIn("restoring the original vendor lock also failed", error)
+                finally:
+                    if lock.is_symlink():
+                        lock.unlink()
+                    lock.write_bytes(result["original_lock_bytes"])
+
+    def test_archive_restoration_never_follows_an_inflight_dangling_symlink(self) -> None:
+        result = self._run_no_regression_update(
+            completion_policy="strict", gate_sequence=[{"exit_code": 0}], implementation_only=True,
+        )
+        self.assertEqual(result["exit_code"], 0, result["stderr"])
+        archive = result["crate"] / "vendor/demo-v1.0.0.zip"
+        with tempfile.TemporaryDirectory() as other:
+            outside = Path(other) / "must-not-be-created.zip"
+
+            def redirect(*_args, **_kwargs):
+                archive.unlink()
+                archive.symlink_to(outside)
+
+            with mock.patch.object(self.module.VendorUpdater, "_run_codex_implementation",
+                                   side_effect=redirect):
+                code, error = self._resume(result["dossier"], implementation_only=True)
+            self.assertEqual(code, 1, error)
+            self.assertIn("resume archive or extraction path is a symlink escape", error)
+            self.assertFalse(outside.exists(), "rollback wrote through the dangling archive symlink")
+            self.assertTrue(archive.is_symlink())
+            self.assertIn("restoring demo-v1.0.0.zip also failed", error)
+            self.assertEqual((result["crate"] / "vendor/vendor-lock.toml").read_bytes(),
+                             result["original_lock_bytes"])
+
+    def test_archive_restoration_refuses_redirected_vendor_parent(self) -> None:
+        result = self._run_no_regression_update(
+            completion_policy="strict", gate_sequence=[{"exit_code": 0}], implementation_only=True,
+        )
+        self.assertEqual(result["exit_code"], 0, result["stderr"])
+        vendor = result["crate"] / "vendor"
+        moved = result["crate"] / "retained-vendor"
+        candidate = (result["dossier"] / "candidate-vendor-lock.toml").read_bytes()
+        with tempfile.TemporaryDirectory() as other:
+            outside = Path(other)
+            external_lock = outside / "vendor-lock.toml"
+            external_lock.write_bytes(candidate)
+
+            def redirect(*_args, **_kwargs):
+                vendor.rename(moved)
+                vendor.symlink_to(outside, target_is_directory=True)
+
+            with mock.patch.object(self.module.VendorUpdater, "_run_codex_implementation",
+                                   side_effect=redirect):
+                code, error = self._resume(result["dossier"], implementation_only=True)
+            self.assertEqual(code, 1, error)
+            self.assertIn("vendor directory escapes the workspace", error)
+            self.assertEqual(sorted(path.name for path in outside.iterdir()), ["vendor-lock.toml"])
+            self.assertEqual(external_lock.read_bytes(), candidate)
+            self.assertIn("restoring demo-v1.0.0.zip also failed", error)
+
+    def test_archive_restoration_refuses_redirected_retained_backup(self) -> None:
+        result = self._run_no_regression_update(
+            completion_policy="strict", gate_sequence=[{"exit_code": 0}], implementation_only=True,
+        )
+        self.assertEqual(result["exit_code"], 0, result["stderr"])
+        archive = result["crate"] / "vendor/demo-v1.0.0.zip"
+        backup = result["dossier"] / "original-archive.zip"
+        with tempfile.TemporaryDirectory() as other:
+            outside = Path(other) / "external-archive.zip"
+            outside.write_bytes(archive.read_bytes())
+
+            def redirect(*_args, **_kwargs):
+                archive.unlink()
+                backup.unlink()
+                backup.symlink_to(outside)
+
+            with mock.patch.object(self.module.VendorUpdater, "_run_codex_implementation",
+                                   side_effect=redirect):
+                code, error = self._resume(result["dossier"], implementation_only=True)
+            self.assertEqual(code, 1, error)
+            self.assertIn("updater output escapes its owner: original-archive.zip", error)
+            self.assertFalse(archive.exists(), "rollback consumed a redirected retained backup")
+            self.assertIn("restoring demo-v1.0.0.zip also failed", error)
+
+    def test_archive_restoration_refuses_changed_retained_backup_bytes(self) -> None:
+        result = self._run_no_regression_update(
+            completion_policy="strict", gate_sequence=[{"exit_code": 0}], implementation_only=True,
+        )
+        self.assertEqual(result["exit_code"], 0, result["stderr"])
+        archive = result["crate"] / "vendor/demo-v1.0.0.zip"
+        backup = result["dossier"] / "original-archive.zip"
+
+        def mutate(*_args, **_kwargs):
+            archive.unlink()
+            self._write_zip(backup, "unrelated/README.md", "different source authority")
+
+        with mock.patch.object(self.module.VendorUpdater, "_run_codex_implementation", side_effect=mutate):
+            code, error = self._resume(result["dossier"], implementation_only=True)
+        self.assertEqual(code, 1, error)
+        self.assertIn("resume archive changed or missing", error)
+        self.assertFalse(archive.exists(), "rollback restored bytes without their original hash")
+        self.assertIn("restoring demo-v1.0.0.zip also failed", error)
+
+    def test_single_vendor_review_pause_rejects_changed_branch_head_and_dirty_scope(self) -> None:
+        result = self._run_no_regression_update(
+            completion_policy="strict", gate_sequence=[{"exit_code": 7}],
+        )
+        base = json.loads(self.config_path.read_text())
+        for key, value, message in [
+            ("branch_output", "changed-branch", "branch"),
+            ("head_output", "b" * 40, "HEAD"),
+            ("status_nul", "?? unrelated.txt\0", "outside"),
+        ]:
+            with self.subTest(key=key):
+                def mutate(*_args, **_kwargs):
+                    config = json.loads(json.dumps(base))
+                    config["git"][key] = value
+                    self._write_tool_config(config)
+                    (self.workspace / "unrelated.txt").write_text("preserve unrelated data\n")
+                with mock.patch.object(self.module.VendorUpdater, "_run_codex_implementation",
+                                       side_effect=mutate):
+                    code, error = self._resume(result["dossier"], implementation_only=True)
+                self.assertEqual(code, 1, error)
+                self.assertIn(message, error)
+                self.assertEqual((result["crate"] / "vendor/vendor-lock.toml").read_bytes(),
+                                 result["original_lock_bytes"])
+                self._write_tool_config(base)
+
+    def test_single_vendor_split_no_regression_update_rejects_before_external_calls(self) -> None:
+        result = self._run_no_regression_update(
+            gate_sequence=[{"exit_code": 0}], implementation_only=True,
+        )
+        self.assertEqual(result["exit_code"], 1)
+        self.assertIn("strict", result["stderr"])
+        self.assertEqual(self._read_logs(), [])
+        self.assertFalse(result["dossier"].exists())
+
+    def test_single_vendor_split_no_regression_resume_rejects_before_external_calls(self) -> None:
+        result = self._run_no_regression_update(gate_sequence=[{"exit_code": 0}, {"exit_code": 7}])
+        self.assertEqual(result["exit_code"], 1)
+        for phase in ("implementation_only", "validation_only"):
+            with self.subTest(phase=phase):
+                before = len(self._read_logs())
+                code, error = self._resume(result["dossier"], **{phase: True})
+                self.assertEqual(code, 1)
+                self.assertIn("strict", error)
+                self.assertEqual(self._read_logs()[before:], [])
+
+    def test_conflicting_resume_phases_reject_at_cli_and_method_boundaries(self) -> None:
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit) as failure:
+            self.module.build_parser().parse_args([
+                "resume", "--dossier", "absent", "--implementation-only", "--validation-only",
+            ])
+        self.assertEqual(failure.exception.code, 2)
+        updater = self.module.VendorUpdater(self.workspace, env=self._env())
+        with self.assertRaisesRegex(self.module.VendorUpdateError, "mutually exclusive"):
+            updater.resume(self.workspace / "absent", implementation_only=True, validation_only=True)
+        self.assertEqual(self._read_logs(), [])
+
     def test_resume_preserves_edits_and_plan_without_resolving_release(self) -> None:
         result = self._run_no_regression_update(
             completion_policy="strict", gate_sequence=[{"exit_code": 7}, {"exit_code": 0}],
@@ -2226,10 +2690,16 @@ class VendorUpdateCliTests(unittest.TestCase):
         self.assertFalse(any(call["tool"] == "git" and call["argv"][0] in {"add", "commit"}
                              for call in self._read_logs()))
 
-    def _resume(self, dossier: Path) -> tuple[int, str]:
+    def _resume(self, dossier: Path, *, implementation_only: bool = False,
+                validation_only: bool = False) -> tuple[int, str]:
         stderr = io.StringIO()
+        args = ["resume", "--dossier", str(dossier)]
+        if implementation_only:
+            args.append("--implementation-only")
+        if validation_only:
+            args.append("--validation-only")
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(stderr):
-            code = self.module.main(["resume", "--dossier", str(dossier)],
+            code = self.module.main(args,
                                     workspace_root=self.workspace, env=self._env())
         return code, stderr.getvalue()
 
@@ -2328,6 +2798,7 @@ class VendorUpdateCliTests(unittest.TestCase):
         git_config: dict[str, object] | None = None,
         codex_config: dict[str, object] | None = None,
         external_focus_paths: tuple[str, ...] = (),
+        implementation_only: bool = False,
     ) -> dict[str, object]:
         crate = self._write_crate(
             vendors_toml="""
@@ -2404,7 +2875,7 @@ class VendorUpdateCliTests(unittest.TestCase):
                     "current-branch",
                     "--completion-policy",
                     completion_policy,
-                ],
+                ] + (["--implementation-only"] if implementation_only else []),
                 workspace_root=self.workspace,
                 env=self._env(),
             )

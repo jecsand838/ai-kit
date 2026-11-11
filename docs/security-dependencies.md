@@ -1,8 +1,10 @@
 # Workspace dependency security
 
-All Kit dependencies now resolve from crates.io without local source patches.
-LanceDB 0.40.0 and Lance 13.0.0 remain selected. The approved SurrealDB
-security migration selects exact client/Core 4.0.0. Its scoped qualification
+All Kit dependencies resolve from crates.io without local source patches.
+Storage selects LanceDB 0.41.0 and Lance 14.0.2. Its compatible
+Zstd backports remove 13 advisory exceptions, as recorded below; every later
+resolved graph requires a fresh two-scan audit before qualification. The approved
+SurrealDB security migration selects exact client/Core 4.0.0. Its scoped qualification
 and historical receipts below do not establish full release qualification.
 Qdrant is temporarily unavailable: its Geo dependency conflicts with the
 published SurrealDB dependency graph. Restoring it requires compatible upstream
@@ -11,7 +13,19 @@ lockfile with `--locked`.
 
 ## Temporary accepted advisories
 
-The maintainer has explicitly accepted the findings below to unblock the initial
+The current policy retains exactly two exceptions: `RUSTSEC-2023-0071` for
+`rsa 0.9.10` and `RUSTSEC-2026-0387` for `crypto-bigint 0.5.5`. The
+recorded Storage campaign scan reports both vulnerabilities and is
+**`PASS_WITH_EXCEPTIONS`**. This is dated evidence for its recorded graph,
+not a fresh audit of each subsequent checkout.
+RustSec lists `rsa >=0.10.0` as patched, but locked `jsonwebtoken 10.4.0`
+requires `rsa ^0.9.6`. The fixed `crypto-bigint >=0.7.6` does not satisfy
+the locked JWT chain's `elliptic-curve` requirement `^0.5`. The final raw
+audit is retained at
+`target/vendor-campaign-storage-20261108/security/final/raw.json`.
+The dated inventory below preserves earlier removal assumptions.
+
+The maintainer has explicitly accepted these findings to unblock the initial
 0.0.1 release preparation. **We will fix these as soon as possible** by adopting
 compatible upstream fixes and removing each exception. These exceptions are not
 a permanent security policy or evidence that the affected code is safe.
@@ -24,11 +38,82 @@ target-specific dependencies, so a finding does not by itself prove execution in
 a particular native build. Conversely, a passing build does not prove an
 advisory unreachable.
 
-The current registry lockfile was scanned on 2026-11-08 using cargo-audit 0.22.2
+### Selected rmcp remediation — 2026-11-09
+
+A fresh campaign audit at RustSec commit
+`d9cb059f3217db87aeccd190b81eaffe8cc29cb9` found
+[RUSTSEC-2026-0462](https://rustsec.org/advisories/RUSTSEC-2026-0462.html)
+in `rmcp 1.5.0`. Tools enables the affected Streamable HTTP client. The failed
+raw and qualified scans remain under
+`target/vendor-campaign-agents-codex-20261109/security-preliminary-01/`.
+No exception was added for this finding.
+
+The separately authorized remediation selects exact `rmcp 3.9.0`, with existing
+direct features and disabled defaults preserved. Required native dependencies
+change from `process-wrap 9.1.0` to `10.0.1` and `sse-stream 0.2.2` to `0.2.6`;
+all other package versions remain locked. The selected SDK bounds successful
+HTTP JSON bodies to 16 MiB and error bodies to 64 KiB, including streamed
+responses without a declared length. Private adaptation preserves the existing
+initialize-based protocol revisions through 2025-11-25 rather than exposing the
+new stateless lifecycle.
+
+The resolved graph's fresh two-scan receipt is
+`target/vendor-campaign-agents-codex-20261109/security-tools-resolution-02/report.json`.
+It reports **PASS_WITH_EXCEPTIONS**: the raw scan contains only the existing
+RSA and crypto-bigint findings, and the qualified scan has no blocking findings.
+This is dependency-graph evidence. The subsequent
+`tools-red-04-sdk-lifecycle-and-compatibility/` run passes all 15 HTTP cases,
+including bounded rejection before EOF and no resend. Its server target passes
+58 cases and exposes four stateless-admission regressions. The independently
+reviewed repair subsequently passes all 63 server cases and all 15 HTTP cases in
+`tools-green-05-http-server-lifecycle/`, including the four repaired failures and
+a partial-metadata control. These intermediate runs alone did not complete
+Tools validation, downstream Agent/App compatibility, or final-source audits.
+
+The subsequent selected campaign completed at `ed4e34b`. Its retained
+`target/vendor-campaign-agents-codex-20261109/final-campaign-state-01/receipt.json`
+records selected Codex/Custom qualification, App routine consumer evidence,
+and the separately authorized Tools remediation. It records all 29 Agent
+native scenarios and final-source **PASS_WITH_EXCEPTIONS** with only the two
+IDs above. App routine coverage retains the ten workflow and one worker
+capacity exclusions in its owning strict guide. Earlier failed runs remain
+failed historical evidence. This source-qualified result neither establishes
+full workspace release qualification nor substitutes for a new audit or gate
+required by a later change.
+
+### Compatible Zstd remediation — 2026-11-08
+
+The Storage vendor campaign updates `zstd 0.13.3` to `0.13.4` and
+`zstd-safe 7.3.0` to `7.4.0`. These published backports satisfy Arrow IPC
+58.4.1 and SurrealKV's existing `zstd ^0.13` requirements, superseding the
+historical assumption that remediation required adoption of `zstd 0.14`.
+The existing `zstd 0.14.3`, `zstd-safe 8.2.0` and
+`zstd-sys 2.1.2+zstd.1.5.7` selections remain unchanged. No direct dependency,
+unrelated package selection or enabled feature changes.
+
+Fresh two-scan evidence under
+`target/vendor-campaign-storage-20261108/security/` uses cargo-audit 0.22.2
+and RustSec commit `309392b18f6b17022f82c701f300433126901068`.
+`zstd-before/report.json` preserves all 15 accepted findings on the committed
+Turso 0.8.3 graph. `zstd-after-resolution/report.json` confirms that
+`RUSTSEC-2026-0391` and every ID from `RUSTSEC-2026-0395` through
+`RUSTSEC-2026-0406` are absent from the unfiltered raw scan before their
+exceptions are removed. `zstd-after-policy/report.json` records the fresh
+audit with only the two remaining exceptions: two vulnerability findings,
+zero unsoundness findings and no unapproved blocking findings. These audit
+receipts do not substitute for affected native compatibility and strict-live
+validation or final campaign qualification.
+
+### Historical accepted inventory before the vendor refresh
+
+The registry lockfile before the LanceDB 0.41.0 refresh was scanned on
+2026-11-08 using cargo-audit 0.22.2
 and RustSec commit `309392b18f6b17022f82c701f300433126901068`. The
 [two-scan receipt](../target/security-2026-0454-0452/audit-20261108T113519Z/report.json)
 records five vulnerability findings and ten unsoundness findings covered by
-**15 exact exceptions**, with no unapproved blocking findings:
+**15 exact exceptions**, with no unapproved blocking findings. This dated
+inventory and its original removal assumptions are historical; the Zstd
+backports above supersede those assumptions and remove all 13 Zstd exceptions:
 
 | Locked package | Accepted advisory IDs | Upstream removal condition |
 | --- | --- | --- |
@@ -37,8 +122,9 @@ records five vulnerability findings and ten unsoundness findings covered by
 | `rsa 0.9.10` | [RUSTSEC-2023-0071](https://rustsec.org/advisories/RUSTSEC-2023-0071.html) | SurrealDB's target-specific JWT chain removes the affected RSA dependency or adopts a RustSec-confirmed fix. No patched version was listed at review. |
 | `crypto-bigint 0.5.5` | [RUSTSEC-2026-0387](https://rustsec.org/advisories/RUSTSEC-2026-0387.html) | The SurrealDB JWT/RSA chain removes or upgrades the affected dependency, confirmed by a fresh raw scan. |
 
-RSA's exception is explicitly a **2023 advisory**, in addition to the 2026
-findings. The already-fixed `zstd-sys 2.1.2+zstd.1.5.7` remains locked; its older
+RSA's retained exception is explicitly a **2023 advisory**, alongside the
+remaining 2026 `crypto-bigint` finding. The already-fixed
+`zstd-sys 2.1.2+zstd.1.5.7` remains locked; its older
 advisory is not ignored. Unrelated compatible fixes remain in the lockfile.
 
 The historical initial-release scan at RustSec commit

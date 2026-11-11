@@ -133,13 +133,22 @@ For transactionality:
 For dependency and platform research:
 
 - Verify Redb's pinned version from `vendor-lock.toml` before citing behavior.
-- Verify Redb 4.3.0 upstream metadata: Rust 1.90, edition 2024, upstream
-  default `std`, and optional `logging`, `cache_metrics`, `chrono_v0_4`, and
-  `uuid` features. Upstream also declares `experimental-api-5`,
-  `experimental_cursor`, and `experimental-multiprocess`; these are metadata,
-  not enabled Storage features. Keep Storage's exact `=4.3.0` dependency with
-  `default-features = false` and no experimental features. The campaign uses
-  Rust 1.99.0 separately from Redb's native minimum.
+- The selected native source is Redb 4.5.0 in the vendor lock and Cargo.lock;
+  source selection is not qualification evidence. Verify its upstream metadata:
+  Rust 1.90, edition 2024, upstream default `std`, and optional `logging`,
+  `cache_metrics`, `chrono_v0_4`, and `uuid` features. This release retains
+  `experimental-api-5`, adds `experimental-niches`, and removes the former
+  `experimental_cursor` and `experimental-multiprocess` flags after API
+  stabilization. These are metadata, not enabled Storage features. Preserve the
+  exact `=4.5.0` dependency with `default-features = false` and no experimental
+  features. The workspace selects Rust 1.99.0 separately from Redb's native
+  minimum.
+- Requalify 4.4/4.5 abort, file-growth rollback and cache invalidation against
+  public rollback/drop, later commit and cold-reopen behavior. Preserve the
+  default ExclusiveWriter construction and private initial ephemeral savepoint;
+  stable multi-process APIs do not authorize selecting MultiWriter mode, which
+  rejects those savepoints. New native close, try-begin-write and integrity APIs
+  add no portable surface by themselves.
 - Verify workspace toolchain and MSRV compatibility before adding or updating
   the Redb dependency.
 - Verify the explicit `redb` opt-in and its supported feature combinations;

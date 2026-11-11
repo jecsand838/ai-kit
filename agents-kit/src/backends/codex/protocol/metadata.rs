@@ -6,8 +6,142 @@ use serde::Deserialize;
 use serde_json::Value;
 
 #[derive(Deserialize)]
+pub(super) struct CodexHookRun {
+    #[serde(rename = "id")]
+    _id: String,
+    #[serde(rename = "eventName")]
+    _event_name: CodexHookEvent,
+    #[serde(rename = "handlerType")]
+    _handler_type: CodexHookHandler,
+    #[serde(rename = "executionMode")]
+    _execution_mode: CodexHookExecution,
+    #[serde(rename = "scope")]
+    _scope: CodexHookScope,
+    // LegacyAppPathString preserves arbitrary UTF-8, including remote paths.
+    #[serde(rename = "sourcePath")]
+    _source_path: String,
+    #[serde(rename = "source", default)]
+    _source: CodexHookSource,
+    #[serde(rename = "displayOrder")]
+    _display_order: i64,
+    #[serde(rename = "status")]
+    _status: CodexHookStatus,
+    #[serde(rename = "statusMessage")]
+    _status_message: Option<String>,
+    #[serde(rename = "startedAt")]
+    _started_at: i64,
+    #[serde(rename = "completedAt")]
+    _completed_at: Option<i64>,
+    #[serde(rename = "durationMs")]
+    _duration_ms: Option<i64>,
+    #[serde(rename = "entries")]
+    _entries: Vec<CodexHookEntry>,
+}
+
+impl CodexHookRun {
+    pub(super) fn validate(params: &Value) -> Result<(), KitError> {
+        serde_json::from_value::<Self>(params.get("run").cloned().unwrap_or(Value::Null))
+            .map(|_| ())
+            .map_err(|_| KitError::protocol("runtime hook metadata is malformed"))
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum CodexHookEvent {
+    PreModelRequest,
+    PostModelRequest,
+    PreToolUse,
+    PermissionRequest,
+    PostToolUse,
+    PreCompact,
+    PostCompact,
+    SessionStart,
+    SessionEnd,
+    UserPromptSubmit,
+    SubagentStart,
+    SubagentStop,
+    Stop,
+    Interrupt,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum CodexHookHandler {
+    Command,
+    McpTool,
+    Prompt,
+    Agent,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum CodexHookExecution {
+    Sync,
+    Async,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum CodexHookScope {
+    Thread,
+    Turn,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum CodexHookSource {
+    System,
+    User,
+    Project,
+    Mdm,
+    SessionFlags,
+    Plugin,
+    CloudRequirements,
+    CloudManagedConfig,
+    LegacyManagedConfigFile,
+    LegacyManagedConfigMdm,
+    #[default]
+    Unknown,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum CodexHookStatus {
+    Running,
+    Completed,
+    Failed,
+    Blocked,
+    Stopped,
+}
+
+#[derive(Deserialize)]
+struct CodexHookEntry {
+    #[serde(rename = "kind")]
+    _kind: CodexHookEntryKind,
+    #[serde(rename = "text")]
+    _text: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum CodexHookEntryKind {
+    Warning,
+    Stop,
+    Feedback,
+    Context,
+    Error,
+}
+
+#[derive(Deserialize)]
 #[serde(tag = "method", content = "params", rename_all_fields = "camelCase")]
 pub(super) enum CodexMetadataNotification {
+    #[serde(rename = "thread/section/changed")]
+    ThreadSectionChanged {
+        thread_id: String,
+        #[serde(deserialize_with = "Option::<String>::deserialize")]
+        section_id: Option<String>,
+    },
     #[serde(rename = "thread/readState/changed")]
     ThreadReadStateChanged {
         thread_id: String,
@@ -261,6 +395,17 @@ impl CodexMetadataNotification {
             serde_json::from_value(serde_json::json!({"method":method,"params":params}))
                 .map_err(|_| KitError::protocol("runtime metadata notification is malformed"))?;
         let (scope, kind) = match notification {
+            Self::ThreadSectionChanged {
+                thread_id,
+                section_id,
+            } => {
+                // The section is opaque metadata, including the null removal.
+                drop(section_id);
+                (
+                    Self::thread(thread_id)?,
+                    CodexKnownNotificationKind::ThreadSectionChanged,
+                )
+            }
             Self::ThreadReadStateChanged {
                 thread_id,
                 read_state,

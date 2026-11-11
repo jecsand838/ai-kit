@@ -33,11 +33,11 @@
 //! let work = tokio::time::timeout(Duration::from_secs(24 * 60 * 60), async {
 //!     if cancel_requested {
 //!         let acknowledgement = provider.cancel_batch(owned_job_id.clone()).await?;
-//!         assert_eq!(acknowledgement.id, owned_job_id);
+//!         if acknowledgement.id != owned_job_id { return Err("cancellation job id changed".into()); }
 //!     }
 //!     let terminal = loop {
 //!         let job = provider.batch_status(owned_job_id.clone()).await?;
-//!         assert_eq!(job.id, owned_job_id);
+//!         if job.id != owned_job_id { return Err("observed job id changed".into()); }
 //!         match job.status {
 //!             BatchStatus::Queued | BatchStatus::Running => {
 //!                 tokio::time::sleep(Duration::from_secs(60)).await;
@@ -62,7 +62,7 @@
 //!         }
 //!         status => println!("Owned job reached {status:?}"),
 //!     }
-//!     Ok::<(), providers_kit::KitError>(())
+//!     Ok::<(), Box<dyn std::error::Error>>(())
 //! }).await;
 //! let shutdown = provider.shutdown().await;
 //! if let Err(error) = &shutdown {

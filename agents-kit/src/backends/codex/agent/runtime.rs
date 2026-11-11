@@ -1,4 +1,4 @@
-use crate::error::ErrorPhase;
+use crate::error::{ErrorDetail, ErrorPhase};
 use std::collections::BTreeSet;
 use std::time::Duration;
 use tools_kit::ToolsetBackend;
@@ -14,9 +14,9 @@ use crate::backends::codex::protocol::notifications::CodexServerNotification;
 use crate::backends::codex::protocol::responses::CodexServerResponse;
 use crate::backends::codex::protocol::{CodexInboundReceiver, CodexProtocol};
 use crate::backends::codex::server_requests::{CodexServerAction, CodexServerRendering};
-use crate::backends::codex::state_store::CodexStateStore;
 use crate::backends::codex::state_store::records::CodexToolAdmission;
-use crate::backends::codex::tools::{CodexDynamicToolCall, CodexTools};
+use crate::backends::codex::state_store::{CodexPromptEffect, CodexStateStore};
+use crate::backends::codex::tools::{CodexDynamicToolCall, CodexToolExecution, CodexTools};
 use crate::core::hierarchy::HierarchyRuntime;
 use crate::{AgentId, CodexConfig, KitError};
 
@@ -93,7 +93,11 @@ impl<S: StateStoreBackend> CodexRuntime<S> {
         self.protocol.clone()
     }
 
-    pub(crate) async fn shutdown(mut self, timeout: Duration) -> Result<(), KitError> {
+    pub(crate) async fn shutdown<T: ToolsetBackend>(
+        mut self,
+        timeout: Duration,
+        tools: &CodexTools<S, T>,
+    ) -> Result<(), KitError> {
         let deadline = tokio::time::Instant::now() + timeout;
         if let Some(stop) = self.stop.take() {
             let _ = stop.send(());
@@ -103,9 +107,20 @@ impl<S: StateStoreBackend> CodexRuntime<S> {
             Ok(Ok(Err(error))) => Some(error),
             Ok(Err(_)) => Some(KitError::integration("event owner failed")),
             Err(_) => {
-                self.events.abort();
-                let _ = (&mut self.events).await;
-                Some(KitError::timeout("event owner did not stop"))
+                let primary = KitError::timeout("event owner did not stop");
+                // Seal fresh handoffs before deciding whether the existing reader
+                // still owns an admitted retirement receipt. Only the reader can
+                // remove its Retiring worker after consuming the JoinSet result.
+                let retiring = tools.revoke_execution();
+                if !retiring {
+                    self.events.abort();
+                }
+                let cleanup = match (&mut self.events).await {
+                    Ok(result) => result,
+                    Err(error) if error.is_cancelled() && !retiring => Ok(()),
+                    Err(_) => Err(KitError::integration("event owner failed during cleanup")),
+                };
+                Some(primary.with_cleanup_result(cleanup))
             }
         };
         self.state.invalidate_runtime();
@@ -141,8 +156,9 @@ impl<S: StateStoreBackend> CodexRuntime<S> {
         hierarchy: HierarchyRuntime,
         tools: CodexTools<S, T>,
     ) -> Result<(), KitError> {
-        let mut tool_work = tokio::task::JoinSet::new();
-        let result = loop {
+        let mut tool_work =
+            tokio::task::JoinSet::<Result<Option<CodexServerRendering>, KitError>>::new();
+        let mut result = loop {
             tokio::select! {
                 _ = &mut stop => break Ok(()),
                 result = state.prompt_task_exit() => {
@@ -153,7 +169,11 @@ impl<S: StateStoreBackend> CodexRuntime<S> {
                         break Err(KitError::integration("managed tool work owner ended unexpectedly"));
                     };
                     match completed {
-                        Ok((id, rendering)) => {
+                        Ok((id, Err(error))) => {
+                            let finished = tools.finish_task(id);
+                            break Err(error.with_cleanup_result(finished));
+                        }
+                        Ok((id, Ok(rendering))) => {
                             let admission = match tools.response_admission(id) {
                                 Ok(admission) => admission,
                                 Err(error) => break Err(error),
@@ -242,6 +262,8 @@ impl<S: StateStoreBackend> CodexRuntime<S> {
                                     continue;
                                 }
                             };
+                            let effect = state.prompt_effect(call.thread_id(), call.turn_id());
+                            if effect.as_ref().is_some_and(|effect| !effect.allows_effects()) { continue; }
                             let generation = call.generation();
                             let runtime = match Self::conversation(
                                 &agent_id,
@@ -260,6 +282,7 @@ impl<S: StateStoreBackend> CodexRuntime<S> {
                             }) {
                                 Ok(runtime) => runtime,
                                 Err(error) => {
+                                    if effect.as_ref().is_some_and(|effect| !effect.allows_effects()) { continue; }
                                     let admission = match tools
                                         .generation_response_admission(&generation)
                                     {
@@ -283,12 +306,16 @@ impl<S: StateStoreBackend> CodexRuntime<S> {
                                     continue;
                                 }
                             };
+                            if effect.as_ref().is_some_and(|effect| !effect.allows_effects()) || !runtime.tool_effects_allowed() {
+                                continue;
+                            }
                             let tool_admission = match state
                                 .observe_prompt_turn(runtime.conversation_id(), call.turn_id())
                                 .await
                             {
                                 Ok(admission) => admission,
                                 Err(error) => {
+                                    if effect.as_ref().is_some_and(|effect| !effect.allows_effects()) { continue; }
                                     let admission = match tools
                                         .generation_response_admission(&generation)
                                     {
@@ -338,14 +365,40 @@ impl<S: StateStoreBackend> CodexRuntime<S> {
                                 }
                                 continue;
                             }
+                            if tools.recognizes_call(&call)
+                                && !runtime.observe_tool_progress(call.thread_id(), call.turn_id()).await
+                            {
+                                continue;
+                            }
+                            if effect.as_ref().is_some_and(|effect| !effect.allows_effects()) { continue; }
+                            let admission = state.observe_prompt_turn(runtime.conversation_id(), call.turn_id()).await;
+                            if effect.as_ref().is_some_and(|effect| !effect.allows_effects()) { continue; }
+                            match admission {
+                                Ok(CodexToolAdmission::Execute) => {}
+                                Ok(CodexToolAdmission::Suppress) => continue,
+                                Err(error) => {
+                                    let admission = match tools.generation_response_admission(&generation) {
+                                        Ok(admission) => admission,
+                                        Err(error) => break Err(error),
+                                    };
+                                    if admission.is_some() {
+                                        let response = protocol.respond(CodexServerResponse::from_rendering(
+                                            CodexServerRendering::from_error(request_id, &error),
+                                        )).await;
+                                        drop(admission);
+                                        if let Err(error) = response { break Err(error); }
+                                    }
+                                    continue;
+                                }
+                            }
                             let workspace_id = runtime.binding().workspace_id().clone();
                             let conversation_id = runtime.conversation_id().clone();
                             let (start, started) = oneshot::channel();
                             let abort = tool_work.spawn(async move {
                                 if started.await.is_err() {
-                                    return None;
+                                    return Ok(None);
                                 }
-                                Self::apply_dynamic_tool(runtime, request_id, call).await
+                                Self::apply_dynamic_tool(runtime, request_id, call, effect).await
                             });
                             if let Err(error) = tools.register_task(
                                 generation,
@@ -375,15 +428,52 @@ impl<S: StateStoreBackend> CodexRuntime<S> {
                 }
             }
         };
-        tool_work.abort_all();
+        let cancellation_error = {
+            let cancellation = tools.cancel_all(tools.cancellation_deadline());
+            tokio::pin!(cancellation);
+            loop {
+                tokio::select! {
+                    biased;
+                    completed = tool_work.join_next_with_id(), if !tool_work.is_empty() => {
+                        let Some(completed) = completed else { break Some(KitError::integration("managed tool cleanup owner ended unexpectedly")); };
+                        let (id, cleanup) = match completed {
+                            Ok((id, Err(error))) => (id, Some(error)),
+                            Ok((id, Ok(_))) => (id, None),
+                            Err(error) => (error.id(), None),
+                        };
+                        if let Some(error) = cleanup {
+                            result = Err(match result { Ok(()) => error, Err(primary) => primary.with_supplementary(error.in_phase(ErrorPhase::Cleanup)) });
+                        }
+                        if let Err(error) = tools.finish_task(id) {
+                            result = Err(match result { Ok(()) => error, Err(primary) => primary.with_supplementary(error.in_phase(ErrorPhase::Cleanup)) });
+                        }
+                    }
+                    cancelled = &mut cancellation => break cancelled.err(),
+                }
+            }
+        };
+        // Execution can now be revoked, but an accepted local cancellation and
+        // native commit receipt stay with their already registered worker.
+        tools.revoke_execution();
         while let Some(completed) = tool_work.join_next_with_id().await {
-            let id = match completed {
-                Ok((id, _)) => id,
-                Err(error) => error.id(),
+            let (id, cleanup) = match completed {
+                Ok((id, Err(error))) => (id, Some(error)),
+                Ok((id, Ok(_))) => (id, None),
+                Err(error) => (error.id(), None),
             };
-            let _ = tools.finish_task(id);
+            if let Some(error) = cleanup {
+                result = Err(match result {
+                    Ok(()) => error,
+                    Err(primary) => primary.with_supplementary(error.in_phase(ErrorPhase::Cleanup)),
+                });
+            }
+            if let Err(error) = tools.finish_task(id) {
+                result = Err(match result {
+                    Ok(()) => error,
+                    Err(primary) => primary.with_supplementary(error.in_phase(ErrorPhase::Cleanup)),
+                });
+            }
         }
-        let cancellation_error = tools.cancel_all(tools.cancellation_deadline()).await.err();
         match (result, cancellation_error) {
             (Err(error), Some(cleanup)) => {
                 Err(error.with_supplementary(cleanup.in_phase(ErrorPhase::Cleanup)))
@@ -397,17 +487,29 @@ impl<S: StateStoreBackend> CodexRuntime<S> {
         runtime: CodexConversationRuntime<S, T>,
         request_id: serde_json::Value,
         call: CodexDynamicToolCall,
-    ) -> Option<CodexServerRendering> {
-        let result = runtime.execute_tool(call).await.map(|response| {
-            Some(CodexServerRendering::dynamic_tool(
-                request_id.clone(),
-                response,
-            ))
-        });
-        match result {
-            Ok(rendering) => rendering,
-            Err(error) => Some(CodexServerRendering::from_error(request_id, &error)),
+        effect: Option<CodexPromptEffect>,
+    ) -> Result<Option<CodexServerRendering>, KitError> {
+        if effect
+            .as_ref()
+            .is_some_and(|effect| !effect.allows_effects())
+        {
+            return Ok(None);
         }
+        let result = match runtime.execute_tool(call, effect.as_ref()).await {
+            Ok(CodexToolExecution::Cancelled(cleanup)) => return cleanup.map(|()| None),
+            Ok(CodexToolExecution::Response(response)) => Ok(response),
+            Err(error) => Err(error),
+        };
+        if effect
+            .as_ref()
+            .is_some_and(|effect| !effect.allows_effects())
+        {
+            return Ok(None);
+        }
+        Ok(Some(match result {
+            Ok(response) => CodexServerRendering::dynamic_tool(request_id, response),
+            Err(error) => CodexServerRendering::from_error(request_id, &error),
+        }))
     }
 
     async fn apply_inbound<T: ToolsetBackend>(
@@ -445,15 +547,36 @@ impl<S: StateStoreBackend> CodexRuntime<S> {
     ) -> Result<Option<CodexServerRendering>, KitError> {
         match action {
             CodexServerAction::Interaction(request) => {
+                // Retain the exact original live owner before any routing await.
+                // Clearing its map entry cannot transfer this callback to a new prompt.
+                let effect = request
+                    .turn_id()
+                    .and_then(|turn| state.prompt_effect(request.thread_id(), turn));
+                if effect
+                    .as_ref()
+                    .is_some_and(|effect| !effect.allows_effects())
+                {
+                    return Ok(None);
+                }
                 let runtime =
-                    Self::conversation(agent_id, state, protocol, tools, request.thread_id())
-                        .await?
-                        .ok_or_else(|| {
-                            KitError::invalid_state(
-                                "server request has no durable conversation owner",
-                            )
-                        })?;
-                runtime.publish_interaction(request).await.map(|()| None)
+                    Self::conversation(agent_id, state, protocol, tools, request.thread_id()).await;
+                if effect
+                    .as_ref()
+                    .is_some_and(|effect| !effect.allows_effects())
+                {
+                    return Ok(None);
+                }
+                let runtime = runtime?.ok_or_else(|| {
+                    KitError::invalid_state("server request has no durable conversation owner")
+                })?;
+                let result = runtime.publish_interaction(request, effect.as_ref()).await;
+                if effect
+                    .as_ref()
+                    .is_some_and(|effect| !effect.allows_effects())
+                {
+                    return Ok(None);
+                }
+                result.map(|()| None)
             }
             CodexServerAction::DynamicTool { request_id, call } => {
                 let _ = (request_id, call);
@@ -522,8 +645,31 @@ impl<S: StateStoreBackend> CodexRuntime<S> {
                 thread_id,
                 request_id,
             } => {
-                let _ = (thread_id, request_id);
-                Ok(())
+                let deadline = tools.cancellation_deadline();
+                loop {
+                    match state
+                        .retire_pending_request(&thread_id, &request_id, deadline)
+                        .await
+                    {
+                        Ok(()) => return Ok(()),
+                        Err(error)
+                            if error.detail() == Some(&ErrorDetail::TransactionConflict)
+                                && error.context().phase != ErrorPhase::Cleanup
+                                && error.supplementary().is_empty() =>
+                        {
+                            let remaining =
+                                deadline.saturating_duration_since(tokio::time::Instant::now());
+                            if remaining.is_zero() {
+                                return Err(error);
+                            }
+                            tokio::time::sleep(Duration::from_millis(25).min(remaining)).await;
+                            if tokio::time::Instant::now() >= deadline {
+                                return Err(error);
+                            }
+                        }
+                        Err(error) => return Err(error),
+                    }
+                }
             }
             CodexNotificationAction::ThreadDeleted { thread_id } => {
                 if let Some((conversation, binding)) =
@@ -550,6 +696,19 @@ impl<S: StateStoreBackend> CodexRuntime<S> {
                 Self::required_conversation(agent_id, state, protocol, tools, &thread_id)
                     .await
                     .map(|_| ())
+            }
+            CodexNotificationAction::StartedCommand {
+                thread_id,
+                turn_id,
+                kind,
+            } => {
+                let runtime =
+                    Self::required_conversation(agent_id, state, protocol, tools, &thread_id)
+                        .await?;
+                if runtime.observe_tool_progress(&thread_id, &turn_id).await {
+                    runtime.publish_notification(kind).await?;
+                }
+                Ok(())
             }
             CodexNotificationAction::Publish { thread_id, kind } => {
                 let runtime =

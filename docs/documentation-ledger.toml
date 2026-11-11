@@ -1,6 +1,6 @@
-version = 26
-scope_date = "2026-11-01"
-scope_source = "User-approved provider Session refactor integration on 2026-11-01, following target-state documentation pre-work committed as eca58db and tests-first implementation; preserves the PR #39 documentation baseline and historical evidence within its recorded scopes"
+version = 27
+scope_date = "2026-11-11"
+scope_source = "User-approved workspace agentic-documentation refresh against upgrade-vendors 60f9160, including reusable Storage vendor prompt metadata; preserves owning contracts, the completed Rustdoc refresh, bounded historical adoptions, and source-qualified evidence"
 notes = [
   "This ledger covers the five compiled Kit crates and their active repository-owned guidance.",
   "The root README owns package selection, installation and runnable entrypoints; architecture, exact validation and release policy remain in their canonical owners. Crate introductions describe pre-1.0 compatibility without announcing unpublished releases.",
@@ -14,10 +14,12 @@ notes = [
   "ModelBackend owns both its Session and Continuation associated types; Custom Agent keeps continuation prompt-local and durable history provider-neutral.",
   "The Session contract includes SessionCommands and SessionEvents in the session module: eleven backend traits, two borrowed-half traits and five App traits. Supplied halves retain opaque closed dispatch, concrete associated types and the Session owner's sole consuming close authority.",
   "Conversation sessions must compose the existing generation and exact-continuation paths for all four providers; native OpenAI Realtime and Gemini Live remain explicit separate profiles. Qualification is established separately by recorded validation of the exact source and invocation.",
-  "Session implementation follows reviewed agentic documentation pre-work, failing tests before production changes, passing behavioral regressions and independent review of each actual implementation diff. Full workspace gates remain required without batch exclusions for this refactor.",
+  "The completed Session implementation followed reviewed agentic documentation pre-work, failing tests before production changes, passing behavioral regressions and independent review of each actual implementation diff. Its approved refactor required full workspace gates without batch exclusions; that historical campaign scope does not activate a new release qualification during this documentation refresh.",
   "Agent preserves direct ToolsetBackend and its associated Handler; App adds five workflow traits without widening lower-crate seams.",
   "Direct public-trait mocks are the primary deterministic lane; native integration and strict-live proof remain separate. Known defects and dated receipts never weaken release requirements.",
   "Active guidance describes contracts and required validation, not a claim that a particular checkout passed the release gates.",
+  "The selected sources include Codex 0.167.1 with OpenCode retained at 1.19.3, LanceDB 0.41.0 with Lance 14.0.2, Redb 4.5.0, Turso 0.8.3, SurrealDB 4.0.0, and rmcp 3.9.0. Selection is distinct from the source/invocation scope of recorded qualification.",
+  "The explicitly inventoried Storage vendor manifest supplies reusable agent prompt metadata. This refresh changes only plan_prompt_suffix values, preserves the exact SurrealDB v4.0.0 approval restriction, and does not activate another vendor update or alter frozen dossiers, pins, gates, locks, or archives.",
   "The qualification report, prototype/capacity records and migration-fixture provenance retain their recorded source and results. Documentation edits do not relabel qualification; new integration results are recorded separately.",
   "External Rust dependencies resolve from crates.io without source patches or guard exemptions. Temporary advisory exceptions are individually enumerated; raw findings remain visible and new vulnerabilities or unsoundness remain blocking.",
   "Qdrant is temporarily absent from current features, public configuration and validation lanes. Historical backend results and security evidence retain their original source scope and authorize no current feature, patch or gate waiver.",
@@ -108,13 +110,14 @@ active = [
   ".agents/skills/*/references/*.md",
   ".agents/skills/*/agents/openai.yaml",
   ".codex/agents/*.toml",
+  "storage-kit/vendor/vendors.toml",
   "agents-kit/.codex/development/PROCESS.md",
   "agents-kit/.codex/development/dispatch/*.md",
 ]
 historical = ["app-kit/audits/**/*.md", "app-kit/plans/**/*.md", "docs/refactors/**/*.md", "docs/security-evidence/**", "docs/pr20-pr21-integration.md", "docs/pr22-validation.md", "docs/strict-live-2026-10-28.md", "docs/strict-live-followup-2026-10-28.md", "docs/strict-live-native-repairs-2026-10-28.md", "docs/strict-live-provider-followup-2026-10-29.md", "docs/strict-live-delivery-2026-10-29.md", "docs/strict-live-ollama-repair-2026-10-29.md", "storage-kit/tests/fixtures/README.md", "storage-kit/docs/feature-split-qualification.md", "storage-kit/docs/lancedb-state-store-capacity.md", "storage-kit/docs/lancedb-state-store-prototype.md"]
 templates = ["agents-kit/.codex/development/templates/**/*.md", ".agents/skills/*/assets/**", ".github/ISSUE_TEMPLATE/*.yml", ".github/pull_request_template.md"]
 excluded = ["tmp/**", "target/**", "**/vendor/**", "agents-kit/.codex/development/execution/**"]
-policy = "Historical records retain their original evidence; templates are examples, not active runs. Explicit adopted_requirements records preserve only the incorporated scope, not old phase instructions, draft signatures, commands, or completion claims. Ordinary links do not propagate adoption. Excluded artifacts are never traversed by documentation checks; pinned oracle authority comes only from the owning specification's explicit adoption. Selecting a workflow is explicit; its presence or adoption of frozen requirements does not activate an old campaign."
+policy = "Historical records retain their original evidence; templates are examples, not active runs. Explicit adopted_requirements records preserve only the incorporated scope, not old phase instructions, draft signatures, commands, or completion claims. Ordinary links do not propagate adoption. The exact storage-kit/vendor/vendors.toml active entry inventories repository-owned reusable prompt metadata; it does not recursively include vendor siblings or activate a campaign. Other excluded artifacts are never traversed by documentation checks; pinned oracle authority comes only from the owning specification's explicit adoption. Selecting a workflow is explicit; its presence or adoption of frozen requirements does not activate an old campaign."
 
 # These source-specific links identify private, locally retained evidence. Their
 # absence in a clean checkout is permitted; this proves neither receipt

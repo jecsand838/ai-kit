@@ -1,13 +1,15 @@
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     fmt,
     path::PathBuf,
     sync::{Arc, Mutex, OnceLock, Weak},
 };
 
+use futures::TryStreamExt;
 use lance::session::Session;
 use lancedb::{
-    connection::Connection, database::namespace::LanceNamespaceDatabase, embeddings::MemoryRegistry,
+    connection::Connection, database::namespace::LanceNamespaceDatabase,
+    embeddings::MemoryRegistry, listing::ListingOptions,
 };
 
 mod memory;
@@ -217,34 +219,19 @@ impl LanceManager {
         parent: &[String],
         name: &str,
     ) -> Result<bool, StorageError> {
-        let mut page_token = None;
-        let mut seen_tokens = BTreeSet::new();
-        loop {
-            let request = serde_json::from_value(serde_json::json!({
-                "id": parent,
-                "limit": 256,
-                "page_token": page_token,
-            }))
-            .map_err(|error| StorageError::Serialization(error.to_string()))?;
-            let response = self
-                .connection
-                .list_namespaces(request)
-                .await
-                .map_err(|error| self.map_err("list_namespaces", error))?;
-            if response.namespaces.iter().any(|child| child == name) {
+        let mut namespaces = self
+            .connection
+            .list_namespaces(parent, ListingOptions::default().page_limit(256));
+        while let Some(child) = namespaces
+            .try_next()
+            .await
+            .map_err(|error| self.map_err("list_namespaces", error))?
+        {
+            if child == name {
                 return Ok(true);
             }
-            let Some(next) = response.page_token.filter(|token| !token.is_empty()) else {
-                return Ok(false);
-            };
-            if !seen_tokens.insert(next.clone()) {
-                return Err(StorageError::backend_op(
-                    "list_namespaces",
-                    "LanceDB namespace pagination repeated a continuation token",
-                ));
-            }
-            page_token = Some(next);
         }
+        Ok(false)
     }
 
     pub(super) fn mutation_process_lock(&self) -> Arc<tokio::sync::Mutex<()>> {

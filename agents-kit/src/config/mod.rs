@@ -49,28 +49,32 @@ pub enum BackendConfig {
 /// # Examples
 ///
 /// ```
-/// use std::num::NonZeroUsize;
-/// use std::time::Duration;
-/// use agents_kit::{
-///     config::{AgentConfig, CodexConfig},
-///     KitError,
-/// };
+/// use std::{num::NonZeroUsize, time::Duration};
+/// use agents_kit::config::{AgentConfig, BackendConfig, CodexConfig};
+/// use agents_kit::error::ErrorKind;
 ///
-/// let agent_config = || -> Result<AgentConfig, KitError> {
-///     let backend = CodexConfig::spawn(
-///         Duration::from_secs(15),
-///         Duration::from_secs(60),
-///     )?;
-///     AgentConfig::new(
-///         backend.into(),
-///         Duration::from_secs(60),
-///         NonZeroUsize::new(1).expect("one is nonzero"),
-///     )?
-///     .with_display_name("documentation-agent")
-/// };
-/// let config = agent_config()?;
+/// // Configuration is passive: this does not start Codex or open a connection.
+/// let backend = CodexConfig::spawn(Duration::from_secs(15), Duration::from_secs(60))?;
+/// let config = AgentConfig::new(backend.into(), Duration::from_secs(30), NonZeroUsize::MIN)?;
+/// assert!(matches!(config.backend(), BackendConfig::Codex(_)));
+/// assert_eq!(config.lifecycle_timeout(), Duration::from_secs(30));
+/// assert_eq!(config.prompt_limit().get(), 1);
+/// assert_eq!(config.display_name(), None);
+/// assert_eq!(config.instructions(), None);
+/// assert_eq!(config.default_prompt_timeout(), None);
+/// assert!(!config.tracing_enabled());
+///
+/// let config = config.with_display_name("documentation-agent")?
+///     .with_instructions("Use concise answers.")?
+///     .with_tracing_enabled(true)
+///     .with_default_prompt_timeout(Duration::from_secs(45))?;
 /// assert_eq!(config.display_name(), Some("documentation-agent"));
-/// # Ok::<(), KitError>(())
+/// assert_eq!(config.instructions(), Some("Use concise answers."));
+/// assert!(config.tracing_enabled());
+/// assert_eq!(config.default_prompt_timeout(), Some(Duration::from_secs(45)));
+/// assert_eq!(config.clone().with_display_name(" padded ").unwrap_err().kind(), ErrorKind::InvalidConfig);
+/// assert_eq!(config.with_default_prompt_timeout(Duration::ZERO).unwrap_err().kind(), ErrorKind::InvalidConfig);
+/// # Ok::<(), agents_kit::KitError>(())
 /// ```
 #[derive(Clone, Debug)]
 pub struct AgentConfig {
@@ -89,15 +93,7 @@ impl AgentConfig {
     /// # Errors
     /// Returns [`crate::error::ErrorKind::InvalidConfig`] when the lifecycle timeout is zero or the selected backend configuration is invalid.
     ///
-    /// ```
-    /// use agents_kit::config::{AgentConfig, CodexConfig};
-    /// use std::{num::NonZeroUsize, time::Duration};
-    /// let config = AgentConfig::new(CodexConfig::spawn(Duration::from_secs(15),
-    ///     Duration::from_secs(60))?.into(), Duration::from_secs(30), NonZeroUsize::MIN)?;
-    /// assert_eq!(config.lifecycle_timeout(), Duration::from_secs(30));
-    /// assert_eq!(config.prompt_limit().get(), 1);
-    /// # Ok::<(), agents_kit::KitError>(())
-    /// ```
+    /// See [`AgentConfig`] for a runnable configuration and validation example.
     pub fn new(
         backend: BackendConfig,
         lifecycle_timeout: Duration,
@@ -121,15 +117,7 @@ impl AgentConfig {
     /// # Errors
     /// Returns [`crate::error::ErrorKind::InvalidConfig`] for an empty or padded display name.
     ///
-    /// ```
-    /// use agents_kit::config::{AgentConfig, CodexConfig};
-    /// use std::{num::NonZeroUsize, time::Duration};
-    /// let config = AgentConfig::new(CodexConfig::spawn(Duration::from_secs(15),
-    ///     Duration::from_secs(60))?.into(), Duration::from_secs(30), NonZeroUsize::MIN)?;
-    /// let config = config.with_display_name("worker")?;
-    /// assert_eq!(config.display_name(), Some("worker"));
-    /// # Ok::<(), agents_kit::KitError>(())
-    /// ```
+    /// See [`AgentConfig`] for a runnable configuration and validation example.
     pub fn with_display_name(mut self, display_name: impl Into<String>) -> Result<Self, KitError> {
         let display_name = display_name.into();
         Self::validate_optional_text("agent display name", Some(&display_name))?;
@@ -142,15 +130,7 @@ impl AgentConfig {
     /// # Errors
     /// Returns [`crate::error::ErrorKind::InvalidConfig`] for empty or padded instructions.
     ///
-    /// ```
-    /// use agents_kit::config::{AgentConfig, CodexConfig};
-    /// use std::{num::NonZeroUsize, time::Duration};
-    /// let config = AgentConfig::new(CodexConfig::spawn(Duration::from_secs(15),
-    ///     Duration::from_secs(60))?.into(), Duration::from_secs(30), NonZeroUsize::MIN)?;
-    /// let config = config.with_instructions("Use concise answers.")?;
-    /// assert_eq!(config.instructions(), Some("Use concise answers."));
-    /// # Ok::<(), agents_kit::KitError>(())
-    /// ```
+    /// See [`AgentConfig`] for a runnable configuration and validation example.
     pub fn with_instructions(mut self, instructions: impl Into<String>) -> Result<Self, KitError> {
         let instructions = instructions.into();
         Self::validate_optional_text("agent instructions", Some(&instructions))?;
@@ -160,15 +140,7 @@ impl AgentConfig {
 
     /// Enables or disables runtime tracing for this agent.
     ///
-    /// ```
-    /// use agents_kit::config::{AgentConfig, CodexConfig};
-    /// use std::{num::NonZeroUsize, time::Duration};
-    /// let config = AgentConfig::new(CodexConfig::spawn(Duration::from_secs(15),
-    ///     Duration::from_secs(60))?.into(), Duration::from_secs(30), NonZeroUsize::MIN)?;
-    /// let config = config.with_tracing_enabled(true);
-    /// assert!(config.tracing_enabled());
-    /// # Ok::<(), agents_kit::KitError>(())
-    /// ```
+    /// See [`AgentConfig`] for a runnable configuration and validation example.
     pub fn with_tracing_enabled(mut self, tracing_enabled: bool) -> Self {
         self.tracing_enabled = tracing_enabled;
         self
@@ -179,15 +151,7 @@ impl AgentConfig {
     /// # Errors
     /// Returns [`crate::error::ErrorKind::InvalidConfig`] when the timeout is zero.
     ///
-    /// ```
-    /// use agents_kit::config::{AgentConfig, CodexConfig};
-    /// use std::{num::NonZeroUsize, time::Duration};
-    /// let config = AgentConfig::new(CodexConfig::spawn(Duration::from_secs(15),
-    ///     Duration::from_secs(60))?.into(), Duration::from_secs(30), NonZeroUsize::MIN)?;
-    /// let config = config.with_default_prompt_timeout(Duration::from_secs(45))?;
-    /// assert_eq!(config.default_prompt_timeout(), Some(Duration::from_secs(45)));
-    /// # Ok::<(), agents_kit::KitError>(())
-    /// ```
+    /// See [`AgentConfig`] for a runnable configuration and validation example.
     pub fn with_default_prompt_timeout(mut self, timeout: Duration) -> Result<Self, KitError> {
         if timeout.is_zero() {
             return Err(KitError::invalid_config(
@@ -200,84 +164,42 @@ impl AgentConfig {
 
     /// Returns the selected backend configuration.
     ///
-    /// ```
-    /// use agents_kit::config::{AgentConfig, CodexConfig};
-    /// use std::{num::NonZeroUsize, time::Duration};
-    /// let config = AgentConfig::new(CodexConfig::spawn(Duration::from_secs(15),
-    ///     Duration::from_secs(60))?.into(), Duration::from_secs(30), NonZeroUsize::MIN)?;
-    /// assert!(matches!(config.backend(), agents_kit::config::BackendConfig::Codex(_)));
-    /// # Ok::<(), agents_kit::KitError>(())
-    /// ```
+    /// See [`AgentConfig`] for a runnable configuration and validation example.
     pub fn backend(&self) -> &BackendConfig {
         &self.backend
     }
 
     /// Returns the configured display name, when present.
     ///
-    /// ```
-    /// use agents_kit::config::{AgentConfig, CodexConfig};
-    /// use std::{num::NonZeroUsize, time::Duration};
-    /// let config = AgentConfig::new(CodexConfig::spawn(Duration::from_secs(15),
-    ///     Duration::from_secs(60))?.into(), Duration::from_secs(30), NonZeroUsize::MIN)?;
-    /// assert_eq!(config.display_name(), None);
-    /// # Ok::<(), agents_kit::KitError>(())
-    /// ```
+    /// See [`AgentConfig`] for a runnable configuration and validation example.
     pub fn display_name(&self) -> Option<&str> {
         self.display_name.as_deref()
     }
 
     /// Returns the configured agent-level instructions, when present.
     ///
-    /// ```
-    /// use agents_kit::config::{AgentConfig, CodexConfig};
-    /// use std::{num::NonZeroUsize, time::Duration};
-    /// let config = AgentConfig::new(CodexConfig::spawn(Duration::from_secs(15),
-    ///     Duration::from_secs(60))?.into(), Duration::from_secs(30), NonZeroUsize::MIN)?;
-    /// assert_eq!(config.instructions(), None);
-    /// # Ok::<(), agents_kit::KitError>(())
-    /// ```
+    /// See [`AgentConfig`] for a runnable configuration and validation example.
     pub fn instructions(&self) -> Option<&str> {
         self.instructions.as_deref()
     }
 
     /// Returns whether runtime tracing is enabled.
     ///
-    /// ```
-    /// use agents_kit::config::{AgentConfig, CodexConfig};
-    /// use std::{num::NonZeroUsize, time::Duration};
-    /// let config = AgentConfig::new(CodexConfig::spawn(Duration::from_secs(15),
-    ///     Duration::from_secs(60))?.into(), Duration::from_secs(30), NonZeroUsize::MIN)?;
-    /// assert!(!config.tracing_enabled());
-    /// # Ok::<(), agents_kit::KitError>(())
-    /// ```
+    /// See [`AgentConfig`] for a runnable configuration and validation example.
     pub fn tracing_enabled(&self) -> bool {
         self.tracing_enabled
     }
 
     /// Returns the bound used for agent lifecycle and recovery work.
     ///
-    /// ```
-    /// use agents_kit::config::{AgentConfig, CodexConfig};
-    /// use std::{num::NonZeroUsize, time::Duration};
-    /// let config = AgentConfig::new(CodexConfig::spawn(Duration::from_secs(15),
-    ///     Duration::from_secs(60))?.into(), Duration::from_secs(30), NonZeroUsize::MIN)?;
-    /// assert_eq!(config.lifecycle_timeout(), Duration::from_secs(30));
-    /// # Ok::<(), agents_kit::KitError>(())
-    /// ```
+    /// See [`AgentConfig`] for a runnable configuration and validation example.
     pub fn lifecycle_timeout(&self) -> Duration {
         self.lifecycle_timeout
     }
 
     /// Returns the maximum number of concurrently admitted prompts for the agent.
     ///
-    /// ```
-    /// use agents_kit::config::{AgentConfig, CodexConfig};
-    /// use std::{num::NonZeroUsize, time::Duration};
-    /// let config = AgentConfig::new(CodexConfig::spawn(Duration::from_secs(15),
-    ///     Duration::from_secs(60))?.into(), Duration::from_secs(30), NonZeroUsize::MIN)?;
-    /// assert_eq!(config.prompt_limit().get(), 1);
-    /// # Ok::<(), agents_kit::KitError>(())
-    /// ```
+    /// See [`AgentConfig`] for a runnable configuration and validation example.
     pub fn prompt_limit(&self) -> NonZeroUsize {
         self.prompt_limit
     }
@@ -285,14 +207,7 @@ impl AgentConfig {
     /// Returns the default foreground prompt timeout, when configured.
     #[must_use]
     ///
-    /// ```
-    /// use agents_kit::config::{AgentConfig, CodexConfig};
-    /// use std::{num::NonZeroUsize, time::Duration};
-    /// let config = AgentConfig::new(CodexConfig::spawn(Duration::from_secs(15),
-    ///     Duration::from_secs(60))?.into(), Duration::from_secs(30), NonZeroUsize::MIN)?;
-    /// assert_eq!(config.default_prompt_timeout(), None);
-    /// # Ok::<(), agents_kit::KitError>(())
-    /// ```
+    /// See [`AgentConfig`] for a runnable configuration and validation example.
     pub fn default_prompt_timeout(&self) -> Option<Duration> {
         self.default_prompt_timeout
     }

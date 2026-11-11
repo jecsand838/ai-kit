@@ -225,7 +225,10 @@ pub enum ActionEvent {
     },
     /// The first authoritative terminal result and its staged state operations.
     Completed {
-        /// Transient final result, distinct from durable workflow state.
+        /// Final result, retained in action outcomes when the complete wave commits.
+        ///
+        /// It remains distinct from workflow state; only explicit writes or authored
+        /// result projection change state. Before commit, this result is staged.
         result: Map<String, Value>,
         /// Ordered state operations to validate and reduce at the commit barrier.
         writes: Vec<StateChange>,

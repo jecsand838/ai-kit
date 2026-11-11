@@ -27,6 +27,11 @@ pub(crate) enum CodexNotificationAction {
         thread_id: String,
         thread_source: Option<String>,
     },
+    StartedCommand {
+        thread_id: String,
+        turn_id: String,
+        kind: ConversationNotificationKind,
+    },
     Publish {
         thread_id: String,
         kind: ConversationNotificationKind,
@@ -126,7 +131,14 @@ impl CodexNotificationAction {
             (CodexItemLifecycle::Started, CodexThreadItem::CommandExecution(command))
                 if matches!(command.status(), CodexCommandExecutionStatus::InProgress) =>
             {
-                Ok(Self::from_command(thread_id, command))
+                Ok(Self::StartedCommand {
+                    thread_id,
+                    turn_id,
+                    kind: ConversationNotificationKind::Process {
+                        label: COMMAND_PROCESS_LABEL.to_owned(),
+                        state: ProcessState::Running,
+                    },
+                })
             }
             (CodexItemLifecycle::Completed, CodexThreadItem::CommandExecution(command))
                 if matches!(
@@ -220,7 +232,8 @@ impl CodexNotificationAction {
             | CodexKnownNotificationKind::RealtimeTranscriptDelta => {
                 Self::Unsupported { thread_id }
             }
-            CodexKnownNotificationKind::ThreadReadStateChanged
+            CodexKnownNotificationKind::ThreadSectionChanged
+            | CodexKnownNotificationKind::ThreadReadStateChanged
             | CodexKnownNotificationKind::ThreadAttachmentUpdated
             | CodexKnownNotificationKind::ProjectChanged
             | CodexKnownNotificationKind::ThreadProjectUpdated

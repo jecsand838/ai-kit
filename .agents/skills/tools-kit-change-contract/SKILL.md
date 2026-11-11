@@ -34,8 +34,11 @@ Keep tool changes inside the reduced executable-tool boundary.
    Unify function and interactive registration under ToolRegistration.
 6. Keep `ToolHandlerBackend::step` as the only execution method.
    Tool-authored failure is Completed ToolResult with `is_error`; outer
-   ToolError is reserved for invalid input/state, protocol, transport,
-   cancellation, timeout, unsupported, or closed runtime.
+   ToolError is reserved for input/output validation, invalid state, protocol,
+   transport, cancellation, timeout, unsupported, or closed runtime.
+   `ToolError::InvalidOutput` can follow completed execution; an outer error
+   does not establish that no side effects occurred. Completed model-visible
+   errors retain their output-schema exemption.
 7. Preserve shared exactly-once Toolset shutdown, sealed admission, tracked
    cleanup, cancellation-safe terminal publication, and no drop cleanup
    promise. Registration copy-on-write Arc unwrapping is not lifecycle.
@@ -52,8 +55,11 @@ Keep tool changes inside the reduced executable-tool boundary.
 10. Organize supporting API into `declaration`, `execution`, `interaction`,
     `local`, `mcp`, and `schema`. Keep root exports tight and do not reexport
     schemars.
-11. Update docs/source contracts with implementation and run validation only
-    at the authorized final validation stage.
+11. Update docs/source contracts with implementation. Before production edits,
+    record focused failing behavioral tests; retain passing controls during
+    implementation and require independent review of the actual diff. Run the
+    exact completion gates at the authorized final validation stage after the
+    change is assembled. Final-gate sequencing does not defer tests-first work.
 
 ## Removed Boundaries
 

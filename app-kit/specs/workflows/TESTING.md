@@ -73,8 +73,19 @@ Existing workflow_execution/workspace_contract cases remain where they fit.
 | hook_execution_contract | Real caller-local async hook delivery: exact lane order, committed versus partial/failed state, pre/item/post callback failure, no-output rollback, and synchronous-only Drop after retained callback/publication settlement |
 | observability_contract | Captured host subscriber, applicable operational spans, native commit-before-event witnesses, safe fields, poll scope, worker dispatcher propagation and subscriber-failure isolation |
 | tracking_checkpoint_contract | Real public history/restore values in StepFinished and registration exports; attempted versus committed metadata, one codec snapshot, callback/output failures and distinct fork/spawn pointers |
-| docs_examples | Every JSON example parses, deterministic ones execute, public examples compile/run, all guides/schema/navigation links complete |
+| docs_examples | Required guide/executable inventories and ordinary local file links; every JSON example parses; documented native workflows, halts after each session's first action or wave, activation counting and complete waves exceeding step limits execute with asserted outcomes |
 | performance/recovery workloads | Measured linear/wide/nested/history workloads, active capacity reuse, bounded task/thread/memory growth and fresh-process crash recovery |
+
+Complete public guides, schema, navigation and compiled/executed examples remain
+required. The `docs_examples` target does not prove Markdown anchor validity,
+prose accuracy, example compilation or real-service journeys. `schema_contract`
+checks the published schema against parser behavior. The
+[App check script](../../scripts/check.sh) owns all-target compilation, doctests,
+the short service-free executable examples and the separate-process history
+example contract. The [shared docs gate](../../../scripts/check_docs_site.sh)
+owns documentation inventory/link checks, strict Rustdoc generation and doctests.
+Configured Agent examples and explicit performance workloads retain their
+separate real-service and capacity proof obligations.
 
 The two mock targets belong to the primary deterministic CI lane described in
 [the workspace mock testing contract](../../../docs/mock-testing.md). They use

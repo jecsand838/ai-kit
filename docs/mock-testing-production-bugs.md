@@ -6,6 +6,90 @@ cancellation follow-up started at `1de968b3c98015f7fc48255d6ac40ef4593ca44d`.
 Regressions remain enabled; fixture and validation-setup errors are distinguished
 from production defects. Manifests, lockfiles, features, and vendor sources are unchanged.
 
+## Codex 0.167.0 protocol adaptation — vendor update
+
+The separately authorized Codex-only update starts at
+`24a33f54401f502fdcdea776ec64fcf854bca18d`. These regressions exercise the public
+Agent through a WebSocket protocol fixture and real Lance state, outside the
+primary direct-trait mock lane. They establish adapter behavior, not native
+Codex qualification. The updater owns the candidate vendor lock and archive.
+
+Before each production area changed, enabled `codex_prompt_stream` tests
+reproduced the following failures. Receipts, complete logs and source hashes
+are retained under
+`target/vendor-updates/agents-kit/codex/rust-v0.167.0/implementation/`.
+
+| Area | Red receipt | Required regression |
+| --- | --- | --- |
+| Selected runtime identity | `01-identity-red`, `02-previous-identity-red` | Accept exactly 0.167.0; reject the previous 0.163.0 before publication or thread creation |
+| Human-only approval kind | `04-human-command-red` | Recognize valid `humanCommand` as unsupported, preserve malformed-request rejection, and create no interaction or acceptance |
+| Disappeared callback | `06-callback-retirement-red` | `disappeared_callback_cancels_only_exact_pending_identity` requires atomic cancellation of the exact still-pending journal and continuation, with no stale response |
+| Typed errors and metadata | `10-metadata-errors-red`, `11-section-validation-red` | Preserve model-not-found and capacity details, reject malformed known errors and missing section metadata, and route foreign sections privately |
+| Optional item timestamps | `14-item-times-red` | `item_times_reject_wrong_types_and_overflow_in_live_and_history` rejects invalid signed-millisecond values at both decode boundaries |
+| Malformed private payloads | `25-parent-payload-red-network` | `codex_release::payloads` rejects malformed image references, hook summaries and process drain status while valid observed media remains private |
+| Structured provider rejection | `26-parent-provider-error-red` | `structured_rejections_preserve_reader_and_explicit_next_prompt` requires PreconditionFailed/PolicyRejected, safe unknown fallback, malformed-known Protocol and continued reader ownership |
+| Callback inventory deadline | `29-parent-callback-read-red-fixture` | `disappeared_callback_bounds_inventory_observation` requires a held read to fail within the original lifecycle deadline, with no approval response |
+| Media identity consistency | `31-media-identity-red` | The two `selected_media_*identity*` cases reject missing/malformed media IDs in history and non-string live user client IDs, preserving exact existing generation extraction |
+
+The full target passed 147 cases in `15-items-compatibility-green`, including
+callback intent/commit races, definite conflict replay, ambiguity preservation,
+flat item ordering and private media compatibility. Further affected-target
+results belong to the implementation receipt. The failed `05-human-command-green`
+invocation was a new fixture expectation error, and `09-callback-races` failed
+to compile a new test wrapper; both failures remain preserved, not relabeled
+as production evidence or passes.
+
+All regressions remain enabled. The required independent diff review and native
+strict gates are deferred to the parent's validation-only phase. A stale
+upstream-source assertion outside this update's write scope remains a blocking
+failure in `08-authority-coordinates`; repaired source-coordinate checks pass
+separately in `13-authority-coordinates-expanded`. No focused result waives that
+failure or establishes workspace or vendor release qualification.
+
+Parent review identified the omitted typed payload work above. Receipt
+`27-parent-payload-green` passes those five focused cases, including identical
+live/history media validation. The initial parent invocation `24-parent-payload-red`
+could not bind loopback sockets; it is environment evidence only. The structured
+error case in receipt 25 timed out at the existing start-reconciliation boundary
+before its intended assertion. The corrected fixture in receipt 26 reproduces the
+actual wrong error detail through a direct received response; the earlier timeout
+is retained as a fixture failure. These results do not waive the full target or
+native qualification. The stale workspace authority anchor was independently
+reviewed and repaired in prerequisite `4f264e8`; both source versions pass its
+wire-fact assertion without changing either archive.
+The callback inventory deadline regression exposed an unbounded read in the new
+retirement path before its final repair. Definite conflict exhaustion, ambiguous
+commit without replay, and primary staging failure with supplementary rollback
+failure passed as compatibility controls in the same invocation. Receipt 28 was
+a new fixture compile error and remains separate from behavioral red evidence.
+
+## Surreal column-removal recovery — Storage vendor campaign
+
+The separately authorized `upgrade-vendors` follow-up preserves a real
+SurrealDB 4.0.0 WebSocket schema failure: the atomic field-definition and
+stored-value removal received a typed transaction conflict at COMMIT. The
+required Surreal strict lane reported 65 passes and one failure; the Lance
+strict lane passed all 37 cases. The conflicting writer is unknown. No causal
+link to the campaign's compatible Zstd backports was established.
+
+Before production changes, the enabled `column_drop_*` cases in
+`storage-kit/tests/surreal_partition_deadline.rs` reproduced five failures:
+retry success, nonzero retry exhaustion, query/context deadlines and backoff.
+The complete target reported 19 passes and five failures. The fixture uses the
+public adapter and pinned native CBOR errors; it is wire/deadline evidence,
+not direct-trait mock coverage or a real-service substitute. Original native
+evidence remains under
+`target/vendor-campaign-storage-20261108/security/zstd-remediation/failed-strict-live/`;
+tests-first evidence remains under
+`target/vendor-campaign-storage-20261108/surreal-column-recovery/`.
+
+The regressions require bounded replay only after confirmed rollback, preserving
+all uncertain or mixed-error failures without replay. Existing collection and
+partition controls remain enabled. The native schema case additionally compares
+exact three-record snapshots across removal, same-name re-addition with a changed
+computed value, and removal again. Fresh native validation and final campaign
+gates remain required; historical or fixture passes do not qualify the update.
+
 ## Release completion and version identities — 2026-11-05
 
 The v0.0.4 preparation reproduces the release helper creating a public GitHub
@@ -334,6 +418,380 @@ fixture, and documentation diffs.
 independent of this defect. This repair promotes required regression coverage
 and does not claim native Codex/OpenCode or full strict-live qualification.
 
+## MOCK-AGENT-003 — Model work precedes failed durable prompt admission
+
+**Affected crate/status:** Custom Agent; confirmed during the authorized
+Codex/Custom parity campaign. The repair passes the recorded Custom runtime
+and mock targets; final campaign qualification remains in progress.
+
+**Expected and observed behavior.** When the durable Kit execution-admission
+write fails, the registered execution must settle without invoking the Model or
+constructing a tool handler. The enabled
+`custom_progress_acceptance_failure_keeps_the_execution_gate_closed` regression
+in [custom_prompt_runtime.rs](../agents-kit/tests/custom_prompt_runtime.rs)
+injects that exact write failure and observes one Model request where zero is
+required. The original `Integration` / `ServiceUnavailable` admission error
+remains observable; an error return alone therefore does not prove absence of
+Model work. The fixture separately counts actual cancellation writes and faults
+so an unexercised cleanup fault cannot masquerade as cleanup evidence.
+
+**Ownership repair.** The existing run owner registers before its first poll
+and owns one execution-release sender; the call owns its receiver. Synchronous
+local validation can finish before admission, but publication, generation, and
+tool work wait for durable Kit admission. Failed admission closes and joins
+the unreleased execution rather than opening the gate during cleanup. Kit
+admission does not establish remote Model acceptance. Immediate rejection by
+the first Provider generation keeps its normalized terminal error, no successful
+history turn, and no tool effects.
+
+**Retained evidence.**
+`target/vendor-campaign-agents-codex-20261109/parity-red-02-custom-runtime/`
+records the exact invocation, source hashes, and failure before Custom
+production edits. The candidate includes the reviewed Codex vendor adaptation;
+Custom production is unchanged from `4f264e836985f486684b9f5445c95fae6c032d45`.
+The other progress reds exercise newly authorized behavior and do not by
+themselves establish pre-existing production defects. The first large-batch
+probe had mismatched test call IDs and a cleanup assertion masking its prompt
+error; that run remains retained. The corrected
+`parity-red-03-custom-mocks-fixed/` run reaches the missing-milestone assertions,
+including the 4,097-call batch, with exact scripted call identities.
+
+Held-publication, cancellation, deadline, observer-loss, and shutdown cases must
+also remain enabled. In particular, deadline bookkeeping must keep polling the
+same admitted execution while waiting for an exclusive storage writer; merely
+retaining its unpolled future cannot settle the original publication. Its
+original deadline must fence the next effect before cleanup can supply another
+cancellation. Current source-specific green evidence and independent review
+belong to the campaign receipts; these reds do not establish qualification.
+
+## MOCK-AGENT-004 — concurrent append makes a rejected acknowledgment contradictory
+
+**Affected crate/status:** Shared Agent notification journal; reproduced during
+Codex/Custom parity. The focused regression and recorded Custom runtime and mock
+targets pass; final campaign qualification remains in progress.
+
+**Expected and observed behavior.** An exact StateStore commit conflict proves
+that a passive acknowledgment did not commit. The receiver must retain its
+original delivered identity and retry against the current journal. A concurrent
+append is valid progress, not evidence of a contradictory acknowledgment.
+The enabled
+`custom_notification_receipt_conflict_preserves_delivery_across_a_concurrent_append`
+regression in [custom_mock_composition.rs](../agents-kit/tests/custom_mock_composition.rs)
+holds a real acknowledgment snapshot while the accepted prompt appends its tool
+milestone. The process-local direct-trait StateStore rejects the stale revision
+with `TransactionConflict`; the fixture positively checks that native result.
+Before repair, receiving fails with `InvalidState` and
+`notification receipt commit outcome is contradictory`.
+
+**Ownership repair.** The existing receipt owner handles definite commit
+conflict before observing a changed whole-record view. It restores the retained
+delivery cursor and retries only that acknowledgment. Successful and indeterminate
+commits retain exact receipt reconciliation. No publication, prompt, handler,
+interaction decision, or unknown commit is blindly repeated. The regression
+requires two Model calls, one handler effect, distinct ordered milestone
+identities, and an empty terminal drain after acknowledgment.
+
+**Retained evidence.**
+`target/vendor-campaign-agents-codex-20261109/parity-red-08-journal-conflict/`
+contains the exact source and command receipt plus the genuine assertion failure.
+The broader `parity-green-02-custom-runtime/` attempt retains three occurrences
+of the same receipt failure; its name does not imply a passing run. Its other
+failures are tracked separately. New Custom progress makes the shared journal
+interleaving easy to exercise; the exact-conflict receipt classification being
+repaired predates this parity work. Source-specific green evidence and independent
+review remain required before this area is complete.
+
+## MOCK-AGENT-005 — cancellation races with native approval publication
+
+**Affected crate/status:** Codex Agent; reproduced during the authorized parity
+campaign. Repair and qualification are in progress.
+
+**Expected and observed behavior.** A callback checked before an awaited storage
+operation must not publish actionable work after durable cancellation wins.
+The enabled
+`codex_progress_interaction_transaction_rechecks_cancellation_before_publication`
+regression holds continuation observation before the Interaction transaction,
+proves cancellation and native interrupt dispatch while the turn remains active, and
+then releases the callback. Before repair, one new Interaction is published
+where zero is permitted. A foreign-turn control retains its conflict error.
+
+**Ownership repair.** The existing publication transaction checks the prompt's
+tool admission after validating native turn ownership. Cancelled or terminal
+same-turn work rolls back without publishing; a foreign turn remains a conflict.
+Rollback failures and the original publication deadline retain their authority.
+No callback decision, tool effect, or native turn is resent.
+
+**Retained evidence.**
+`target/vendor-campaign-agents-codex-20261109/parity-red-11-codex-atomic-admission-network/`
+records the genuine one-versus-zero failure and unchanged source. The preceding
+`parity-red-10-codex-atomic-admission/` attempt failed at the sandbox's local
+listener restriction and is not behavioral evidence. The permissive transaction
+check predates this parity change; the new progress tests expose its interleaving.
+Focused green evidence, independent review, and complete qualification remain
+required.
+
+## MOCK-AGENT-006 — publication-failure cleanup stops on a cancellation conflict
+
+**Affected crate/status:** Candidate Codex progress implementation; reproduced
+before acceptance. This entry does not claim the new recovery path existed in
+the previously selected implementation.
+
+**Expected and observed behavior.** Cancellation claim and settlement can race
+the independent reader's matching native terminal update. The causal regressions
+`codex_progress_claim_conflict_reconciles_proven_native_terminal_without_interrupt`
+and `codex_progress_settlement_conflict_reconciles_proven_native_terminal_without_resend`
+hold each actual cancellation commit, positively observe the same generation's
+terminal update, then release the stale transaction. Both verify a real
+`TransactionConflict`. Before repair, cleanup propagates that conflict and
+retains the old context despite the now-committed terminal evidence. The original
+publication failure remains primary, but later admission and cleanup cannot
+complete normally.
+
+The repair belongs in the existing prompt recovery owner: reconcile only exact
+local conflicts within the original cleanup deadline, preserve the primary
+publication failure, and never resend an interruption or tool effect. Unknown
+commit outcomes and other failures retain their uncertainty. The enabled tests
+require exact interruption counts, bounded cleanup, context retirement, and
+successful subsequent admission after proven settlement.
+
+**Retained evidence.**
+`target/vendor-campaign-agents-codex-20261109/parity-red-12-codex-recovery-conflicts/`
+records both genuine failures and unchanged source. These causal tests establish
+the conflict path; they do not by themselves establish the cause of the earlier
+intermittent retention failures. Repair, independent implementation review, and
+complete qualification remain required.
+
+## MOCK-AGENT-007 — a late managed handler crosses the prompt deadline
+
+**Affected crate/status:** Codex managed tools during the authorized progress
+campaign. Behavioral failures precede the repair; complete qualification remains
+required.
+
+**Expected and observed behavior.** Handler acquisition and an already-admitted
+Invoke may finish after the original prompt deadline. The two enabled
+`codex_progress_deadline_cancels_a_late_*` regressions hold each boundary and the
+exact timeout-intent write. They observe public Timeout while durable prompt
+state is still Waiting/NotRequested and no native interrupt has been sent.
+Before repair, releasing acquisition starts one forbidden Invoke; releasing an
+in-flight Invoke publishes one forbidden actionable Interaction.
+
+The existing prompt effect guard must remain with the exact non-Clone handler,
+be checked before each new effect, and settle that handler through Cancel.
+Completed and typed ToolError::Cancelled are normal cancellation outcomes;
+another Interaction or a different error is unfinished or failed cleanup.
+The original primary failure must be captured before cleanup waits, and real
+cleanup failures must remain observable through the existing tracked worker.
+A late native callback response must not be sent. No new producer, task, public
+trait, record format, or deadline is authorized by this repair.
+
+**Retained evidence.** `parity-red-13-codex-full-including-tool-deadlines` under
+`target/vendor-campaign-agents-codex-20261109/` records both one-versus-zero
+failures. Its subsequent cleanup deadlock required termination of only the
+owned test process and is recorded separately below; that full target is
+incomplete. `parity-red-15-codex-deadline-cancel-controls` records three further
+Invoke failures. Two also have secondary cleanup assertions because the old
+path never attempted the expected cancellation. Their response-channel EOF waits
+additionally exposed a fixture sender retained after socket EOF; that sender
+lifetime requires a separate test-only correction. These secondary failures are
+not proofs of the repaired cancellation-result branches. All controls remain
+enabled.
+
+After the reviewed effect-guard repair and fixture EOF correction,
+`parity-green-09-codex-late-tool-deadline` passes both late-handler cases, and
+`parity-green-10-codex-deadline-cancel-controls` passes all three cancellation
+outcome controls. Each receipt verifies unchanged source. The intervening
+`parity-green-08-codex-late-tool-deadline` was a compile-only type-inference
+failure, corrected with the exact existing worker result type; it establishes
+no behavioral result. Full-target and integrated qualification remain required.
+
+## MOCK-AGENT-008 — managed interaction cancellation reenters its own mutex
+
+**Affected crate/status:** Codex managed interaction cleanup, exposed while
+validating unread progress. The mutex repair requires the full enabled cleanup
+regression and final qualification; removing the hang alone is insufficient.
+
+**Expected and observed behavior.** A pending managed Interaction can follow
+unread passive Progress facts. Public abort must still cancel and join its exact
+handler. The fallback removed that Interaction's local owner inside an if-let
+whose temporary pending-map guard remained alive. Generation reclamation then
+locked the same map, blocking the current-thread runtime and its async deadlines.
+
+`parity-red-13-codex-full-including-tool-deadlines/deadlock-sample.txt` records the
+actual cancel_interaction -> reclaim_generation -> pending mutex stack. The
+enabled `codex_progress_unacknowledged_facts_do_not_deadlock_tool_cancellation`
+regression separately proves the exact unread ordering and abort path. It runs
+one exact child test with a mandatory start receipt and bounded kill/wait;
+fixture deletion requires proven child reaping. `parity-red-14-codex-unread-progress-cleanup`
+reproduces the hang within that bound instead of freezing the whole target.
+
+The repair releases the existing map guard before signalling the responder or
+reclaiming the generation. `parity-green-07-codex-unread-progress-cleanup` no
+longer hangs, but fails next admission; despite its receipt name, it is not a
+passing regression. The diagnostic below establishes that remaining defect.
+
+## MOCK-AGENT-009 — local tool cancellation leaves a durable Interaction pending
+
+**Affected crate/status:** Codex managed interaction cleanup; confirmed after
+the mutex repair. Repair and complete qualification remain required.
+
+**Expected and observed behavior.** Cancelling an exact owned handler must also
+settle its own durable Interaction without evicting or rewriting unread passive
+facts. The ordinary public resolution path remains head-only. When that path
+cannot reach an Interaction behind passive facts, the fallback cancelled the
+local handler but left the journal Interaction Pending. Native cancellation
+settled, yet the next prompt returned Busy at Prompt/Admission.
+
+`parity-red-16-codex-interaction-retirement` retains the committed post-abort
+journal: two passive Progress entries and the exact still-pending Interaction.
+Its next-prompt assertion now reports the early public Busy directly, rather
+than hiding it behind a native-acceptance timeout. The enabled regression keeps
+its original admission, native acceptance, handler, callback, and cleanup claims.
+
+The required repair belongs to the existing concrete managed-tool, durable
+interaction, and notification owners. It must validate exact notification and
+generation ownership, preserve raced resolution authority, and retain admitted
+transaction ownership and uncertainty. It must not widen caller resolution,
+resend a handler effect or callback decision, adopt another Interaction, or
+change public notification/persistence formats. These fixture receipts establish
+adapter defects, not native or workspace release qualification.
+
+`parity-red-18-codex-retirement-owned` records nine further behavioral failures
+before retirement production changes: no owned retirement is admitted, the first
+unknown-commit variant observes zero retirement attempts, foreign Interaction
+content is not rejected, and raced resolution uncertainty does not fence new admission or
+retain its exact cleanup failure. Dropped-abort, reader-exit, awaited-shutdown,
+and same-Agent independent-conversation controls remain enabled. Secondary
+cleanup failures are retained separately from their primary assertions.
+`parity-red-17-codex-retirement-owned` only exposed seven fixture assertions that
+incorrectly required opaque PromptStream to implement Debug; their corrected
+error-kind assertions produced the behavioral failures in red18.
+
+`parity-red-19-codex-retirement-owned` retains ten failures after adding the late
+shutdown-failure control and waiting for the exact commit receipt before native
+completion. The first reviewed worker-owned repair passes eight of eleven
+controls in `parity-red-20-codex-retirement-aggregation`. Its two durable validation
+failures still lacked StateRead attribution, so later cleanup changed their
+observed phase. This is a gap in the campaign repair, not a claim that the
+unmodified implementation already performed retirement. The narrow follow-up
+attributes only those persisted-state checks and leaves the assertions intact.
+The third failure establishes the separate existing aggregation defect below.
+
+## MOCK-AGENT-010 — tool shutdown discards an independent cleanup failure
+
+**Affected crate/status:** Codex's existing managed Toolset shutdown aggregation,
+exposed after the reviewed retirement repair. Complete qualification remains
+required.
+
+**Expected and observed behavior.** During consuming Agent shutdown, a retained
+retirement failure remains primary when the Toolset's shared shutdown
+independently fails. Both failures must
+remain observable. The existing `cancellation_error.or(shutdown_error)` discards
+the latter error whenever cancellation has already failed.
+
+The enabled
+`codex_progress_tool_retirement_retains_a_distinct_toolset_shutdown_failure`
+regression first proves a real rollback and retained ServiceUnavailable at
+StateCommit, then arms a distinct typed Toolset InvalidConfiguration failure,
+which Agent normalizes to InvalidData.
+It requires exactly one shutdown invocation and the original primary plus that
+separate supplementary error. `parity-red-20-codex-retirement-aggregation`
+records the lost secondary failure with the original aggregation unchanged.
+This isolates the pre-existing aggregation statement after retirement support
+became available; it does not claim the unrepaired adapter could already reach
+that retirement outcome. The repair combines both errors in the existing
+shutdown owner without changing one-error or success outcomes, effects, or API.
+
+After the reviewed retirement, phase-attribution, and error-aggregation repairs,
+`parity-green-11-codex-retirement-owned` passes all eleven controls with unchanged
+source. This is scoped fixture evidence; the complete Codex target and final
+integrated qualification remain required.
+
+## MOCK-TOOL-001 — unbounded native HTTP response buffering
+
+**Affected crate/status:** Tools MCP HTTP client through rmcp 1.5.0;
+RUSTSEC-2026-0462 remediation and qualification are in progress.
+
+The independent finite-body fixtures in
+[http_response_limits/mod.rs](../tools-kit/tests/http_response_limits/mod.rs)
+exercise declared oversized initialization, streamed initialization and tool
+responses, and the smaller non-success response limit. Each withholds EOF,
+positively observes the bounded payload delivery, counts native operations,
+and joins the client and peer. On the old dependency,
+`tools-red-01-response-limits/` records one passing control and four failures:
+three directly wait for withheld EOF rather than rejecting the oversized body;
+the streamed tool-response case also requires an abort fallback during bounded
+cleanup, which masks its earlier rejection assertion and is retained separately.
+It is not claimed as a clean assertion-only red. The corrected fixture now
+reports early completion before cleanup assertions.
+
+Select the published fixed SDK instead of adding an exception or a parallel
+transport. Existing success, correlated JSON-RPC rejection, no-resend, shared
+shutdown, and session-worker ownership controls remain required. Source and
+command receipts live beneath
+`target/vendor-campaign-agents-codex-20261109/`; fresh dependency security proof
+alone does not establish behavioral completion. On the independently reviewed
+repair, `tools-green-05-http-server-lifecycle/` passes all 15 HTTP cases,
+including all four oversized-response cases. Complete crate and live gates
+remain required.
+
+## MOCK-TOOL-002 — unsupported selected protocol proceeds to inventory
+
+**Affected crate/status:** Tools MCP client; reproduced before the SDK update.
+`tools-baseline-02-protocol/` records that a peer selecting 2026-07-28 after the
+client offered 2025-11-25 still receives `tools/list`, and construction succeeds.
+The independent raw-peer regression
+`client_protocol_revision_rejects_new_lifecycle_before_inventory` requires
+rejection and joined native cleanup before inventory or tool execution.
+The four retained revision negotiations and existing server's revision ceiling
+pass in that same baseline and remain compatibility controls.
+
+The selected update keeps private client/server revision boundaries through
+2025-11-25. New stateless discovery, execution, and capability families are not
+implicitly enabled by adopting the security fix. The selected-revision rejection
+and all four retained-version controls pass in
+`tools-green-05-http-server-lifecycle/`; complete validation remains required.
+
+## MOCK-TOOL-003 — audio content metadata is discarded
+
+**Affected crate/status:** Tools native content adaptation with rmcp 1.5.0;
+selected-source repair and qualification are in progress.
+`tools-baseline-03-content/` records that audio annotations survive but the
+native audio `_meta` entry is dropped. The exact comparison in
+`audio_content_metadata_is_preserved_with_annotations` fails; all five existing
+content variants, their previously supported metadata, and output-schema
+rejection controls pass. The new SDK represents this metadata explicitly;
+retain it through the existing portable Audio metadata field without adding a
+public content type. Inbound proof does not by itself establish outbound
+roundtrip preservation; the served-audio regression is also required. Both
+directions pass in `tools-green-05-http-server-lifecycle/` on the reviewed repair.
+
+## MOCK-TOOL-004 — SDK upgrade admits an unowned stateless lifecycle
+
+**Affected crate/status:** Candidate rmcp 3.9.0 adaptation; regression found
+during independent review before the upgrade's acceptance. This is not claimed
+as a defect in the previous selected SDK.
+
+The selected SDK treats complete inline client metadata as stateless routing
+even when it names retained protocol revision 2025-11-25. Its discovery route
+also bypasses initialization. A version ceiling alone therefore fails to
+preserve the supplied server's existing session and worker ownership.
+`tools-red-04-sdk-lifecycle-and-compatibility/` records four genuine failures:
+full and minimal inline metadata return inventory without initialization,
+inline metadata overrides an initialized session, and sessionless discovery
+returns success. The tests use raw HTTP, retain fresh-session usability and
+joined cleanup, and preserve an ordinary request-metadata success control.
+
+The repair belongs in the existing private HTTP admission policy, before native
+routing can allocate stateless work. It must preserve bounded request bodies,
+ordinary initialized requests, native session ownership, and shutdown. The
+enabled regressions live in
+[server_startup_regressions/mod.rs](../tools-kit/tests/server_startup_regressions/mod.rs).
+All 58 other server cases and all 15 HTTP client cases passed in that red run.
+The independently reviewed repair passes all 63 server cases, including an
+additional partial-metadata control, and all 15 HTTP cases in
+`tools-green-05-http-server-lifecycle/`. Complete crate and live gates remain
+required; the original four failures remain retained.
+
 ## MOCK-APP-001 — a conflicting read observation permanently fails shutdown
 
 **Affected crate/status:** App; independently reproduced and repaired in the
@@ -495,3 +953,37 @@ observer restriction was applied.
 Current source-specific passes, failures and outstanding qualification belong
 to the PR validation evidence. Reproducing this race and passing a focused
 regression do not establish full App or workspace qualification.
+
+## Codex 0.167.1 compatibility refresh — pending qualification
+
+This refresh is based on the reviewed 33-file Codex 0.167.0 reference.
+The independently reviewed endpoint trees have identical App Server and protocol
+sources. The 11 changed upstream paths concern the release version and native
+incremental tools, including top-level `web_search` placement and foreground and
+background compaction. The new `incremental_tools_legacy` flag is under
+development and disabled by default; regular Responses selects it only for the
+native Bedrock provider IDs, while Responses Lite retains its existing flag.
+These native changes stay private. No feature, provider configuration or public
+API is enabled or added by this adaptation.
+
+The parent recorded tests-first compatibility evidence in
+`target/vendor-campaign-agents-codex-20261109/codex-01671-identity-red-01/receipt.json`:
+the exact initialization-rejection test exited 101 against the reviewed 0.167.0
+reference because the added `codex/0.167.0` control was still accepted. The
+original log, captured source and diff remain at that location. This establishes
+the required selection change, not a retroactive defect in the former selection.
+The new rejection tuple, older and malformed controls, and zero-thread-start
+assertion remain intact.
+
+Relative to the reviewed reference, the sole production change selects 0.167.1.
+Positive fixture identities, source-authority expectations, strict setup and
+research guidance follow the new frozen candidate lock. The parent completed
+the protected guidance installation after the leaf returned; the exact
+postimage and frozen-input verification are recorded in
+`target/vendor-campaign-agents-codex-20261109/protected-guidance-01671-01/receipt.json`.
+All original
+0.167.0 findings, historical receipts and Tools remediation entries remain
+unchanged. Independent implementation review, focused green proof, native
+prerequisites and every fresh acceptance gate remain pending. This note claims
+no new qualification; the retained native suite does not exhaustively qualify
+upstream search, compaction or Bedrock behavior.

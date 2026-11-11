@@ -27,7 +27,8 @@ use agents_kit::knowledge::{
 };
 use agents_kit::model::ModelSelector;
 use agents_kit::notification::{
-    ConversationNotificationKind, ConversationNotificationReceiver, NotificationResolution,
+    ConversationNotification, ConversationNotificationKind, ConversationNotificationReceiver,
+    NotificationResolution,
 };
 use agents_kit::prompt::{
     PromptEvent, PromptRequest, PromptStream, StructuredOutputRequest, UsageInfo,
@@ -415,6 +416,24 @@ struct NotificationConflictStore {
     settlement_writes: Arc<AtomicUsize>,
     settlement_observations: Arc<AtomicUsize>,
     injected: Arc<tokio::sync::Semaphore>,
+    progress: Arc<Mutex<Option<Arc<ProgressPublication>>>>,
+    progress_fault: Arc<Mutex<Option<Arc<ProgressFault>>>>,
+    exclusive_writer: Option<Arc<tokio::sync::Semaphore>>,
+    journal_writer: Option<Arc<tokio::sync::Semaphore>>,
+    journal_waiting: Arc<tokio::sync::Semaphore>,
+    interaction_publications: Arc<AtomicUsize>,
+    reject_acceptance: Arc<AtomicBool>,
+    reject_cancellation: Arc<AtomicBool>,
+    acceptance_faults: Arc<AtomicUsize>,
+    cancellation_writes: Arc<AtomicUsize>,
+    cancellation_faults: Arc<AtomicUsize>,
+    cancellation_observed: Arc<tokio::sync::Semaphore>,
+    cancellation_read_target: Arc<Mutex<Option<StateKey>>>,
+    cancellation_read_entered: Arc<tokio::sync::Semaphore>,
+    cancellation_read_release: Arc<tokio::sync::Semaphore>,
+    deadline_settled: Arc<tokio::sync::Semaphore>,
+    failed_settled: Arc<tokio::sync::Semaphore>,
+    deadline_terminal: Arc<Mutex<Option<serde_json::Value>>>,
 }
 
 struct NotificationConflictTransaction {
@@ -425,6 +444,93 @@ struct NotificationConflictTransaction {
     wrote_resolution_intent: bool,
     wrote_resolution_settlement: bool,
     wrote_prompt_waiter: bool,
+    notification_before: Option<serde_json::Value>,
+    wrote_interaction_publication: bool,
+    progress: Option<Arc<ProgressPublication>>,
+    progress_fault: Option<Arc<ProgressFault>>,
+    writer: Option<tokio::sync::OwnedSemaphorePermit>,
+    journal_writer: Option<tokio::sync::OwnedSemaphorePermit>,
+    wrote_cancellation: bool,
+    deadline_terminal: Option<serde_json::Value>,
+    failed_terminal: bool,
+}
+
+#[derive(Clone, Copy)]
+enum ProgressFaultOutcome {
+    Conflict,
+    Uncommitted,
+    Committed,
+}
+
+struct ProgressFault {
+    label: &'static str,
+    outcome: ProgressFaultOutcome,
+    armed: AtomicBool,
+    attempts: Mutex<Vec<serde_json::Value>>,
+}
+
+impl ProgressFault {
+    fn record_attempt(&self, item: &serde_json::Value) -> bool {
+        if item
+            .pointer("/kind/kind")
+            .and_then(serde_json::Value::as_str)
+            != Some("progress")
+            || item
+                .pointer("/kind/label")
+                .and_then(serde_json::Value::as_str)
+                != Some(self.label)
+        {
+            return false;
+        }
+        let mut attempts = self.attempts.lock().expect("progress attempts");
+        if attempts
+            .first()
+            .is_some_and(|first| first.get("id") != item.get("id"))
+        {
+            return false;
+        }
+        attempts.push(item.clone());
+        true
+    }
+}
+
+#[derive(Clone, Copy)]
+enum ProgressCommitStage {
+    Before,
+    After,
+}
+
+struct ProgressPublication {
+    label: &'static str,
+    stage: ProgressCommitStage,
+    entered: tokio::sync::Semaphore,
+    release: tokio::sync::Semaphore,
+    commits: AtomicUsize,
+    receipts: AtomicUsize,
+    receipt_observed: tokio::sync::Semaphore,
+}
+
+impl ProgressPublication {
+    async fn hold(&self) {
+        self.entered.add_permits(1);
+        self.release
+            .acquire()
+            .await
+            .expect("publication release")
+            .forget();
+    }
+
+    async fn entered(&self) {
+        self.entered
+            .acquire()
+            .await
+            .expect("publication admission")
+            .forget();
+    }
+
+    fn release(&self) {
+        self.release.add_permits(1);
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -464,7 +570,147 @@ impl NotificationConflictStore {
             settlement_writes: Arc::new(AtomicUsize::new(0)),
             settlement_observations: Arc::new(AtomicUsize::new(0)),
             injected: Arc::new(tokio::sync::Semaphore::new(0)),
+            progress: Arc::new(Mutex::new(None)),
+            progress_fault: Arc::new(Mutex::new(None)),
+            exclusive_writer: None,
+            journal_writer: None,
+            journal_waiting: Arc::new(tokio::sync::Semaphore::new(0)),
+            interaction_publications: Arc::new(AtomicUsize::new(0)),
+            reject_acceptance: Arc::new(AtomicBool::new(false)),
+            reject_cancellation: Arc::new(AtomicBool::new(false)),
+            acceptance_faults: Arc::new(AtomicUsize::new(0)),
+            cancellation_writes: Arc::new(AtomicUsize::new(0)),
+            cancellation_faults: Arc::new(AtomicUsize::new(0)),
+            cancellation_observed: Arc::new(tokio::sync::Semaphore::new(0)),
+            cancellation_read_target: Arc::new(Mutex::new(None)),
+            cancellation_read_entered: Arc::new(tokio::sync::Semaphore::new(0)),
+            cancellation_read_release: Arc::new(tokio::sync::Semaphore::new(0)),
+            deadline_settled: Arc::new(tokio::sync::Semaphore::new(0)),
+            failed_settled: Arc::new(tokio::sync::Semaphore::new(0)),
+            deadline_terminal: Arc::new(Mutex::new(None)),
         }
+    }
+
+    fn fault_progress(
+        &self,
+        label: &'static str,
+        outcome: ProgressFaultOutcome,
+    ) -> Arc<ProgressFault> {
+        let fault = Arc::new(ProgressFault {
+            label,
+            outcome,
+            armed: AtomicBool::new(true),
+            attempts: Mutex::new(Vec::new()),
+        });
+        assert!(
+            self.progress_fault
+                .lock()
+                .expect("progress fault")
+                .replace(Arc::clone(&fault))
+                .is_none()
+        );
+        fault
+    }
+
+    fn with_exclusive_writer(mut self) -> Self {
+        self.exclusive_writer = Some(Arc::new(tokio::sync::Semaphore::new(1)));
+        self
+    }
+
+    fn with_journal_writer(mut self) -> Self {
+        self.journal_writer = Some(Arc::new(tokio::sync::Semaphore::new(1)));
+        self
+    }
+
+    fn hold_progress(
+        &self,
+        label: &'static str,
+        stage: ProgressCommitStage,
+    ) -> Arc<ProgressPublication> {
+        let progress = Arc::new(ProgressPublication {
+            label,
+            stage,
+            entered: tokio::sync::Semaphore::new(0),
+            release: tokio::sync::Semaphore::new(0),
+            commits: AtomicUsize::new(0),
+            receipts: AtomicUsize::new(0),
+            receipt_observed: tokio::sync::Semaphore::new(0),
+        });
+        assert!(
+            self.progress
+                .lock()
+                .expect("progress control")
+                .replace(Arc::clone(&progress))
+                .is_none()
+        );
+        progress
+    }
+
+    fn has_interaction_state(value: &serde_json::Value, state: &str) -> bool {
+        value
+            .get("pending")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|pending| {
+                pending.iter().any(|item| {
+                    item.pointer("/kind/kind")
+                        .and_then(serde_json::Value::as_str)
+                        == Some("interaction")
+                        && item
+                            .pointer("/state/state")
+                            .and_then(serde_json::Value::as_str)
+                            == Some(state)
+                })
+            })
+    }
+
+    fn interaction_transition(
+        before: Option<&serde_json::Value>,
+        after: &serde_json::Value,
+        state: &str,
+    ) -> bool {
+        after
+            .get("pending")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|pending| {
+                pending.iter().any(|item| {
+                    if item
+                        .pointer("/kind/kind")
+                        .and_then(serde_json::Value::as_str)
+                        != Some("interaction")
+                        || item
+                            .pointer("/state/state")
+                            .and_then(serde_json::Value::as_str)
+                            != Some(state)
+                        || (state == "resolving"
+                            && item
+                                .pointer("/state/detail/acceptance")
+                                .and_then(serde_json::Value::as_str)
+                                != Some("unconfirmed"))
+                    {
+                        return false;
+                    }
+                    before
+                        .and_then(|value| value.get("pending"))
+                        .and_then(serde_json::Value::as_array)
+                        .and_then(|prior| {
+                            prior.iter().find(|prior| prior.get("id") == item.get("id"))
+                        })
+                        .is_some_and(|prior| prior.get("state") != item.get("state"))
+                })
+            })
+    }
+
+    fn inserted_notification<'a>(
+        before: Option<&serde_json::Value>,
+        after: &'a serde_json::Value,
+    ) -> Option<&'a serde_json::Value> {
+        after.get("pending")?.as_array()?.iter().find(|item| {
+            let id = item.get("id");
+            !before
+                .and_then(|value| value.get("pending"))
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|pending| pending.iter().any(|prior| prior.get("id") == id))
+        })
     }
 
     async fn hold_receipt_read(&self) {
@@ -617,24 +863,40 @@ impl StateStoreBackend for NotificationConflictStore {
                 "injected notification observation failure",
             ))
         } else {
-            let observed = self.inner.load(key).await?;
+            let observed = self.inner.load(key.clone()).await?;
+            let hold_cancellation_read = observed.as_ref().is_some_and(|snapshot| {
+                snapshot.record.value.pointer("/state/phase") == Some(&serde_json::json!("active"))
+                    && snapshot.record.value.pointer("/state/cancellation")
+                        == Some(&serde_json::json!("caller"))
+            }) && {
+                let mut target = self
+                    .cancellation_read_target
+                    .lock()
+                    .expect("cancellation read target");
+                if target.as_ref() == Some(&key) {
+                    target.take();
+                    true
+                } else {
+                    false
+                }
+            };
+            if hold_cancellation_read {
+                // Retain this already-observed snapshot without holding a native
+                // writer, so the captured prompt can terminalize independently.
+                self.cancellation_read_entered.add_permits(1);
+                self.cancellation_read_release
+                    .acquire()
+                    .await
+                    .expect("cancellation observation release")
+                    .forget();
+            }
             let resolving = notification
                 && observed.as_ref().is_some_and(|snapshot| {
-                    snapshot
-                        .record
-                        .value
-                        .pointer("/pending/0/state/state")
-                        .and_then(serde_json::Value::as_str)
-                        == Some("resolving")
+                    Self::has_interaction_state(&snapshot.record.value, "resolving")
                 });
             let terminal = notification
                 && observed.as_ref().is_some_and(|snapshot| {
-                    snapshot
-                        .record
-                        .value
-                        .pointer("/pending/0/state/state")
-                        .and_then(serde_json::Value::as_str)
-                        == Some("terminal")
+                    Self::has_interaction_state(&snapshot.record.value, "terminal")
                 });
             if terminal
                 && let Some(before) = self
@@ -667,6 +929,15 @@ impl StateStoreBackend for NotificationConflictStore {
     }
 
     async fn begin_transaction(&self) -> Result<Self::Transaction, StateStoreError> {
+        let writer = match &self.exclusive_writer {
+            Some(writer) => Some(
+                Arc::clone(writer)
+                    .acquire_owned()
+                    .await
+                    .expect("writer admission"),
+            ),
+            None => None,
+        };
         Ok(NotificationConflictTransaction {
             inner: self.inner.begin_transaction().await?,
             owner: self.clone(),
@@ -675,6 +946,15 @@ impl StateStoreBackend for NotificationConflictStore {
             wrote_resolution_intent: false,
             wrote_resolution_settlement: false,
             wrote_prompt_waiter: false,
+            notification_before: None,
+            wrote_interaction_publication: false,
+            progress: None,
+            progress_fault: None,
+            writer,
+            journal_writer: None,
+            wrote_cancellation: false,
+            deadline_terminal: None,
+            failed_terminal: false,
         })
     }
 }
@@ -684,9 +964,29 @@ impl StateTransactionBackend for NotificationConflictTransaction {
         &mut self,
         key: StateKey,
     ) -> Result<Option<StateRecordSnapshot>, StateStoreError> {
-        self.read_notification |=
-            key.namespace().as_str() == "agents_kit_conversation_notifications_v1";
-        self.inner.load(key).await
+        let notification = key.namespace().as_str() == "agents_kit_conversation_notifications_v1";
+        if notification
+            && self.journal_writer.is_none()
+            && let Some(writer) = &self.owner.journal_writer
+        {
+            if writer.available_permits() == 0 {
+                self.owner.journal_waiting.add_permits(1);
+            }
+            self.journal_writer = Some(
+                Arc::clone(writer)
+                    .acquire_owned()
+                    .await
+                    .expect("journal writer admission"),
+            );
+        }
+        self.read_notification |= notification;
+        let loaded = self.inner.load(key).await?;
+        if notification {
+            self.notification_before = loaded
+                .as_ref()
+                .map(|snapshot| snapshot.record.value.as_ref().clone());
+        }
+        Ok(loaded)
     }
 
     async fn put(&mut self, record: StateRecord) -> Result<(), StateStoreError> {
@@ -719,23 +1019,113 @@ impl StateTransactionBackend for NotificationConflictTransaction {
                 .is_some();
         let notification =
             record.key.namespace().as_str() == "agents_kit_conversation_notifications_v1";
+        let inserted = notification
+            .then(|| {
+                NotificationConflictStore::inserted_notification(
+                    self.notification_before.as_ref(),
+                    &record.value,
+                )
+            })
+            .flatten();
+        let interaction_publication = inserted.is_some_and(|item| {
+            item.pointer("/kind/kind")
+                .and_then(serde_json::Value::as_str)
+                == Some("interaction")
+        });
+        if interaction_publication {
+            self.owner
+                .interaction_publications
+                .fetch_add(1, Ordering::SeqCst);
+        }
+        if let Some(item) = inserted {
+            let fault = self
+                .owner
+                .progress_fault
+                .lock()
+                .expect("progress fault")
+                .clone();
+            if let Some(fault) = fault
+                && fault.record_attempt(item)
+                && fault.armed.swap(false, Ordering::SeqCst)
+            {
+                match fault.outcome {
+                    ProgressFaultOutcome::Conflict => {
+                        return Err(StateStoreError::transaction_conflict(
+                            "put",
+                            "definite progress conflict",
+                        ));
+                    }
+                    ProgressFaultOutcome::Uncommitted | ProgressFaultOutcome::Committed => {
+                        self.progress_fault = Some(fault)
+                    }
+                }
+            }
+            let mut pending = self.owner.progress.lock().expect("progress control");
+            if pending.as_ref().is_some_and(|progress| {
+                item.pointer("/kind/kind")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("progress")
+                    && item
+                        .pointer("/kind/label")
+                        .and_then(serde_json::Value::as_str)
+                        == Some(progress.label)
+            }) {
+                self.progress = pending.take();
+            }
+        }
         let resolution_intent = notification
-            && record
-                .value
-                .pointer("/pending/0/state/state")
-                .and_then(serde_json::Value::as_str)
-                == Some("resolving")
-            && record
-                .value
-                .pointer("/pending/0/state/detail/acceptance")
-                .and_then(serde_json::Value::as_str)
-                == Some("unconfirmed");
+            && NotificationConflictStore::interaction_transition(
+                self.notification_before.as_ref(),
+                &record.value,
+                "resolving",
+            );
         let resolution_settlement = notification
+            && NotificationConflictStore::interaction_transition(
+                self.notification_before.as_ref(),
+                &record.value,
+                "terminal",
+            );
+        let continuation = record.key.namespace().as_str() == "agents_kit_custom_continuations_v1";
+        if continuation
+            && record.value.pointer("/state/accepted") == Some(&serde_json::json!(true))
+            && self.owner.reject_acceptance.swap(false, Ordering::SeqCst)
+        {
+            self.owner.acceptance_faults.fetch_add(1, Ordering::SeqCst);
+            return Err(StateStoreError::unavailable(
+                "put",
+                "injected acceptance failure",
+            ));
+        }
+        if continuation
+            && record.value.pointer("/state/phase") == Some(&serde_json::json!("ready"))
+            && record.value.pointer("/terminal/outcome") == Some(&serde_json::json!("failed"))
+            && record.value.pointer("/terminal/cancellation")
+                == Some(&serde_json::json!("deadline"))
+        {
+            self.deadline_terminal = Some(record.value.as_ref().clone());
+        }
+        let cancellation = continuation
             && record
                 .value
-                .pointer("/pending/0/state/state")
-                .and_then(serde_json::Value::as_str)
-                == Some("terminal");
+                .pointer("/state/cancellation")
+                .is_some_and(|value| !value.is_null());
+        self.failed_terminal |= continuation
+            && record.value.pointer("/state/phase") == Some(&serde_json::json!("ready"))
+            && record.value.pointer("/terminal/outcome") == Some(&serde_json::json!("failed"));
+        if cancellation {
+            self.owner
+                .cancellation_writes
+                .fetch_add(1, Ordering::SeqCst);
+            if self.owner.reject_cancellation.swap(false, Ordering::SeqCst) {
+                self.owner
+                    .cancellation_faults
+                    .fetch_add(1, Ordering::SeqCst);
+                return Err(StateStoreError::InvalidRequest(
+                    "injected cancellation failure".into(),
+                ));
+            }
+        }
+        self.wrote_cancellation |= cancellation;
         if resolution_settlement
             && self
                 .owner
@@ -749,13 +1139,13 @@ impl StateTransactionBackend for NotificationConflictTransaction {
                 .lock()
                 .expect("settlement snapshot mutex") = before;
         }
-        if notification && self.owner.conflict.swap(false, Ordering::SeqCst) {
+        if interaction_publication && self.owner.conflict.swap(false, Ordering::SeqCst) {
             self.owner.injected.add_permits(1);
             Err(StateStoreError::transaction_conflict(
                 "put",
                 "injected notification publication conflict",
             ))
-        } else if notification && self.owner.persistent_conflict.load(Ordering::SeqCst) {
+        } else if interaction_publication && self.owner.persistent_conflict.load(Ordering::SeqCst) {
             if self
                 .owner
                 .persistent_attempts
@@ -770,6 +1160,7 @@ impl StateTransactionBackend for NotificationConflictTransaction {
             ))
         } else {
             self.wrote_notification |= notification;
+            self.wrote_interaction_publication |= interaction_publication;
             self.wrote_resolution_intent |= resolution_intent;
             self.wrote_resolution_settlement |= resolution_settlement;
             if resolution_intent {
@@ -797,7 +1188,51 @@ impl StateTransactionBackend for NotificationConflictTransaction {
             wrote_resolution_intent,
             wrote_resolution_settlement,
             wrote_prompt_waiter,
+            notification_before: _,
+            wrote_interaction_publication,
+            progress,
+            progress_fault,
+            writer,
+            journal_writer,
+            wrote_cancellation,
+            deadline_terminal,
+            failed_terminal,
         } = self;
+        let _writer = writer;
+        let _journal_writer = journal_writer;
+        if let Some(fault) = progress_fault {
+            match fault.outcome {
+                ProgressFaultOutcome::Conflict => unreachable!("conflicts are injected at put"),
+                ProgressFaultOutcome::Uncommitted => {
+                    inner.rollback().await?;
+                    return Err(StateStoreError::unavailable(
+                        "commit",
+                        "progress was not committed",
+                    ));
+                }
+                ProgressFaultOutcome::Committed => {
+                    inner.commit().await?;
+                    owner.unavailable_observation.store(true, Ordering::SeqCst);
+                    return Err(StateStoreError::unavailable(
+                        "commit",
+                        "progress committed but receipt was lost",
+                    ));
+                }
+            }
+        }
+        if let Some(progress) = progress {
+            if matches!(progress.stage, ProgressCommitStage::Before) {
+                progress.hold().await;
+            }
+            progress.commits.fetch_add(1, Ordering::SeqCst);
+            let result = inner.commit().await;
+            if matches!(progress.stage, ProgressCommitStage::After) {
+                progress.hold().await;
+            }
+            progress.receipts.fetch_add(1, Ordering::SeqCst);
+            progress.receipt_observed.add_permits(1);
+            return result;
+        }
         if read_notification
             && !wrote_notification
             && owner.receipt_read_hold.swap(false, Ordering::SeqCst)
@@ -843,7 +1278,9 @@ impl StateTransactionBackend for NotificationConflictTransaction {
             owner.prompt_waiter_receipts.fetch_add(1, Ordering::SeqCst);
             return result;
         }
-        if wrote_resolution_settlement && owner.ambiguous_settlement.swap(false, Ordering::SeqCst) {
+        let result = if wrote_resolution_settlement
+            && owner.ambiguous_settlement.swap(false, Ordering::SeqCst)
+        {
             inner.commit().await?;
             Err(StateStoreError::unavailable(
                 "commit",
@@ -855,7 +1292,7 @@ impl StateTransactionBackend for NotificationConflictTransaction {
                 "commit",
                 "injected ambiguous interaction intent commit",
             ))
-        } else if wrote_notification && owner.ambiguous.swap(false, Ordering::SeqCst) {
+        } else if wrote_interaction_publication && owner.ambiguous.swap(false, Ordering::SeqCst) {
             inner.commit().await?;
             owner.unavailable_observation.store(true, Ordering::SeqCst);
             Err(StateStoreError::unavailable(
@@ -864,7 +1301,23 @@ impl StateTransactionBackend for NotificationConflictTransaction {
             ))
         } else {
             inner.commit().await
+        };
+        if result.is_ok() {
+            if failed_terminal {
+                owner.failed_settled.add_permits(1);
+            }
+            if wrote_cancellation {
+                owner.cancellation_observed.add_permits(1);
+            }
+            if let Some(terminal) = deadline_terminal {
+                *owner
+                    .deadline_terminal
+                    .lock()
+                    .expect("deadline terminal observation") = Some(terminal);
+                owner.deadline_settled.add_permits(1);
+            }
         }
+        result
     }
 
     async fn rollback(self) -> Result<(), StateStoreError> {
@@ -888,6 +1341,7 @@ enum HandlerBehavior {
     Empty { is_error: bool, metadata_only: bool },
     Structured { is_error: bool, null: bool },
     Interaction,
+    GatedInteraction,
 }
 
 struct ScriptedToolset {
@@ -920,6 +1374,8 @@ struct CancellationProbe {
     shutdown_timeout: AtomicBool,
     started: tokio::sync::Notify,
     release: tokio::sync::Notify,
+    invoke_started: tokio::sync::Notify,
+    invoke_release: tokio::sync::Notify,
 }
 
 impl ScriptedToolset {
@@ -943,7 +1399,10 @@ impl ScriptedToolset {
 
     fn info(&self) -> ToolInfo {
         let mut info = ToolInfo::new(self.name.clone(), self.schema.clone());
-        if matches!(self.behavior, HandlerBehavior::Interaction) {
+        if matches!(
+            self.behavior,
+            HandlerBehavior::Interaction | HandlerBehavior::GatedInteraction
+        ) {
             info.interactions = ToolInteractionCapabilities {
                 text: true,
                 ..ToolInteractionCapabilities::default()
@@ -1072,8 +1531,12 @@ impl ToolHandlerBackend for ScriptedHandler {
                             metadata: std::collections::BTreeMap::new(),
                         }))
                     }
-                    HandlerBehavior::Interaction => {
+                    HandlerBehavior::Interaction | HandlerBehavior::GatedInteraction => {
                         self.phase = HandlerPhase::Waiting;
+                        if matches!(self.behavior, HandlerBehavior::GatedInteraction) {
+                            self.cancellation.invoke_started.notify_one();
+                            self.cancellation.invoke_release.notified().await;
+                        }
                         Ok(ToolHandlerOutput::Interaction(ToolInteractionRequest {
                             id: ToolInteractionId::new(),
                             tool_name: self.name.clone(),
@@ -1386,6 +1849,30 @@ impl<S: StateStoreBackend> CustomPromptFixture<S> {
         }
     }
 
+    async fn next_interaction(
+        &self,
+        receiver: &mut ConversationNotificationReceiver,
+    ) -> ConversationNotification {
+        loop {
+            let item = receiver
+                .recv()
+                .await
+                .expect("notification source")
+                .expect("notification delivery");
+            match item.kind() {
+                ConversationNotificationKind::Interaction { .. } => return item,
+                ConversationNotificationKind::Progress { label, detail } => {
+                    assert!(matches!(
+                        label.as_str(),
+                        "Preparing response" | "Tool calls requested"
+                    ));
+                    assert!(detail.is_none());
+                }
+                kind => panic!("unexpected notification before interaction: {kind:?}"),
+            }
+        }
+    }
+
     async fn approve_prompt(
         &self,
         conflicts: &NotificationConflictStore,
@@ -1412,9 +1899,7 @@ impl<S: StateStoreBackend> CustomPromptFixture<S> {
         .expect("approval publication fault injection must remain bounded");
         let notification = tokio::time::timeout(Duration::from_secs(3), async {
             tokio::select! {
-                item = receiver.recv() => item
-                    .expect("notification stream must remain open")
-                    .expect("notification delivery must succeed"),
+                item = self.next_interaction(receiver) => item,
                 result = &mut prompt => {
                     panic!("prompt settled before approval delivery: {result:?}")
                 }
@@ -1594,10 +2079,19 @@ async fn custom_approval_publication_reconciles_transaction_faults() {
     .await
     .expect("persistent approval publication fault injection must remain bounded");
     let error = tokio::time::timeout_at(persistent_deadline, async {
-        tokio::select! {
-            result = &mut prompt => result,
-            item = receiver.recv() => {
-                panic!("permanently conflicted publication must not deliver a notification: {item:?}")
+        loop {
+            tokio::select! {
+                result = &mut prompt => break result,
+                item = receiver.recv() => {
+                    let item = item.expect("open journal").expect("milestone delivery");
+                    match item.kind() {
+                        ConversationNotificationKind::Progress { label, detail } => {
+                            assert!(matches!(label.as_str(), "Preparing response" | "Tool calls requested"));
+                            assert!(detail.is_none());
+                        }
+                        kind => panic!("permanently conflicted Interaction must not be delivered: {kind:?}"),
+                    }
+                }
             }
         }
     })
@@ -1646,9 +2140,7 @@ async fn custom_approval_publication_reconciles_transaction_faults() {
     ));
     let notification = tokio::time::timeout(Duration::from_secs(3), async {
         tokio::select! {
-            item = receiver.recv() => item
-                .expect("notification stream must remain open")
-                .expect("notification delivery must succeed"),
+            item = fixture.next_interaction(&mut receiver) => item,
             result = &mut prompt => {
                 panic!("prompt settled before intent approval delivery: {result:?}")
             }
@@ -1697,9 +2189,7 @@ async fn custom_approval_publication_reconciles_transaction_faults() {
     );
     let notification = tokio::time::timeout(Duration::from_secs(3), async {
         tokio::select! {
-            item = receiver.recv() => item
-                .expect("notification stream must remain open")
-                .expect("notification delivery must succeed"),
+            item = fixture.next_interaction(&mut receiver) => item,
             result = &mut prompt => {
                 panic!("prompt settled before settlement approval delivery: {result:?}")
             }
@@ -1772,8 +2262,7 @@ async fn custom_approval_confirmed_settlement_never_replays_after_stale_observat
     let outcome = async {
         let notification = tokio::time::timeout(Duration::from_secs(3), async {
             tokio::select! {
-                item = receiver.recv() => item
-                    .ok_or_else(|| KitError::closed("notification stream ended"))?,
+                item = fixture.next_interaction(&mut receiver) => Ok(item),
                 result = &mut prompt => Err(result.err().unwrap_or_else(||
                     KitError::invalid_state("prompt completed before approval"))),
             }
@@ -1875,9 +2364,7 @@ async fn custom_approval_settlement_observation_timeout_requires_recovery() {
     );
     let notification = tokio::time::timeout(Duration::from_secs(3), async {
         tokio::select! {
-            item = receiver.recv() => item
-                .expect("notification stream must remain open")
-                .expect("notification delivery must succeed"),
+            item = fixture.next_interaction(&mut receiver) => item,
             result = &mut prompt => {
                 panic!("prompt settled before settlement recovery delivery: {result:?}")
             }
@@ -2059,9 +2546,7 @@ async fn custom_approval_intent_observation_timeout_requires_recovery() {
     );
     let notification = tokio::time::timeout(Duration::from_secs(3), async {
         tokio::select! {
-            item = receiver.recv() => item
-                .expect("notification stream must remain open")
-                .expect("notification delivery must succeed"),
+            item = fixture.next_interaction(&mut receiver) => item,
             result = &mut prompt => {
                 panic!("prompt settled before recovery approval delivery: {result:?}")
             }
@@ -3764,9 +4249,7 @@ async fn abort_cancels_and_drains_an_interactive_tool_before_route_reuse() {
             .prompt(PromptRequest::new("wait in the tool").expect("fixture prompt must be valid")),
     );
     let notification = tokio::select! {
-        item = receiver.recv() => item
-            .expect("notification stream must remain open")
-            .expect("notification delivery must succeed"),
+        item = fixture.next_interaction(&mut receiver) => item,
         result = &mut prompt => panic!("prompt settled before interaction: {result:?}"),
     };
     assert!(matches!(
@@ -4058,11 +4541,12 @@ impl CustomPromptFixture<StateStore> {
             .expect("real delta must arrive while tool approval prevents completion");
         assert!(matches!(partial,
         Some(Ok(PromptEvent::OutputDelta { text })) if text == "stream-fragment-only"));
-        let approval = tokio::time::timeout(Duration::from_secs(3), notifications.recv())
-            .await
-            .expect("streaming cannot block durable interaction delivery")
-            .expect("notification receiver stays open")
-            .expect("approval delivery succeeds");
+        let approval = tokio::time::timeout(
+            Duration::from_secs(3),
+            fixture.next_interaction(&mut notifications),
+        )
+        .await
+        .expect("streaming cannot block durable interaction delivery");
         assert!(matches!(
             approval.kind(),
             ConversationNotificationKind::Interaction { .. }
@@ -4270,11 +4754,12 @@ async fn custom_prompt_stream_drop_and_overflow_do_not_abort_accepted_work() {
         .await
         .expect("stream admission is bounded")
         .expect("stream admitted");
-        let approval = tokio::time::timeout(Duration::from_secs(3), notifications.recv())
-            .await
-            .expect("output pressure cannot block approval delivery")
-            .expect("receiver stays open")
-            .expect("approval delivered");
+        let approval = tokio::time::timeout(
+            Duration::from_secs(3),
+            fixture.next_interaction(&mut notifications),
+        )
+        .await
+        .expect("output pressure cannot block approval delivery");
         assert!(matches!(
             approval.kind(),
             ConversationNotificationKind::Interaction { .. }
@@ -4417,11 +4902,12 @@ async fn custom_prompt_stream_abort_settles_old_generation_before_new_output() {
             text: "old generation".to_owned()
         }
     );
-    let approval = tokio::time::timeout(Duration::from_secs(3), notifications.recv())
-        .await
-        .expect("approval progress")
-        .expect("receiver open")
-        .expect("approval");
+    let approval = tokio::time::timeout(
+        Duration::from_secs(3),
+        fixture.next_interaction(&mut notifications),
+    )
+    .await
+    .expect("approval progress");
     assert!(
         tokio::time::timeout(Duration::from_millis(25), old.recv())
             .await
@@ -5595,4 +6081,810 @@ async fn custom_cancelled_notification_read_does_not_freeze_a_closed_snapshot() 
         .settle(async { std::fs::remove_dir_all(root) })
         .await;
     cleanup.finish(observed);
+}
+
+#[derive(Clone, Copy)]
+enum ProgressInterruption {
+    Complete,
+    Deadline,
+    DeadlineIntentFailure,
+    AbortIntentRace,
+    Close,
+}
+
+impl CustomPromptFixture<NotificationConflictStore> {
+    async fn progress_publication_retains_ownership(
+        stage: ProgressCommitStage,
+        interruption: ProgressInterruption,
+        tools: bool,
+    ) {
+        let inner = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory()))
+            .await
+            .expect("progress store");
+        let store = NotificationConflictStore::new(inner);
+        // An exclusive writer detects both acceptance-before-publication ordering
+        // and the need to poll an admitted publication while deadline bookkeeping
+        // waits for that same writer. Retaining an unpolled future is insufficient.
+        let store = if matches!(
+            interruption,
+            ProgressInterruption::Complete | ProgressInterruption::Deadline
+        ) {
+            store.with_exclusive_writer()
+        } else if matches!(interruption, ProgressInterruption::DeadlineIntentFailure) {
+            store.with_journal_writer()
+        } else {
+            store
+        };
+        let fixture = Self::build_with_store(
+            if tools {
+                ToolSelection::Allowed(vec![TOOL.into()])
+            } else {
+                ToolSelection::None
+            },
+            Vec::new(),
+            HandlerBehavior::Complete,
+            None,
+            CustomToolApproval::Allow,
+            store.clone(),
+        )
+        .await;
+        let responses = if tools {
+            vec![
+                ScriptedState::function_response(),
+                ScriptedState::terminal_response("complete"),
+            ]
+        } else {
+            vec![ScriptedState::terminal_response("complete")]
+        };
+        fixture.state.set_streams(
+            responses
+                .into_iter()
+                .map(|response| vec![Ok(GenerateEvent::Completed(Box::new(response)))])
+                .collect(),
+        );
+        let progress = store.hold_progress(
+            if tools {
+                "Tool calls requested"
+            } else {
+                "Preparing response"
+            },
+            stage,
+        );
+        if matches!(interruption, ProgressInterruption::DeadlineIntentFailure) {
+            store.reject_cancellation.store(true, Ordering::SeqCst);
+        }
+        let Self {
+            conversation,
+            workspace,
+            agent,
+            root,
+            state,
+            calls,
+            cancellation,
+            toolset_count,
+            ..
+        } = fixture;
+        let mut conversation = Some(conversation);
+        let mut receiver = conversation
+            .as_ref()
+            .unwrap()
+            .notification_stream()
+            .expect("receiver");
+        let observed = NativeCleanup::observe(tokio::time::Instant::now() + Duration::from_secs(8), async {
+            let request = PromptRequest::new("private prompt and arguments").expect("request");
+            let request = if matches!(interruption, ProgressInterruption::Deadline | ProgressInterruption::DeadlineIntentFailure) {
+                request.with_timeout(Duration::from_millis(500)).expect("deadline")
+            } else { request };
+            let mut output = conversation.as_ref().unwrap().prompt_stream(request).await.expect("stream");
+            progress.entered().await;
+            assert_eq!(progress.receipts.load(Ordering::SeqCst), 0);
+            assert_eq!(state.requests().len(), usize::from(tools));
+            assert_eq!(calls.load(Ordering::SeqCst), 0);
+            match interruption {
+                ProgressInterruption::Complete => {
+                    progress.release();
+                    assert!(matches!(output.recv().await, Some(Ok(PromptEvent::Completed(response))) if response.output() == "complete"));
+                    assert_eq!(state.requests().len(), if tools { 2 } else { 1 });
+                    assert_eq!(calls.load(Ordering::SeqCst), usize::from(tools));
+                }
+                ProgressInterruption::Deadline => {
+                    // A held native transaction may also delay the deadline intent.
+                    // Elapse the original timeout, then release only that transaction;
+                    // no explicit abort or close may supply the cancellation under test.
+                    tokio::time::sleep(Duration::from_millis(550)).await;
+                    assert_eq!(progress.receipts.load(Ordering::SeqCst), 0, "deadline cannot synthesize a publication receipt");
+                    progress.release();
+                    let error = output.recv().await.expect("deadline event").expect_err("deadline must end observation");
+                    assert_eq!(error.kind(), agents_kit::error::ErrorKind::Timeout);
+                    store.cancellation_observed.acquire().await.expect("deadline cancellation committed").forget();
+                    store.deadline_settled.acquire().await.expect("deadline owner reached durable terminal settlement").forget();
+                    let terminal = store.deadline_terminal.lock().expect("deadline terminal observation").clone().expect("committed deadline terminal");
+                    assert_eq!(terminal.pointer("/state/phase"), Some(&serde_json::json!("ready")));
+                    assert_eq!(terminal.pointer("/terminal/outcome"), Some(&serde_json::json!("failed")));
+                    assert_eq!(terminal.pointer("/terminal/cancellation"), Some(&serde_json::json!("deadline")));
+                    assert_eq!(progress.receipts.load(Ordering::SeqCst), 1, "deadline settlement observed the original publication receipt");
+                    assert_eq!(state.requests().len(), usize::from(tools), "deadline must fence the next model effect before cleanup");
+                    assert_eq!(calls.load(Ordering::SeqCst), 0, "deadline must fence the next tool effect before cleanup");
+                }
+                ProgressInterruption::DeadlineIntentFailure => {
+                    let error = output.recv().await.expect("deadline event").expect_err("deadline ends observation");
+                    assert_eq!(error.kind(), agents_kit::error::ErrorKind::Timeout);
+                    store.journal_waiting.acquire().await.expect("interaction cleanup reaches the held journal writer").forget();
+                    assert_eq!(store.cancellation_faults.load(Ordering::SeqCst), 1, "only the continuation cancellation put supplies this failure");
+                    assert_eq!(store.cancellation_writes.load(Ordering::SeqCst), 1);
+                    assert_eq!(progress.receipts.load(Ordering::SeqCst), 0);
+                    progress.release();
+                    tokio::time::timeout(Duration::from_secs(1), progress.receipt_observed.acquire()).await
+                        .expect("the original publication must progress while cleanup waits, without exhausting its three-second lifecycle budget")
+                        .expect("original publication receipt").forget();
+                    store.failed_settled.acquire().await.expect("failed intent owner reaches durable terminal settlement").forget();
+                    assert_eq!(progress.receipts.load(Ordering::SeqCst), 1);
+                    assert_eq!(state.requests().len(), usize::from(tools));
+                    assert_eq!(calls.load(Ordering::SeqCst), 0);
+                    assert_eq!(store.interaction_publications.load(Ordering::SeqCst), 0);
+                }
+                ProgressInterruption::AbortIntentRace => {
+                    *store.cancellation_read_target.lock().expect("cancellation read target") = Some(StateKey::new("agents_kit_custom_continuations_v1", conversation.as_ref().unwrap().id().as_str()).expect("exact continuation key"));
+                    let mut abort = Box::pin(conversation.as_ref().unwrap().abort());
+                    tokio::select! {
+                        permit = store.cancellation_read_entered.acquire() => permit.expect("committed cancellation observation is held").forget(),
+                        result = &mut abort => panic!("abort returned before the held cancellation observation: {result:?}"),
+                    }
+                    assert_eq!(store.cancellation_writes.load(Ordering::SeqCst), 1);
+                    assert_eq!(progress.receipts.load(Ordering::SeqCst), 0);
+                    // The exact postcommit read cannot return to dispatch local
+                    // cancellation until released. Natural completion retains
+                    // authority while that intent is still being reconciled.
+                    progress.release();
+                    let terminal = output.recv().await;
+                    assert!(matches!(&terminal, Some(Ok(PromptEvent::Completed(response))) if response.output() == "complete"), "natural completion may win before local cancellation dispatch (before_commit={}, tools={tools}): {terminal:?}", matches!(stage, ProgressCommitStage::Before));
+                    assert_eq!(state.requests().len(), if tools { 2 } else { 1 });
+                    assert_eq!(calls.load(Ordering::SeqCst), usize::from(tools));
+                    assert_eq!(progress.receipts.load(Ordering::SeqCst), 1, "natural completion must observe the original publication receipt");
+                    store.cancellation_read_release.add_permits(1);
+                    abort.await.expect("delayed abort joins its captured terminal");
+                    assert_eq!(state.requests().len(), if tools { 2 } else { 1 }, "settled abort cannot dispatch another model generation");
+                    assert_eq!(calls.load(Ordering::SeqCst), usize::from(tools), "settled abort cannot dispatch another handler");
+                }
+                ProgressInterruption::Close => {
+                    let mut close = Box::pin(conversation.take().unwrap().close());
+                    tokio::select! {
+                        permit = store.cancellation_observed.acquire() => permit.expect("close cancellation receipt").forget(),
+                        result = &mut close => panic!("close returned before the held publication settled: {result:?}"),
+                    }
+                    progress.release();
+                    close.await.expect("close joins admitted publication");
+                    assert!(matches!(output.recv().await, Some(Err(_))));
+                }
+            }
+            assert!(output.recv().await.is_none());
+        }).await;
+        // Release fixture barriers even when red evidence exposes a first-poll
+        // writer deadlock. The failed observation remains primary; cleanup may
+        // admit one additional writer solely to let the tracked owner join.
+        progress.release();
+        store
+            .cancellation_read_target
+            .lock()
+            .expect("cancellation read target")
+            .take();
+        store.cancellation_read_release.add_permits(1);
+        if let Some(writer) = &store.exclusive_writer {
+            writer.add_permits(1);
+        }
+        let mut cleanup = NativeCleanup::new(Duration::from_secs(4));
+        if let Some(conversation) = conversation.take() {
+            cleanup.settle(conversation.close()).await;
+        }
+        cleanup
+            .settle(async {
+                while let Some(item) = receiver.recv().await {
+                    let item = item?;
+                    match item.kind() {
+                        ConversationNotificationKind::Progress { label, detail } => {
+                            assert!(matches!(
+                                label.as_str(),
+                                "Preparing response" | "Tool calls requested"
+                            ));
+                            assert!(detail.is_none());
+                        }
+                        kind => panic!("unexpected fact during progress drain: {kind:?}"),
+                    }
+                }
+                Ok::<(), KitError>(())
+            })
+            .await;
+        drop(receiver);
+        cleanup.settle(workspace.close()).await;
+        cleanup.settle(agent.shutdown()).await;
+        cleanup
+            .settle(async { std::fs::remove_dir_all(root) })
+            .await;
+        cleanup.finish(observed);
+        assert_eq!(progress.commits.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            progress.receipts.load(Ordering::SeqCst),
+            1,
+            "owned execution must observe its original receipt"
+        );
+        if matches!(
+            interruption,
+            ProgressInterruption::Complete | ProgressInterruption::AbortIntentRace
+        ) {
+            assert_eq!(state.requests().len(), if tools { 2 } else { 1 });
+            assert_eq!(calls.load(Ordering::SeqCst), usize::from(tools));
+        } else {
+            assert_eq!(state.requests().len(), usize::from(tools));
+            assert_eq!(calls.load(Ordering::SeqCst), 0);
+        }
+        assert_eq!(cancellation.shutdowns.load(Ordering::SeqCst), toolset_count);
+    }
+}
+
+#[tokio::test]
+async fn custom_progress_publication_keeps_transaction_authority_through_cancellation_and_close() {
+    for stage in [ProgressCommitStage::Before, ProgressCommitStage::After] {
+        for interruption in [
+            ProgressInterruption::Complete,
+            ProgressInterruption::Deadline,
+            ProgressInterruption::AbortIntentRace,
+            ProgressInterruption::Close,
+        ] {
+            for tools in [false, true] {
+                CustomPromptFixture::progress_publication_retains_ownership(
+                    stage,
+                    interruption,
+                    tools,
+                )
+                .await;
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn custom_progress_deadline_intent_failure_keeps_publication_polling() {
+    for stage in [ProgressCommitStage::Before, ProgressCommitStage::After] {
+        for tools in [false, true] {
+            CustomPromptFixture::progress_publication_retains_ownership(
+                stage,
+                ProgressInterruption::DeadlineIntentFailure,
+                tools,
+            )
+            .await;
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum HandlerDeadlineCase {
+    InteractionAfterDeadline,
+    FailedCancellationIntent,
+}
+
+impl CustomPromptFixture<NotificationConflictStore> {
+    async fn handler_deadline_ownership(case: HandlerDeadlineCase) {
+        let raw = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory()))
+            .await
+            .expect("handler deadline store");
+        let store = NotificationConflictStore::new(raw);
+        let store = match case {
+            HandlerDeadlineCase::InteractionAfterDeadline => store.with_exclusive_writer(),
+            HandlerDeadlineCase::FailedCancellationIntent => store,
+        };
+        let fixture = Self::build_with_store(
+            ToolSelection::Allowed(vec![TOOL.into()]),
+            Vec::new(),
+            HandlerBehavior::GatedInteraction,
+            None,
+            CustomToolApproval::Allow,
+            store.clone(),
+        )
+        .await;
+        fixture
+            .state
+            .set_streams(vec![vec![Ok(GenerateEvent::Completed(Box::new(
+                ScriptedState::function_response(),
+            )))]]);
+        if matches!(case, HandlerDeadlineCase::FailedCancellationIntent) {
+            store.reject_cancellation.store(true, Ordering::SeqCst);
+        }
+        let Self {
+            conversation,
+            workspace,
+            agent,
+            root,
+            state,
+            calls,
+            cancellation,
+            toolset_count,
+            ..
+        } = fixture;
+        let mut receiver = conversation
+            .notification_stream()
+            .expect("handler receiver");
+        let mut held_writer = None;
+        let observed = NativeCleanup::observe(tokio::time::Instant::now() + Duration::from_secs(8), async {
+            let cancelled = cancellation.started.notified();
+            tokio::pin!(cancelled);
+            cancelled.as_mut().enable();
+            let mut output = conversation.prompt_stream(
+                PromptRequest::new("pending handler at deadline").expect("request")
+                    .with_timeout(Duration::from_secs(1)).expect("deadline"),
+            ).await.expect("stream");
+            cancellation.invoke_started.notified().await;
+            assert_eq!(calls.load(Ordering::SeqCst), 1);
+            assert_eq!(cancellation.count.load(Ordering::SeqCst), 0);
+            if matches!(case, HandlerDeadlineCase::InteractionAfterDeadline) {
+                // This caller-owned transaction blocks the deadline-intent write.
+                // Its release must not supply the missing prepublication guard.
+                held_writer = Some(store.begin_transaction().await.expect("exclusive writer"));
+            }
+            let error = output.recv().await.expect("deadline event").expect_err("deadline observation");
+            assert_eq!(error.kind(), agents_kit::error::ErrorKind::Timeout);
+            if matches!(case, HandlerDeadlineCase::InteractionAfterDeadline) {
+                cancellation.invoke_release.notify_one();
+            }
+            tokio::time::timeout(Duration::from_secs(1), &mut cancelled).await
+                .expect("deadline must cancel the acquired handler before external writer release or explicit cleanup");
+            assert_eq!(cancellation.count.load(Ordering::SeqCst), 1);
+            assert_eq!(store.interaction_publications.load(Ordering::SeqCst), 0);
+            match case {
+                HandlerDeadlineCase::InteractionAfterDeadline => {
+                    assert_eq!(store.cancellation_writes.load(Ordering::SeqCst), 0);
+                }
+                HandlerDeadlineCase::FailedCancellationIntent => {
+                    assert_eq!(store.cancellation_writes.load(Ordering::SeqCst), 1);
+                    assert_eq!(store.cancellation_faults.load(Ordering::SeqCst), 1);
+                }
+            }
+            cancellation.release.notify_one();
+            if let Some(writer) = held_writer.take() {
+                writer.rollback().await.expect("release external writer");
+            }
+            store.failed_settled.acquire().await.expect("handler owner durably settles failure").forget();
+            assert_eq!(store.interaction_publications.load(Ordering::SeqCst), 0, "no late Interaction may be published while the deadline owner settles");
+            assert_eq!(cancellation.count.load(Ordering::SeqCst), 1);
+            assert_eq!(cancellation.created.load(Ordering::SeqCst), 1);
+            assert_eq!(calls.load(Ordering::SeqCst), 1);
+            assert_eq!(state.requests().len(), 1, "no continuation Model call after deadline");
+            assert!(output.recv().await.is_none());
+        }).await;
+        cancellation.invoke_release.notify_one();
+        cancellation.release.notify_one();
+        let mut cleanup = NativeCleanup::new(Duration::from_secs(4));
+        if let Some(writer) = held_writer.take() {
+            cleanup.settle(writer.rollback()).await;
+        }
+        cleanup.settle(conversation.close()).await;
+        cleanup.settle(async {
+            for expected in ["Preparing response", "Tool calls requested"] {
+                let notification = receiver.recv().await.expect("required milestone")?;
+                assert!(matches!(notification.kind(), ConversationNotificationKind::Progress { label, detail } if label == expected && detail.is_none()));
+            }
+            assert!(receiver.recv().await.is_none(), "deadline cannot add a late Interaction");
+            Ok::<(), KitError>(())
+        }).await;
+        drop(receiver);
+        cleanup.settle(workspace.close()).await;
+        cleanup.settle(agent.shutdown()).await;
+        cleanup
+            .settle(async { std::fs::remove_dir_all(root) })
+            .await;
+        cleanup.finish(observed);
+        assert_eq!(cancellation.shutdowns.load(Ordering::SeqCst), toolset_count);
+    }
+}
+
+#[tokio::test]
+async fn custom_progress_deadline_fences_a_late_handler_interaction_before_publication() {
+    CustomPromptFixture::handler_deadline_ownership(HandlerDeadlineCase::InteractionAfterDeadline)
+        .await;
+}
+
+#[tokio::test]
+async fn custom_progress_deadline_intent_failure_signals_and_joins_active_handler() {
+    CustomPromptFixture::handler_deadline_ownership(HandlerDeadlineCase::FailedCancellationIntent)
+        .await;
+}
+
+#[tokio::test]
+async fn custom_progress_acceptance_failure_keeps_the_execution_gate_closed() {
+    let mut baseline: Option<(KitError, usize)> = None;
+    for cancellation_fails in [false, true] {
+        let inner = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory()))
+            .await
+            .expect("store");
+        let store = NotificationConflictStore::new(inner);
+        let fixture = CustomPromptFixture::build_with_store(
+            ToolSelection::None,
+            vec![ScriptedState::terminal_response("must not execute")],
+            HandlerBehavior::Complete,
+            None,
+            CustomToolApproval::Allow,
+            store.clone(),
+        )
+        .await;
+        let mut receiver = fixture
+            .conversation
+            .notification_stream()
+            .expect("receiver");
+        store.reject_acceptance.store(true, Ordering::SeqCst);
+        store
+            .reject_cancellation
+            .store(cancellation_fails, Ordering::SeqCst);
+        let observed = NativeCleanup::observe(
+            tokio::time::Instant::now() + Duration::from_secs(5),
+            async {
+                let result = fixture
+                    .conversation
+                    .prompt(PromptRequest::new("fail before execution").expect("request"))
+                    .await;
+                let error = result.expect_err("acceptance storage failed");
+                assert_eq!(error.kind(), agents_kit::error::ErrorKind::Integration);
+                assert_eq!(error.detail(), Some(&agents_kit::error::ErrorDetail::ServiceUnavailable));
+                assert_eq!(store.acceptance_faults.load(Ordering::SeqCst), 1);
+                assert!(!store.reject_acceptance.load(Ordering::SeqCst));
+                let cancellation_writes = store.cancellation_writes.load(Ordering::SeqCst);
+                assert!(cancellation_writes <= 1, "failed admission cannot repeat a cancellation mutation");
+                if let Some((primary, baseline_writes)) = &baseline {
+                    assert_eq!(error.kind(), primary.kind());
+                    assert_eq!(error.message(), primary.message());
+                    assert_eq!(error.context(), primary.context());
+                    assert_eq!(error.detail(), primary.detail());
+                    assert_eq!(cancellation_writes, *baseline_writes, "fault arming cannot change whether preexecution cancellation was needed");
+                    if cancellation_writes == 0 {
+                        assert!(store.reject_cancellation.load(Ordering::SeqCst), "unreleased preexecution decline must leave the unrelated cancellation fault armed");
+                        assert_eq!(store.cancellation_faults.load(Ordering::SeqCst), 0);
+                        assert_eq!(error.supplementary().len(), primary.supplementary().len(), "a cancellation write that never happened supplies no cleanup failure");
+                    } else {
+                        assert!(!store.reject_cancellation.load(Ordering::SeqCst));
+                        assert_eq!(store.cancellation_faults.load(Ordering::SeqCst), 1);
+                        // Cleanup preserves the StateWrite phase that detected
+                        // this exact cancellation mutation failure.
+                        assert_eq!(error.supplementary().iter().filter(|failure| failure.kind() == agents_kit::error::ErrorKind::Integration && failure.detail() == Some(&agents_kit::error::ErrorDetail::InvalidData) && failure.context().phase == agents_kit::error::ErrorPhase::StateWrite).count(), 1, "the distinct injected cancellation failure retains its detecting phase and remains supplementary to admission failure: {error:?}");
+                    }
+                } else {
+                    assert!(!cancellation_fails);
+                    assert_eq!(store.cancellation_faults.load(Ordering::SeqCst), 0);
+                    baseline = Some((error, cancellation_writes));
+                }
+                assert_eq!(fixture.state.requests().len(), 0);
+                assert_eq!(fixture.calls.load(Ordering::SeqCst), 0);
+            },
+        )
+        .await;
+        // Faults are one-shot and must never leak into cleanup.
+        store.reject_acceptance.store(false, Ordering::SeqCst);
+        store.reject_cancellation.store(false, Ordering::SeqCst);
+        let CustomPromptFixture {
+            conversation,
+            workspace,
+            agent,
+            root,
+            ..
+        } = fixture;
+        let mut cleanup = NativeCleanup::new(Duration::from_secs(4));
+        cleanup.settle(conversation.close()).await;
+        cleanup
+            .settle(async {
+                assert!(
+                    receiver.recv().await.is_none(),
+                    "failed execution admission publishes no progress"
+                );
+                Ok::<(), KitError>(())
+            })
+            .await;
+        drop(receiver);
+        cleanup.settle(workspace.close()).await;
+        cleanup.settle(agent.shutdown()).await;
+        cleanup
+            .settle(async { std::fs::remove_dir_all(root) })
+            .await;
+        cleanup.finish(observed);
+    }
+}
+
+#[tokio::test]
+async fn custom_progress_publication_faults_preserve_identity_replay_and_effect_boundaries() {
+    for outcome in [
+        ProgressFaultOutcome::Conflict,
+        ProgressFaultOutcome::Uncommitted,
+        ProgressFaultOutcome::Committed,
+    ] {
+        for tools in [false, true] {
+            let inner =
+                StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory()))
+                    .await
+                    .expect("store");
+            let store = NotificationConflictStore::new(inner);
+            let fixture = CustomPromptFixture::build_with_store(
+                if tools {
+                    ToolSelection::Allowed(vec![TOOL.into()])
+                } else {
+                    ToolSelection::None
+                },
+                if tools {
+                    vec![
+                        ScriptedState::function_response(),
+                        ScriptedState::terminal_response("complete"),
+                        ScriptedState::terminal_response("complete"),
+                    ]
+                } else {
+                    vec![
+                        ScriptedState::terminal_response("complete"),
+                        ScriptedState::terminal_response("complete"),
+                    ]
+                },
+                HandlerBehavior::Complete,
+                None,
+                CustomToolApproval::Allow,
+                store.clone(),
+            )
+            .await;
+            let label = if tools {
+                "Tool calls requested"
+            } else {
+                "Preparing response"
+            };
+            let fault = store.fault_progress(label, outcome);
+            let mut receiver = Some(
+                fixture
+                    .conversation
+                    .notification_stream()
+                    .expect("receiver"),
+            );
+            let observed = NativeCleanup::observe(
+                tokio::time::Instant::now() + Duration::from_secs(8),
+                async {
+                    let result = fixture
+                        .conversation
+                        .prompt(PromptRequest::new("publication fault").expect("request"))
+                        .await;
+                    assert!(
+                        !fault.armed.load(Ordering::SeqCst),
+                        "the intended publication must consume its fault"
+                    );
+                    let mut delivered = None;
+                    if matches!(outcome, ProgressFaultOutcome::Uncommitted) {
+                        assert_eq!(
+                            result
+                                .expect_err("uncommitted publication prevents the next effect")
+                                .kind(),
+                            agents_kit::error::ErrorKind::Integration
+                        );
+                        assert_eq!(fixture.state.requests().len(), usize::from(tools));
+                        assert_eq!(fixture.calls.load(Ordering::SeqCst), 0);
+                        if tools {
+                            let preparing = receiver
+                                .as_mut()
+                                .unwrap()
+                                .recv()
+                                .await
+                                .expect("source")
+                                .expect("preparing");
+                            assert_eq!(
+                                preparing.kind(),
+                                &ConversationNotificationKind::Progress {
+                                    label: "Preparing response".into(),
+                                    detail: None
+                                }
+                            );
+                            delivered = Some(preparing);
+                        }
+                    } else {
+                        assert_eq!(result.expect("confirmed publication").output(), "complete");
+                        assert_eq!(fixture.state.requests().len(), if tools { 2 } else { 1 });
+                        assert_eq!(fixture.calls.load(Ordering::SeqCst), usize::from(tools));
+                        if tools {
+                            let preparing = receiver
+                                .as_mut()
+                                .unwrap()
+                                .recv()
+                                .await
+                                .expect("source")
+                                .expect("preparing");
+                            assert_eq!(
+                                preparing.kind(),
+                                &ConversationNotificationKind::Progress {
+                                    label: "Preparing response".into(),
+                                    detail: None
+                                }
+                            );
+                        }
+                        let item = receiver
+                            .as_mut()
+                            .unwrap()
+                            .recv()
+                            .await
+                            .expect("source")
+                            .expect("target milestone");
+                        assert_eq!(
+                            item.kind(),
+                            &ConversationNotificationKind::Progress {
+                                label: label.into(),
+                                detail: None
+                            }
+                        );
+                        let attempts = fault.attempts.lock().expect("attempts").clone();
+                        assert_eq!(
+                            attempts.len(),
+                            if matches!(outcome, ProgressFaultOutcome::Conflict) {
+                                2
+                            } else {
+                                1
+                            }
+                        );
+                        assert!(
+                            attempts.iter().all(|attempt| attempt == &attempts[0]),
+                            "identity, timestamp and payload remain exact across conflict retry"
+                        );
+                        assert_eq!(
+                            attempts[0].get("id").and_then(serde_json::Value::as_str),
+                            Some(item.id().as_str())
+                        );
+                        assert_eq!(
+                            attempts[0].get("inserted_at"),
+                            Some(&serde_json::to_value(item.inserted_at()).expect("timestamp"))
+                        );
+                        drop(receiver.take());
+                        receiver = Some(
+                            fixture
+                                .conversation
+                                .notification_stream()
+                                .expect("reacquire"),
+                        );
+                        assert_eq!(
+                            receiver
+                                .as_mut()
+                                .unwrap()
+                                .recv()
+                                .await
+                                .expect("source")
+                                .expect("replay"),
+                            item,
+                            "receiver loss is not acknowledgement"
+                        );
+                        delivered = Some(item);
+                    }
+                    assert!(!store.unavailable_observation.load(Ordering::SeqCst));
+                    fixture
+                        .conversation
+                        .prompt(
+                            PromptRequest::new("acknowledgment marker")
+                                .expect("request")
+                                .with_tool_selection(ToolSelection::None)
+                                .expect("selection"),
+                        )
+                        .await
+                        .expect("fresh work after exact publication settlement");
+                    let fresh = receiver
+                        .as_mut()
+                        .unwrap()
+                        .recv()
+                        .await
+                        .expect("source")
+                        .expect("fresh milestone");
+                    assert_eq!(
+                        fresh.kind(),
+                        &ConversationNotificationKind::Progress {
+                            label: "Preparing response".into(),
+                            detail: None
+                        }
+                    );
+                    if let Some(previous) = delivered {
+                        assert_ne!(
+                            fresh.id(),
+                            previous.id(),
+                            "advancing acknowledges the exact replayed item without duplicating it"
+                        );
+                    }
+                },
+            )
+            .await;
+            let CustomPromptFixture {
+                conversation,
+                workspace,
+                agent,
+                root,
+                ..
+            } = fixture;
+            let mut cleanup = NativeCleanup::new(Duration::from_secs(4));
+            cleanup.settle(conversation.close()).await;
+            cleanup
+                .settle(async {
+                    assert!(
+                        receiver.as_mut().unwrap().recv().await.is_none(),
+                        "acknowledged or uncommitted progress cannot replay on terminal drain"
+                    );
+                    Ok::<(), KitError>(())
+                })
+                .await;
+            drop(receiver);
+            cleanup.settle(workspace.close()).await;
+            cleanup.settle(agent.shutdown()).await;
+            cleanup
+                .settle(async { std::fs::remove_dir_all(root) })
+                .await;
+            cleanup.finish(observed);
+        }
+    }
+}
+
+#[tokio::test]
+async fn custom_progress_shutdown_joins_publication_after_observer_loss() {
+    for stage in [ProgressCommitStage::Before, ProgressCommitStage::After] {
+        let inner = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory()))
+            .await
+            .expect("store");
+        let store = NotificationConflictStore::new(inner);
+        let fixture = CustomPromptFixture::build_with_store(
+            ToolSelection::None,
+            Vec::new(),
+            HandlerBehavior::Complete,
+            None,
+            CustomToolApproval::Allow,
+            store.clone(),
+        )
+        .await;
+        fixture
+            .state
+            .set_streams(vec![vec![Ok(GenerateEvent::Completed(Box::new(
+                ScriptedState::terminal_response("must not execute"),
+            )))]]);
+        let progress = store.hold_progress("Preparing response", stage);
+        let output = fixture
+            .conversation
+            .prompt_stream(
+                PromptRequest::new("drop observation during publication").expect("request"),
+            )
+            .await
+            .expect("stream");
+        let entered = tokio::time::timeout(Duration::from_secs(3), progress.entered()).await;
+        drop(output);
+        let CustomPromptFixture {
+            conversation,
+            workspace,
+            agent,
+            root,
+            state,
+            calls,
+            cancellation,
+            toolset_count,
+            ..
+        } = fixture;
+        drop(conversation);
+        drop(workspace);
+        let mut shutdown = Box::pin(agent.shutdown());
+        let mut joined = false;
+        let observed = NativeCleanup::observe(tokio::time::Instant::now() + Duration::from_secs(6), async {
+            entered.expect("progress publication must start");
+            tokio::select! {
+                permit = store.cancellation_observed.acquire() => permit.expect("shutdown cancellation receipt").forget(),
+                result = &mut shutdown => {
+                    joined = true;
+                    panic!("shutdown completed before the publication receipt: {result:?}");
+                }
+            }
+            assert_eq!(progress.receipts.load(Ordering::SeqCst), 0);
+            assert!(state.requests().is_empty());
+            progress.release();
+            let result = shutdown.as_mut().await;
+            joined = true;
+            result.expect("shutdown joins the publication owner");
+            assert_eq!(progress.receipts.load(Ordering::SeqCst), 1);
+            assert!(state.requests().is_empty());
+            assert_eq!(calls.load(Ordering::SeqCst), 0);
+        }).await;
+        progress.release();
+        let mut cleanup = NativeCleanup::new(Duration::from_secs(4));
+        if !joined {
+            cleanup.settle(shutdown.as_mut()).await;
+        }
+        cleanup
+            .settle(async { std::fs::remove_dir_all(root) })
+            .await;
+        cleanup.finish(observed);
+        assert_eq!(cancellation.shutdowns.load(Ordering::SeqCst), toolset_count);
+    }
 }

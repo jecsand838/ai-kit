@@ -14,10 +14,30 @@ use std::time::Duration;
 use futures_util::{Stream, StreamExt};
 use tokio::sync::{mpsc, oneshot};
 
+use crate::notification::ConversationNotificationKind;
 use crate::{
     KitError, KnowledgePolicy, ModelSelector, PersonalitySelector, ReasoningEffort, ToolSelection,
     WorkspaceContext,
 };
+
+#[derive(Clone, Copy)]
+pub(crate) enum PromptMilestone {
+    Preparing,
+    ToolCallsRequested,
+}
+
+impl PromptMilestone {
+    pub(crate) fn into_notification(self) -> ConversationNotificationKind {
+        let label = match self {
+            Self::Preparing => "Preparing response",
+            Self::ToolCallsRequested => "Tool calls requested",
+        };
+        ConversationNotificationKind::Progress {
+            label: label.to_owned(),
+            detail: None,
+        }
+    }
+}
 
 /// Strict self-contained JSON Schema requested for structured prompt output.
 ///

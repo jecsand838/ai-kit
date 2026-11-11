@@ -93,8 +93,12 @@ where their semantics apply. `with_generation(GenerationConfig)` and
 borrowed `generation()` and `tools()` expose those existing values, including
 `generation().tool_choice()`. There is no separate Session function/tool-choice
 schema. Validated instruction, audio and turn-detection modifiers remain.
-Every accepted setting is rendered or explicitly
-rejected by the owning provider. Configuration is fixed for the Session lifetime;
+Constructors validate local invariants. Opening checks profile support;
+Realtime also validates native setup and waits for its handshake. Conversation
+can reject model-specific generation, tool, reasoning, or response-format
+settings later through Session events when an accepted command executes.
+Every accepted setting is rendered or explicitly rejected by the owning
+provider. Configuration is fixed for the Session lifetime;
 there is no reconfiguration, export/import, resume or rewind API. A caller Model
 may retain the complete value; no aggregate parts wrapper, type alias or
 public-field decomposition is added.

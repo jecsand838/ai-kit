@@ -12,14 +12,11 @@ Repository guides and examples linked below track `main`.
 Toolset -> ToolHandler
 ```
 
-Construct a built-in Toolset directly:
-
-```rust,ignore
-use tools_kit::Toolset;
-
-let local = Toolset::local(registrations)?;
-let mcp = Toolset::mcp(client_config).await?;
-```
+Construct a built-in Toolset with `Toolset::local(registrations)` or
+`Toolset::mcp(client_config).await`. The canonical Rustdoc sources for
+[Local registration and invocation](https://github.com/jecsand838/ai-kit/blob/main/tools-kit/src/lib.rs)
+and [MCP clients](https://github.com/jecsand838/ai-kit/blob/main/tools-kit/src/mcp.rs)
+show complete setup, execution, and shared shutdown, including failure paths.
 
 Import `ToolsetBackend` and `ToolHandlerBackend` to list `Vec<ToolInfo>`, select
 one handler by `ToolName`, and drive its `step` state machine.
@@ -43,14 +40,26 @@ use std::sync::Arc;
 use tools_kit::ToolsetBackend;
 
 let tools = Arc::new(toolset);
-let server = tools_kit::mcp::McpServer::start(Arc::clone(&tools), server_config).await?;
-server.shutdown().await?;
-tools.shutdown().await?;
+let serving = async {
+    let server = tools_kit::mcp::McpServer::start(Arc::clone(&tools), server_config).await?;
+    server.shutdown().await
+}.await;
+let source_cleanup = tools.shutdown().await;
+if let Err(error) = &source_cleanup {
+    eprintln!("Source cleanup failed: {error}");
+}
+serving?;
+source_cleanup?;
 ```
 
 The server can expose any concrete `ToolsetBackend`, including a non-Clone
 caller implementation with its own handler. It owns and joins its serving
 task; the caller separately shuts down the underlying shared toolset.
+Settle both cleanup calls before propagating their results, reporting a source
+cleanup failure even when serving already failed. Keep the Tokio runtime driven
+until retained cleanup settles. The canonical
+[`mcp::McpServer` Rustdoc source](https://github.com/jecsand838/ai-kit/blob/main/tools-kit/src/sources/mcp/server/mod.rs) includes a complete
+client/server/source invocation and cleanup sequence.
 
 See:
 

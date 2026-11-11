@@ -207,9 +207,21 @@ Shutdown seals prompt-task admission, observes task failures, and bounds cleanup
 using the existing lifecycle deadline. Last runtime drop revokes tracked tasks;
 the Kit does not leave detached prompt tasks or spawn a second stream driver.
 
-Protocol readers remain responsive while prompt, tool, Database, and durable
-work proceeds. No prompt or state guard is held across a JSON-RPC, tool,
-notification, storage, or waiter await.
+Transport response processing remains available while prompt, tool, Database,
+and durable work proceeds. The semantic event reader may await one bounded
+milestone publication before dispatching its derived effects; publication
+failure wakes the original prompt owner and leaves that reader available for
+native terminal reconciliation. No prompt or state guard is held across a
+JSON-RPC, tool, notification, storage, or waiter await.
+
+Publication-failure recovery reconciles a definite cancellation-claim or
+cancellation-receipt commit conflict against the same durable generation. Only
+an exact typed StateStore commit conflict without another cause or cleanup
+failure permits another local attempt, bounded by the original cleanup deadline.
+The native interruption remains outside those loops and is never resent.
+Native terminal authority can make the renewed claim unnecessary or confirm an
+already-settled receipt; transport failure, unknown commit outcome and other
+errors retain the original publication failure and supplementary cleanup evidence.
 
 ## Abort And Cancellation
 
@@ -330,3 +342,10 @@ Malformed terminal status/error combinations remain Protocol. Error details and
 misalignment steering prose remain private. Recovery uses full `thread/read`
 history for both paginated and legacy native storage, without a storage-mode
 override or a new paging API.
+
+The selected flat item timestamps remain private validation data, not output
+ordering. New model-not-found and policy-capacity failures use the same typed
+normalization in live completion, interrupted causes, and full-history recovery.
+Provider-admission rejection never substitutes a new thread, selected model, or
+provider. Callback retirement cancels only an exact still-pending interaction;
+resolution intent and ambiguous native acceptance remain recovery-owned.

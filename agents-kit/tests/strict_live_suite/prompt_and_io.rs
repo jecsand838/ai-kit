@@ -11,7 +11,9 @@ use std::task::{Context, Poll, Wake, Waker};
 use std::time::Duration;
 
 use agents_kit::identity::{AgentId, ConversationId, WorkspaceId};
-use agents_kit::notification::{ConversationNotificationKind, NotificationResolution};
+use agents_kit::notification::{
+    ConversationNotificationKind, ConversationNotificationReceiver, NotificationResolution,
+};
 use agents_kit::prompt::{PromptEvent, PromptRequest, StructuredOutputRequest};
 use agents_kit::tool::ToolSelection;
 use agents_kit::{AgentBackend, WorkspaceBackend};
@@ -27,7 +29,7 @@ use tools_kit::interaction::ToolInteractionCapabilities;
 use tools_kit::local::ToolRegistration;
 use tools_kit::schema::JsonSchema;
 
-use super::delivery_and_events::DeliveryScenario;
+use super::delivery_and_events::{CodexProgress, DeliveryScenario};
 use super::fixture::{StrictBackend, StrictFixture, StrictOpenCodeProcess};
 use crate::opencode_question_evidence::readback::{FreshOutputExpectation, NativeQuestionReadback};
 
@@ -1193,6 +1195,39 @@ async fn opencode_incremental_output_abort_and_reopen_are_live() {
 struct CodexCallerLossScenario;
 
 impl CodexCallerLossScenario {
+    async fn observe_settled_progress(
+        receiver: &mut ConversationNotificationReceiver,
+        deadline: tokio::time::Instant,
+    ) -> CodexProgress {
+        let mut progress = CodexProgress::Pending;
+        let preparing = tokio::time::timeout_at(deadline, receiver.recv())
+            .await
+            .expect("required caller-loss Preparing remains within the original deadline")
+            .expect("caller-loss milestone delivery remains open")
+            .expect("caller-loss milestone delivery succeeds");
+        progress.observe(&preparing);
+        let quiet = (tokio::time::Instant::now() + Duration::from_secs(1)).min(deadline);
+        loop {
+            match tokio::time::timeout_at(quiet, receiver.recv()).await {
+                Err(_) => break,
+                Ok(Some(Ok(notification))) => {
+                    assert!(
+                        matches!(
+                            notification.kind(),
+                            ConversationNotificationKind::Progress { .. }
+                        ),
+                        "the settled gate/plain prompt must have only phase milestones"
+                    );
+                    progress.observe(&notification);
+                }
+                Ok(Some(Err(error))) => panic!("settled caller-loss notification failed: {error}"),
+                Ok(None) => panic!("caller-loss receiver closed before conversation close"),
+            }
+        }
+        progress.assert_preparing();
+        progress
+    }
+
     async fn run() {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(390);
         let fixture = tokio::time::timeout_at(deadline, StrictFixture::new())
@@ -1265,6 +1300,7 @@ impl CodexCallerLossScenario {
         let mut owned_conversation = None;
         let mut owned_notifications = None;
         let mut owned_waiter = None;
+        let mut stream_progress = CodexProgress::Pending;
         let observed = NativeCleanup::observe(deadline, async {
         let agent = owned_agent.insert(AgentBuilder::create(config, fixture.storage())
             .with_toolset(toolset)
@@ -1284,6 +1320,9 @@ impl CodexCallerLossScenario {
                 .await
                 .expect("strict-live caller-loss conversation must build"),
         ));
+        let notifications = owned_notifications.insert(conversation
+            .notification_stream()
+            .expect("caller-loss notification receiver"));
         let prompt = owned_waiter.insert({
             let conversation = Arc::clone(conversation);
             let model = model.clone();
@@ -1315,6 +1354,7 @@ impl CodexCallerLossScenario {
             .abort()
             .await
             .expect("runtime-owned prompt must remain abortable after waiter loss");
+        Self::observe_settled_progress(notifications, deadline).await.finish();
 
         let follow_up = conversation
             .prompt(
@@ -1329,9 +1369,9 @@ impl CodexCallerLossScenario {
             .await
             .expect("conversation must remain usable after owned cancellation");
 
-        let notifications = owned_notifications.insert(conversation
-            .notification_stream()
-            .expect("streamed Codex interaction receiver"));
+        let mut recovered_progress = Self::observe_settled_progress(notifications, deadline).await;
+        assert!(matches!(recovered_progress, CodexProgress::Preparing(_)), "the no-tools recovery prompt has only Preparing response");
+        recovered_progress.finish();
         let stream = conversation.prompt_stream(
             PromptRequest::new(
                 "Call strict_stream_question exactly once with empty arguments and wait for its real caller-supplied answer. Then reply with exactly that answer. Do not call strict_prompt_gate or any other tool."
@@ -1347,6 +1387,9 @@ impl CodexCallerLossScenario {
                     notification = notifications.recv() => {
                         let notification = notification.expect("interaction delivery open")
                             .expect("interaction delivery succeeds");
+                        if matches!(notification.kind(), ConversationNotificationKind::Progress { .. }) {
+                            stream_progress.observe(&notification);
+                        }
                         if matches!(notification.kind(), ConversationNotificationKind::Interaction { response_schema: Some(_), .. }) {
                             break notification;
                         }
@@ -1355,6 +1398,7 @@ impl CodexCallerLossScenario {
                 }
             }
         }).await.expect("real streamed tool interaction must arrive");
+        stream_progress.assert_preparing();
         assert_eq!(interaction_calls.load(Ordering::SeqCst), 1);
         let answer = StrictFixture::unique("CODEX_STREAM_ANSWER");
         conversation
@@ -1405,7 +1449,23 @@ impl CodexCallerLossScenario {
         if let Some(mut notifications) = owned_notifications {
             cleanup
                 .settle::<agents_kit::KitError>(async {
-                    DeliveryScenario::drain(&mut notifications).await;
+                    tokio::time::timeout(Duration::from_secs(45), async {
+                        while let Some(notification) = notifications.recv().await {
+                            let notification = notification
+                                .expect("caller-loss terminal notifications remain valid");
+                            if matches!(
+                                notification.kind(),
+                                ConversationNotificationKind::Progress { .. }
+                            ) {
+                                stream_progress.observe(&notification);
+                            }
+                        }
+                    })
+                    .await
+                    .expect("caller-loss terminal drain remains bounded");
+                    if matches!(&observed, Ok(Ok(()))) {
+                        stream_progress.finish();
+                    }
                     Ok(())
                 })
                 .await;
@@ -1588,10 +1648,21 @@ async fn opencode_native_idle_terminal_waiter_reopens_in_one_build() {
     };
     let answer = DeliveryScenario::resolve_opencode_question(conversation, &interaction).await;
 
-    let response = tokio::time::timeout(Duration::from_secs(660), &mut prompt)
-        .await
-        .expect("post-restart OpenCode prompt must reach terminal delivery")
-        .expect("post-restart OpenCode prompt must succeed");
+    let response = std::panic::AssertUnwindSafe(async {
+        tokio::time::timeout(Duration::from_secs(660), &mut prompt)
+            .await
+            .expect("post-restart OpenCode prompt must reach terminal delivery")
+            .expect("post-restart OpenCode prompt must succeed")
+    }).catch_unwind().await;
+    let response = match response {
+        Ok(response) => response,
+        Err(failure) => {
+            let context = native.capture_failure(&session, DeliveryScenario::opencode_question_prompt(),
+                &mut primary_failure, failure).await;
+            eprintln!("post-restart question terminal failure evidence={context}");
+            std::panic::resume_unwind(primary_failure.take().expect("original terminal failure remains owned"));
+        }
+    };
     drop(prompt);
 
     let grade = native.completed(evidence, &session, &answer, response.output()).await;

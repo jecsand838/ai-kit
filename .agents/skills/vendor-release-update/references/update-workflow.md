@@ -37,6 +37,40 @@ Use execution mode when the prompt points at both `dossier.md` and `plan.md`.
    unchanged. Target preflight runs after adaptation and before completion gates.
 7. Do not create commits, branches, or pushes. Leave that to the updater.
 
+## Strict Review Pause
+
+A parent may invoke a strict single-vendor update with `--implementation-only`
+to obtain an independent review before acceptance. This is also available on
+`resume` for an existing version-1 strict dossier. Follow the implementation
+prompt's focused-check sequencing: adapt the selected vendor and record its
+regressions, but leave full preflight and completion gates to the parent-owned
+validation phase. The leaf still must not delegate, commit, or change frozen
+inputs.
+
+The updater validates the branch, HEAD, scope, frozen inputs, and unchanged
+recovery metadata after adaptation. Each invocation snapshots its fixed dossier
+inputs, including the saved plan, release metadata, and upstream diff files;
+they must remain regular files with unchanged contents through adaptation and
+validation. Execution logs and other evidence outputs remain writable. It then
+restores the exact original lock and retains implementation edits and both
+source archives and extracts. The
+parent reviews the actual diff together with `candidate-vendor-lock.toml`;
+the checkout's restored original lock does not select the adapted target.
+
+After review, `resume --dossier <dossier-directory> --validation-only` installs
+that same candidate without discovery, planning, or implementation, runs every
+configured strict gate, and finalizes the local vendor commit on success.
+**Validation-only commits on success; it is not a read-only check.** A failed
+phase retains edits and evidence and restores the original lock before commit.
+Redirected updater outputs are rejected before writes. Restoration refuses
+redirected lock, archive, and extraction paths. An absent original archive can
+be restored only from an owned regular backup matching its recorded hash.
+Restoration failures remain supplementary to the primary failure, and cleanup
+attempts continue for remaining owned archives.
+Use `resume --implementation-only` for further adaptation of the frozen target.
+Split execution is unavailable for `no-regression`; ordinary update and resume
+retain their existing complete execution behavior.
+
 ## Failure Review
 
 When validation or completion gates fail:

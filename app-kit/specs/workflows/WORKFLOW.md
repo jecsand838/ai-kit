@@ -763,13 +763,22 @@ committed action ordinals. This is App's explicit native-node mapping of pinned
 `application/state_meta.rs:94–100` and `application/step_txn.rs:95–126`, which
 reserve one sequence id per action and restore prior metadata on rollback.
 
+`ExecutionOptions::max_steps` counts successfully committed named activations
+in the current execution session. Each committed sibling counts separately;
+the limit is checked only after the complete required wave commits. A parallel
+wave may therefore carry the count beyond the selected limit and must never
+be split to meet it. Historical commits, partials, control checkpoints, failed
+attempts and no-output EOF do not consume this session's count. Omitting the
+caller limit leaves the existing private finite runtime bounds in force.
+
 Halting is a resumable execution boundary, not cancellation/input. Selectors
 accept exact action ids and `@tag`, validate all selectors before effects,
 preserve explicit/tag order and deduplicate first occurrence. Both lanes execute
-the first action of the current session before checking halts against historical
-position, including after reopen at a nonzero action ordinal. Only a current
-session's committed action enables subsequent halt checks; partials and
-successful no-output EOF do not. The pinned streaming resume cases are
+the first action of the current session, or the complete first wave for App-native
+BSP, before checking halts against historical position, including after reopen
+at a nonzero action ordinal. Only a current session's committed action or complete
+wave enables subsequent halt checks; partials and successful no-output EOF do
+not. The pinned streaming resume cases are
 `tests/contract/application_streaming_contract/resumed_halts.rs:11–115`;
 `application/streaming/step_lifecycle.rs:441–448` records that commit evidence.
 

@@ -107,6 +107,24 @@ constructs a shell or binds tool input through task-local state.
 - Managed knowledge exposes only source/scope/policy/ingestion inputs; retrieved
   context and Database layout remain private.
 
+Supplied Codex and Custom conversations retain at most two additional historical
+Progress facts per original live prompt: `Preparing response` and
+`Tool calls requested`, each with no detail. They report milestones, not
+current activity, native acceptance, tool completion, or prompt success.
+Preparing follows validated durable Kit admission; Tool requires the backend's
+supported live evidence before its following tool effect. Missing Codex
+attribution can leave Tool absent, and recovery never invents a missing fact.
+
+Consume these through the same receiver. Published facts retain their exact
+identity, timestamp, order, and payload through replay; unread facts are never
+overwritten or evicted. The per-prompt bound does not remove the journal's
+finite lifetime capacity: a full journal fails publication before the next
+generation or tool effect. Publication keeps its original bounded deadline and
+settles admitted storage work through cancellation or caller loss; it cannot
+authorize effect replay. OpenCode's mapping is unchanged. See the
+[notification contract](../specs/NOTIFICATIONS.md#bounded-prompt-milestones)
+for exact eligibility, ordering, acknowledgment, and terminal retention.
+
 ## Ownership Boundaries
 
 providers-kit owns one selected model call and normalized function

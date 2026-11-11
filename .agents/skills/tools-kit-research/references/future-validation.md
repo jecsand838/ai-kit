@@ -30,6 +30,15 @@ Repository-managed MCP services prove deterministic transport only.
 ## Strict-Live Proof
 
 The strict gate requires a real independently configured MCP service, expected
-tool and arguments, and bounded timeout. It proves live inventory, one call,
-and settled Toolset shutdown. It fails fast on missing environment and never
-substitutes mocks, recordings, or repository-scripted servers.
+tool and arguments, a complete independent successful `ToolResult` supplied in
+`TEST_TOOLS_KIT_MCP_EXPECTED_RESULT_JSON`, and a bounded timeout. Parse the expected
+result before connecting. After settled Toolset shutdown, compare the complete
+result: exact ordered content, structured content, metadata, and failure status.
+Success status alone is insufficient. Never derive expectations from observed
+output or normalize volatile fields away.
+
+This proves live inventory, one real call, exact returned contents, and settled
+Toolset shutdown. Missing environment fails fast; mocks, recordings, and
+repository-scripted servers never substitute for the independent service.
+The [strict-live guide](../../../../tools-kit/docs/STRICT_TESTING.md#strict-live-mcp-gate)
+owns the exact prerequisites and proof boundary.

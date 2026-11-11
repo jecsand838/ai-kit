@@ -185,7 +185,7 @@ where
         }
         .await;
         if let Err(error) = workspace_policy_validation {
-            let error = match runtime.shutdown(config.lifecycle_timeout()).await {
+            let error = match runtime.shutdown(config.lifecycle_timeout(), &tools).await {
                 Ok(()) => error,
                 Err(cleanup) => error.with_supplementary(cleanup.in_phase(ErrorPhase::Cleanup)),
             };
@@ -202,7 +202,7 @@ where
             let cleanups = match state.cleanup_obligations(info.id()).await {
                 Ok(cleanups) => cleanups,
                 Err(error) => {
-                    let error = match runtime.shutdown(config.lifecycle_timeout()).await {
+                    let error = match runtime.shutdown(config.lifecycle_timeout(), &tools).await {
                         Ok(()) => error,
                         Err(cleanup) => {
                             error.with_supplementary(cleanup.in_phase(ErrorPhase::Cleanup))
@@ -222,7 +222,7 @@ where
             };
             for cleanup in cleanups {
                 if let Err(error) = runtime.protocol().settle_cleanup(&cleanup).await {
-                    let error = match runtime.shutdown(config.lifecycle_timeout()).await {
+                    let error = match runtime.shutdown(config.lifecycle_timeout(), &tools).await {
                         Ok(()) => error,
                         Err(cleanup) => {
                             error.with_supplementary(cleanup.in_phase(ErrorPhase::Cleanup))
@@ -240,7 +240,7 @@ where
                     return Err(error);
                 }
                 if let Err(error) = state.finish_cleanup(&cleanup).await {
-                    let error = match runtime.shutdown(config.lifecycle_timeout()).await {
+                    let error = match runtime.shutdown(config.lifecycle_timeout(), &tools).await {
                         Ok(()) => error,
                         Err(cleanup) => {
                             error.with_supplementary(cleanup.in_phase(ErrorPhase::Cleanup))
@@ -465,7 +465,7 @@ where
             }
             .await;
             if let Err(error) = creation_reconciliation {
-                let error = match runtime.shutdown(config.lifecycle_timeout()).await {
+                let error = match runtime.shutdown(config.lifecycle_timeout(), &tools).await {
                     Ok(()) => error,
                     Err(cleanup) => error.with_supplementary(cleanup.in_phase(ErrorPhase::Cleanup)),
                 };
@@ -498,7 +498,7 @@ where
             }
             .await;
             if let Err(error) = reconciliation {
-                let error = match runtime.shutdown(config.lifecycle_timeout()).await {
+                let error = match runtime.shutdown(config.lifecycle_timeout(), &tools).await {
                     Ok(()) => error,
                     Err(cleanup) => error.with_supplementary(cleanup.in_phase(ErrorPhase::Cleanup)),
                 };
@@ -873,18 +873,17 @@ where
         state.invalidate_runtime();
         let quiescence_error = hierarchy.await_agent_quiescence(deadline).await.err();
         let protocol = runtime.protocol();
+        let mut first_error = [
+            prompt_cancellation_error,
+            tool_cancellation_error,
+            quiescence_error,
+        ]
+        .into_iter()
+        .flatten()
+        .reduce(|primary, error| primary.with_supplementary(error.in_phase(ErrorPhase::Cleanup)));
         let cleanup =
             async move {
-                let mut first_error = [
-                    prompt_cancellation_error,
-                    tool_cancellation_error,
-                    quiescence_error,
-                ]
-                .into_iter()
-                .flatten()
-                .reduce(|primary, error| {
-                    primary.with_supplementary(error.in_phase(ErrorPhase::Cleanup))
-                });
+                let mut first_error: Option<KitError> = None;
                 for cleanup in state.take_retained_cleanups() {
                     let recording_error = state.record_cleanup(&cleanup).await.err();
                     let settlement_error = protocol.settle_cleanup(&cleanup).await.err();
@@ -973,33 +972,31 @@ where
                         }
                     }
                 }
-                if let Err(error) = runtime
-                    .shutdown(deadline.saturating_duration_since(tokio::time::Instant::now()))
-                    .await
-                {
-                    first_error = Some(match first_error.take() {
-                        Some(primary) => {
-                            primary.with_supplementary(error.in_phase(ErrorPhase::Cleanup))
-                        }
-                        None => error,
-                    });
-                }
-                if let Err(error) = tools.shutdown(deadline).await {
-                    first_error = Some(match first_error.take() {
-                        Some(primary) => {
-                            primary.with_supplementary(error.in_phase(ErrorPhase::Cleanup))
-                        }
-                        None => error,
-                    });
-                }
                 match first_error {
                     Some(error) => Err(error),
                     None => Ok(()),
                 }
             };
-        let result = tokio::time::timeout_at(deadline, cleanup)
+        if let Err(error) = tokio::time::timeout_at(deadline, cleanup)
             .await
-            .unwrap_or_else(|_| Err(KitError::timeout("agent shutdown deadline elapsed")));
-        _claim.complete_shutdown(result)
+            .unwrap_or_else(|_| Err(KitError::timeout("agent shutdown deadline elapsed")))
+        {
+            KitError::record_cleanup(&mut first_error, error);
+        }
+        // Native cleanup may expire, but it must not drop the separate existing
+        // reader/worker owner while that owner holds an admitted commit receipt.
+        if let Err(error) = runtime
+            .shutdown(
+                deadline.saturating_duration_since(tokio::time::Instant::now()),
+                &tools,
+            )
+            .await
+        {
+            KitError::record_cleanup(&mut first_error, error);
+        }
+        if let Err(error) = tools.shutdown(deadline).await {
+            KitError::record_cleanup(&mut first_error, error);
+        }
+        _claim.complete_shutdown(first_error.map_or(Ok(()), Err))
     }
 }

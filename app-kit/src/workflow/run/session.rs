@@ -113,6 +113,8 @@ impl<
     /// The App's captured runtime must remain alive and driven elsewhere.
     /// Acquisition validates options before callbacks or source construction.
     /// The returned owner borrows the run exclusively through its last use.
+    /// Halt ordering and the first-session-wave exception match asynchronous
+    /// [execution controls](crate::workflow#control-execution).
     ///
     /// A live synchronous owner prevents overlapping access to the run:
     ///
@@ -215,6 +217,8 @@ impl<
     /// Blocks until one partial result or committed boundary is available.
     ///
     /// An entered runtime context is rejected before advancing this owner.
+    /// Halt ordering matches [`Execution::next`]; see
+    /// [execution controls](crate::workflow#control-execution).
     ///
     /// # Errors
     ///
@@ -232,6 +236,8 @@ impl<
     /// Drains partial results and blocks until one committed boundary.
     ///
     /// An entered runtime context is rejected before advancing this owner.
+    /// Halt ordering matches [`Execution::step`]; see
+    /// [execution controls](crate::workflow#control-execution).
     ///
     /// # Errors
     ///
@@ -250,6 +256,8 @@ impl<
     ///
     /// Rejection inside an entered runtime drops this consumed owner; existing
     /// execution cleanup retains any previously admitted publication.
+    /// Halt ordering matches [`Execution::finish`]; see
+    /// [execution controls](crate::workflow#control-execution).
     ///
     /// # Errors
     ///
@@ -1065,6 +1073,8 @@ impl<
     /// iteration checks halt-after-prior before halt-before-next. A retained halt is
     /// not reclassified by a later step/finish call. EOF without Completed commits
     /// no action and ends this observation without automatically retrying it.
+    /// Halt checks begin after this session's first committed action or wave;
+    /// see [execution controls](crate::workflow#control-execution).
     ///
     /// # Errors
     ///
@@ -1341,6 +1351,8 @@ impl<
     /// Consumes partials until a committed boundary or halt. Ordinary iteration
     /// checks halt-before-next before halt-after-prior. Only a committed action
     /// advances its ordinal; control checkpoints and partials do not.
+    /// Halt checks begin after this session's first committed action or wave;
+    /// see [execution controls](crate::workflow#control-execution).
     ///
     /// # Errors
     ///
@@ -1375,6 +1387,8 @@ impl<
     /// or exhaustion, then finalizes observation. A returned snapshot need not be
     /// Succeeded: inspect status and interactions. Accepted child/native cleanup
     /// retains its original authority and deadlines.
+    /// Halt ordering and the first-session-wave exception follow
+    /// [execution controls](crate::workflow#control-execution).
     ///
     /// # Errors
     ///
@@ -1406,59 +1420,7 @@ impl<
     /// failures are retained in the returned run state. Cleanup preserves primary
     /// failures and does not detach an admitted native commit.
     ///
-    /// # Example
-    ///
-    /// ```
-    /// # use agents_kit::Agent;
-    /// # use app_kit::{App, AppConfig, Shutdown, WorkspaceConfig};
-    /// # use app_kit::workflow::{CheckpointSelector, ExecutionEvent, ExecutionOptions, RunSelector,
-    /// #     RunStatus, WorkflowDefinition, WorkflowState};
-    /// # use storage_kit::StateStore;
-    /// # use storage_kit::state::config::{LanceStateStoreConfig, StateStoreConfig};
-    /// #
-    /// # let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-    /// # let result = runtime.block_on(async {
-    /// # let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
-    /// # let definition = WorkflowDefinition::parse(r#"{
-    /// #     "schema":"app-kit.workflow/v2", "id":"counter", "revision":"r1",
-    /// #     "state":{"count":0}, "required":["count"],
-    /// #     "reducers":{"count":"reject_concurrent"}, "entry":"increment",
-    /// #     "nodes":[{"id":"increment","step":{"kind":"state","mutations":[
-    /// #         {"kind":"increment","target":"count","value":{"kind":"literal","value":1}}
-    /// #     ]}}], "routes":{}
-    /// # }"#)?;
-    /// # let config = AppConfig::<_, Agent>::new(store, Vec::new(), vec![definition]);
-    /// # let mut app = App::open(config).await?;
-    /// # let outcome = async {
-    /// #     let mut workspace = app.create_workspace(WorkspaceConfig {
-    /// #         name: Some("local counter".into()), root: std::env::current_dir()?,
-    /// #     }).await?;
-    /// #     let workflow = workspace.workflow("counter".parse()?).await?;
-    /// #     let mut run = workflow.prepare(WorkflowState::default()).await?;
-    ///     let execution = run.execution(ExecutionOptions::default()).await?;
-    ///     let parked = execution.abort().await?;
-    ///     let completed = run.execution(ExecutionOptions::default()).await?.finish().await?;
-    ///     #
-    /// #     Ok::<_, Box<dyn std::error::Error>>((parked, completed))
-    /// # }.await;
-    /// # let cleanup = app.shutdown(Shutdown::CancelAndDrain { timeout: std::time::Duration::from_secs(5) }).await;
-    /// # if let Err(error) = &cleanup { eprintln!("App shutdown: {error}"); }
-    /// # let observed = outcome?;
-    /// # cleanup?;
-    /// # Ok::<_, Box<dyn std::error::Error>>(observed)
-    /// # });
-    /// # let metrics = runtime.metrics();
-    /// # runtime.block_on(async {
-    /// #     while metrics.num_alive_tasks() != 0 {
-    /// #         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-    /// #     }
-    /// # });
-    /// # let (parked, completed) = result?;
-    /// assert_eq!(parked.state.values()["count"], 0);
-    /// assert!(parked.last_action_ordinal.is_none());
-    /// assert_eq!(completed.state.values()["count"], 1);
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See [the execution controls journey](crate::workflow#control-execution).
     pub async fn abort(mut self) -> Result<RunSnapshot, AppError> {
         self.close().await
     }

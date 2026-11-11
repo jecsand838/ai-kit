@@ -164,6 +164,16 @@ impl Mode {
                     uuid::Uuid::new_v4().simple()
                 )),
             };
+            let cleanup_locators = match case {
+                Case::NamespacePagination => DatabaseCase::namespace_locators(&fixture.locator),
+                #[cfg(feature = "surrealdb")]
+                Case::ConcurrentScopes => {
+                    let mut locators = vec![fixture.locator.clone()];
+                    locators.extend(fixture.scope_locators());
+                    locators
+                }
+                _ => vec![fixture.locator.clone()],
+            };
             // Heap-pin the concrete case future to reduce the outer runner's
             // debug-build stack pressure. Native polling and parser calls still
             // use the same runtime thread and remain inside this timeout.
@@ -173,15 +183,6 @@ impl Mode {
             ))
             .catch_unwind()
             .await;
-            let cleanup_locators = match case {
-                #[cfg(feature = "surrealdb")]
-                Case::ConcurrentScopes => {
-                    let mut locators = vec![fixture.locator.clone()];
-                    locators.extend(fixture.scope_locators());
-                    locators
-                }
-                _ => vec![fixture.locator.clone()],
-            };
             for locator in cleanup_locators {
                 let cleanup = tokio::time::timeout(
                     Duration::from_secs(20),
@@ -283,6 +284,7 @@ enum Case {
     SqlReadColumnsRejection,
     SqlBackfill,
     ScanDeletedRows,
+    NamespacePagination,
     CastAlreadyRequired,
     QuotedFilters {
         field: &'static str,
@@ -368,6 +370,97 @@ struct DatabaseCase {
 }
 
 impl DatabaseCase {
+    fn namespace_locators(root: &StorageLocator) -> Vec<StorageLocator> {
+        (0..257)
+            .map(|number| {
+                StorageLocator::new(format!("collection_{number:03}"))
+                    .with_namespace([root.collection.clone(), format!("sibling_{number:03}")])
+            })
+            .collect()
+    }
+
+    async fn seed_namespace_collections(&self, locators: &[StorageLocator]) {
+        for locator in locators {
+            let created = self
+                .database
+                .catalog(CatalogRequest::CreateCollection(CreateCollectionRequest {
+                    locator: locator.clone(),
+                    schema: Some(CollectionSchema {
+                        fields: vec![FieldSchema {
+                            name: "marker".to_owned(),
+                            field_type: FieldType::String,
+                            nullable: false,
+                            metadata: Default::default(),
+                        }],
+                        metadata: Default::default(),
+                    }),
+                    records: Vec::new(),
+                    mode: CreateCollectionMode::Create,
+                }))
+                .await
+                .expect("create schema-only collection in each sibling namespace");
+            let CatalogResponse::Collection(info) = created else {
+                panic!("create returns collection information");
+            };
+            assert_eq!(info.locator, *locator);
+            assert_eq!(info.record_count, Some(0));
+        }
+    }
+
+    async fn assert_namespace_collections(&self, locators: &[StorageLocator]) {
+        assert_eq!(locators.len(), 257, "cross the native 256-name page limit");
+        for locator in locators {
+            let opened = self
+                .database
+                .catalog(CatalogRequest::OpenCollection {
+                    locator: locator.clone(),
+                })
+                .await
+                .expect("every sibling collection remains reachable");
+            let CatalogResponse::Collection(info) = opened else {
+                panic!("open returns collection information");
+            };
+            assert_eq!(info.locator, *locator);
+            assert_eq!(info.record_count, Some(0));
+            let listed = self
+                .database
+                .catalog(CatalogRequest::ListCollections(ListCollectionsRequest {
+                    namespace: locator.namespace.clone(),
+                    limit: None,
+                    start_after: None,
+                }))
+                .await
+                .expect("list every sibling across native namespace pages");
+            let CatalogResponse::Collections(collections) = listed else {
+                panic!("list returns collections");
+            };
+            assert_eq!(collections.len(), 1, "sibling namespaces stay isolated");
+            assert_eq!(collections[0].locator, *locator);
+        }
+        let missing = vec![
+            self.locator.collection.clone(),
+            "sibling_missing".to_owned(),
+        ];
+        for namespace in [
+            missing.clone(),
+            vec![self.locator.collection.clone()],
+            missing,
+        ] {
+            assert_eq!(
+                self.database
+                    .catalog(CatalogRequest::ListCollections(ListCollectionsRequest {
+                        namespace,
+                        limit: None,
+                        start_after: None,
+                    }))
+                    .await
+                    .expect("missing sibling and parent remain readable"),
+                CatalogResponse::Collections(Vec::new()),
+                "lookup must not create a collection or leak child collections"
+            );
+        }
+    }
+
     fn record(&self, number: u64) -> DataRecord {
         let record = if self.mode.is_lance() {
             DataRecord::without_id()
@@ -519,6 +612,11 @@ impl DatabaseCase {
             Case::ScanDeletedRows => {
                 self.seed_scan_deleted_rows().await;
                 self.assert_scan_deleted_rows().await;
+            }
+            Case::NamespacePagination => {
+                let locators = Self::namespace_locators(&self.locator);
+                self.seed_namespace_collections(&locators).await;
+                self.assert_namespace_collections(&locators).await;
             }
             Case::CastAlreadyRequired => self.cast_already_required().await,
             Case::QuotedFilters { field } => self.quoted_filters(field).await,
@@ -1673,6 +1771,11 @@ impl DatabaseCase {
             assert_eq!(row.fields["state"], "original");
             assert!(row.fields["numeric"].as_i64().is_some());
         }
+        let mut without_extra = self.rows().await;
+        assert_eq!(without_extra.len(), 3, "schema changes preserve every row");
+        for row in &mut without_extra {
+            row.fields.remove("extra");
+        }
         self.database
             .catalog(CatalogRequest::AlterCollection(
                 SchemaEvolutionRequest::DropColumns(DropColumnsRequest {
@@ -1682,12 +1785,46 @@ impl DatabaseCase {
             ))
             .await
             .expect("drop computed column");
-        assert!(
-            self.rows()
-                .await
-                .iter()
-                .all(|row| !row.fields.contains_key("extra")),
-            "dropping a computed column removes its stored values as well as its definition"
+        assert_eq!(
+            self.rows().await,
+            without_extra,
+            "dropping a computed column removes its values and preserves every other field and identity"
+        );
+        self.database
+            .catalog(CatalogRequest::AlterCollection(
+                SchemaEvolutionRequest::AddColumns(AddColumnsRequest {
+                    locator: self.locator.clone(),
+                    expressions: vec![ComputedColumn {
+                        name: "extra".to_owned(),
+                        expression_sql: "2".to_owned(),
+                    }],
+                    read_columns: None,
+                }),
+            ))
+            .await
+            .expect("re-add the removed column with a different expression");
+        let mut replacement = without_extra.clone();
+        for row in &mut replacement {
+            row.fields.insert("extra".to_owned(), json!(2));
+        }
+        assert_eq!(
+            self.rows().await,
+            replacement,
+            "a removed computed definition must not survive re-addition or change other fields"
+        );
+        self.database
+            .catalog(CatalogRequest::AlterCollection(
+                SchemaEvolutionRequest::DropColumns(DropColumnsRequest {
+                    locator: self.locator.clone(),
+                    columns: vec!["extra".to_owned()],
+                }),
+            ))
+            .await
+            .expect("remove the replacement computed column");
+        assert_eq!(
+            self.rows().await,
+            without_extra,
+            "replacement computed values are removed without losing or changing records"
         );
     }
 
@@ -3768,6 +3905,85 @@ async fn lancedb_relative_db_prefix_stays_local_and_reopens_absolute() {
         "relative local path and absolute reopen: {observed:?}; cleanup: {cleanup:?}"
     );
     cleanup.expect("settled relative database directory");
+}
+
+#[tokio::test]
+async fn lancedb_namespace_pagination_memory() {
+    Mode::LanceMemory.cases(&[Case::NamespacePagination]).await;
+}
+
+#[tokio::test]
+async fn lancedb_namespace_pagination_filesystem_reopen() {
+    let directory = tempfile::tempdir().expect("isolated filesystem namespace database");
+    let configuration = Mode::Lance.configuration(directory.path());
+    let locator = StorageLocator::new(format!("proof_{}", uuid::Uuid::new_v4().simple()));
+    // Precompute every owned collection before mutation, including for cleanup
+    // after a partial creation, assertion panic or scenario timeout.
+    let locators = DatabaseCase::namespace_locators(&locator);
+    let observed = AssertUnwindSafe(tokio::time::timeout(
+        Duration::from_secs(120),
+        Box::pin(async {
+            let fixture = DatabaseCase {
+                database: tokio::time::timeout(
+                    Duration::from_secs(30),
+                    Database::connect(configuration.clone()),
+                )
+                .await
+                .expect("initial namespace connection deadline")
+                .expect("initial namespace connection"),
+                configuration: configuration.clone(),
+                mode: Mode::Lance,
+                locator: locator.clone(),
+            };
+            fixture.seed_namespace_collections(&locators).await;
+            fixture.assert_namespace_collections(&locators).await;
+            drop(fixture);
+            // Every Database owner is closed before the filesystem is reopened.
+            let fixture = DatabaseCase {
+                database: tokio::time::timeout(
+                    Duration::from_secs(30),
+                    Database::connect(configuration.clone()),
+                )
+                .await
+                .expect("namespace reopen deadline")
+                .expect("namespace reopen"),
+                configuration: configuration.clone(),
+                mode: Mode::Lance,
+                locator,
+            };
+            fixture.assert_namespace_collections(&locators).await;
+        }),
+    ))
+    .catch_unwind()
+    .await;
+    let database =
+        tokio::time::timeout(Duration::from_secs(30), Database::connect(configuration)).await;
+    let mut cleanup_failures = Vec::new();
+    match database {
+        Ok(Ok(database)) => {
+            for locator in locators {
+                let cleanup = tokio::time::timeout(
+                    Duration::from_secs(20),
+                    database.catalog(CatalogRequest::DropCollection {
+                        locator: locator.clone(),
+                        ignore_missing: true,
+                    }),
+                )
+                .await;
+                if !matches!(cleanup, Ok(Ok(_))) {
+                    cleanup_failures.push(format!("{locator:?}: {cleanup:?}"));
+                }
+            }
+        }
+        error => cleanup_failures.push(format!("cleanup connection: {error:?}")),
+    }
+    let directory_cleanup = directory.close();
+    assert!(
+        matches!(observed, Ok(Ok(()))),
+        "namespace reopen proof: {observed:?}; cleanup: {cleanup_failures:?}; directory cleanup: {directory_cleanup:?}"
+    );
+    assert!(cleanup_failures.is_empty(), "cleanup: {cleanup_failures:?}");
+    directory_cleanup.expect("namespace directory cleanup");
 }
 
 #[tokio::test]

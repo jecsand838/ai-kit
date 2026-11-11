@@ -973,6 +973,7 @@ impl<S: StateStoreBackend, D: DatabaseBackend, P: ProviderBackend, T: ToolsetBac
             tool_selection,
             self.runtime.server.loop_limits(),
             self.observation.output(),
+            self.deadline,
         )
         .with_prompt_overrides(
             system,
@@ -1035,6 +1036,10 @@ impl<S: StateStoreBackend, D: DatabaseBackend, P: ProviderBackend, T: ToolsetBac
             })
             .await
         {
+            self.fail_accepted(generation_id, run, error).await;
+            return;
+        }
+        if let Err(error) = run.release_execution() {
             self.fail_accepted(generation_id, run, error).await;
             return;
         }
@@ -1119,8 +1124,9 @@ impl<S: StateStoreBackend, D: DatabaseBackend, P: ProviderBackend, T: ToolsetBac
         let lifecycle_deadline = self.runtime.server.lifecycle_deadline();
         let state = self.runtime.state.clone();
         let conversation_id = self.runtime.conversation_id.clone();
-        let cancellation = self
-            .await_operation(async move {
+        let mut completion = None;
+        let cancellation = {
+            let cancellation = self.await_operation(async move {
                 state
                     .request_generation_cancellation(
                         &conversation_id,
@@ -1129,55 +1135,62 @@ impl<S: StateStoreBackend, D: DatabaseBackend, P: ProviderBackend, T: ToolsetBac
                         lifecycle_deadline,
                     )
                     .await
-            })
-            .await;
-        let active = match cancellation {
-            Ok(active) => active,
-            Err(error) => {
-                let interactions = self
-                    .runtime
-                    .requests
-                    .cancel_conversation(
-                        &self.runtime.conversation_id,
-                        lifecycle_deadline,
-                        Some(lifecycle_deadline),
-                    )
-                    .await;
-                let completion = execution.as_mut().await;
-                if let Some(terminal) = self.terminalize_provider(generation, completion).await {
-                    self.settle(
-                        generation,
-                        Err(error
-                            .with_cleanup_result(interactions)
-                            .with_cleanup_result(terminal.map(|_| ()))),
-                    )
-                    .await;
+            });
+            tokio::pin!(cancellation);
+            // An admitted publication may own the store's sole writer. Keep
+            // driving that exact execution while cancellation waits for it.
+            // The call's original deadline fences every subsequent effect.
+            tokio::select! {
+                result = &mut cancellation => result,
+                result = execution.as_mut() => {
+                    completion = Some(result);
+                    cancellation.await
                 }
-                return;
             }
         };
-        let route = if active {
-            self.runtime
+        let route = match &cancellation {
+            Ok(false) => Ok(()),
+            Ok(true) | Err(_) => self
+                .runtime
                 .server
                 .cancel(&self.runtime.conversation_id, generation)
-                .map(|_| ())
-        } else {
-            Ok(())
+                .map(|_| ()),
         };
         self.deliver_timeout();
-        let interactions = self
-            .runtime
-            .requests
-            .cancel_conversation(
+        let interactions = {
+            let interactions = self.runtime.requests.cancel_conversation(
                 &self.runtime.conversation_id,
                 lifecycle_deadline,
                 Some(lifecycle_deadline),
-            )
-            .await;
-        let completion = execution.as_mut().await;
+            );
+            tokio::pin!(interactions);
+            if completion.is_some() {
+                interactions.await
+            } else {
+                // Interaction cleanup may need the journal writer still owned
+                // by this execution, including after cancellation intent fails.
+                tokio::select! {
+                    result = &mut interactions => result,
+                    result = execution.as_mut() => {
+                        completion = Some(result);
+                        interactions.await
+                    }
+                }
+            }
+        };
+        let completion = match completion {
+            Some(completion) => completion,
+            None => execution.as_mut().await,
+        };
         if let Some(terminal) = self.terminalize_provider(generation, completion).await {
-            self.settle(generation, route.and(interactions).and(terminal))
-                .await;
+            let result = match cancellation {
+                Ok(_) => route.and(interactions).and(terminal),
+                Err(error) => Err(error
+                    .with_cleanup_result(route)
+                    .with_cleanup_result(interactions)
+                    .with_cleanup_result(terminal.map(|_| ()))),
+            };
+            self.settle(generation, result).await;
         }
     }
 

@@ -11,6 +11,15 @@ the [workspace architecture](ARCHITECTURE.md) explains ownership and boundaries.
 Provider contributors should also read the
 [Provider contribution guide](providers-kit/CONTRIBUTING.md).
 
+When using Codex, read the complete root and owning crate instructions rather
+than relying on automatically loaded excerpts. The official
+[instruction-loading guide](https://developers.openai.com/codex/guides/agents-md)
+describes root-to-directory precedence, one selected instruction file per
+directory, and the default 32 KiB combined limit. Several root-plus-crate chains
+here exceed that default. Confirm the complete applicable files were read before
+editing; this repository does not change your Codex configuration. A linked
+skill or historical plan does not select or activate its workflow.
+
 ## Get started
 
 You need Git, Bash, Python 3.11 or newer,

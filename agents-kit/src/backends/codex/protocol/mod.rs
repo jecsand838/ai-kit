@@ -40,7 +40,7 @@ use crate::{
 
 use jsonrpc::{CodexRequestError, CodexRpc};
 
-const SELECTED_CODEX_VERSION: &str = "0.163.0";
+const SELECTED_CODEX_VERSION: &str = "0.167.1";
 const AGENTS_KIT_CLIENT_VERSION: &str = "0.0.4";
 const MAX_MODEL_PAGES: usize = 1_024;
 const MAX_PROTOCOL_PAGES: usize = 1_024;
@@ -326,6 +326,16 @@ enum CodexHistoryItem {
 impl<'de> serde::Deserialize<'de> for CodexHistoryItem {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let value = <Value as serde::Deserialize>::deserialize(deserializer)?;
+        let item = value
+            .as_object()
+            .ok_or_else(|| serde::de::Error::custom("history item is malformed"))?;
+        notifications::CodexThreadItem::validate_times(item).map_err(serde::de::Error::custom)?;
+        if matches!(
+            item.get("type").and_then(Value::as_str),
+            Some("userMessage" | "imageGeneration")
+        ) {
+            items::CodexMediaItem::validate(item).map_err(serde::de::Error::custom)?;
+        }
         match value.get("type").and_then(Value::as_str) {
             Some(
                 "functionCallOutput"
@@ -1263,7 +1273,7 @@ impl CodexProtocol {
     fn is_thread_closing(error: &CodexRequestError, thread_id: &str) -> bool {
         matches!(
             error,
-            CodexRequestError::ServerRejected { message, .. }
+            CodexRequestError::ServerRejected { message, data: jsonrpc::CodexRejectionData::Fallback, .. }
                 if message
                     == &format!(
                         "thread {thread_id} is closing; retry thread/resume after the thread is closed"
@@ -1341,9 +1351,11 @@ impl CodexProtocol {
             .await
         {
             Ok(response) => response,
-            Err(CodexRequestError::ServerRejected { message, .. })
-                if message == format!("thread not found: {thread_id}") =>
-            {
+            Err(CodexRequestError::ServerRejected {
+                message,
+                data: jsonrpc::CodexRejectionData::Fallback,
+                ..
+            }) if message == format!("thread not found: {thread_id}") => {
                 self.loaded_threads().remove(thread_id);
                 return Ok(());
             }

@@ -43,15 +43,17 @@ stable review coordinates:
 | Archive member | Symbol anchors | Contract fact |
 |---|---|---|
 | `codex-rs/app-server-protocol/src/rpc.rs` | `RequestId`; `JSONRPCMessage` | String/integer request identifiers and directional JSON-RPC message shapes |
-| `codex-rs/app-server-protocol/src/protocol/v1.rs` | `InitializeCapabilities`; `opt_out_notification_methods`; `InitializeResponse`; `user_agent` | Initialization declares exact per-connection notification exclusions and reports server identity |
-| `codex-rs/app-server-protocol/src/protocol/common.rs` | `ThreadSetName => "thread/name/set"`; `ThreadNameUpdated => "thread/name/updated"`; `ThreadDelete => "thread/delete"`; `ThreadDeleted => "thread/deleted"`; `ThreadUnsubscribe => "thread/unsubscribe"`; `ThreadBackgroundTerminalsClean => "thread/backgroundTerminals/clean"`; `ThreadBackgroundTerminalsList => "thread/backgroundTerminals/list"`; `ExperimentalFeatureList => "experimentalFeature/list"`; `ThreadReadStateChanged => "thread/readState/changed"` | Typed materialization, lifecycle, cleanup, and feature-inspection methods; known read-state notifications remain private |
+| `codex-rs/app-server-protocol/src/protocol/v1.rs` | `InitializeCapabilities`; `required_human_approval`; `opt_out_notification_methods`; `InitializeResponse`; `user_agent` | Initialization declares exact per-connection notification exclusions and reports server identity |
+| `codex-rs/app-server-protocol/src/protocol/common.rs` | `ThreadSetName => "thread/name/set"`; `ThreadNameUpdated => "thread/name/updated"`; `ThreadDelete => "thread/delete"`; `ThreadDeleted => "thread/deleted"`; `ThreadUnsubscribe => "thread/unsubscribe"`; `ThreadBackgroundTerminalsClean => "thread/backgroundTerminals/clean"`; `ThreadBackgroundTerminalsList => "thread/backgroundTerminals/list"`; `ExperimentalFeatureList => "experimentalFeature/list"`; `ThreadReadStateChanged => "thread/readState/changed"`; `ThreadSectionChanged => "thread/section/changed"` | Typed materialization, lifecycle, cleanup, and feature-inspection methods; known read-state notifications remain private |
 | `codex-rs/app-server-protocol/src/protocol/v2/permissions.rs` | `SandboxPolicy::DangerFullAccess`; `SandboxPolicy::ReadOnly { network_access }`; `WorkspaceWrite {`; `writable_roots: Vec<AbsolutePathBuf>`; `network_access: bool`; `exclude_tmpdir_env_var: bool`; `exclude_slash_tmp: bool` | Full access has no network field; restricted modes represent their network flag, while WorkspaceWrite can exclude implicit temporary writable roots but neither restricted mode encodes a complete readable-root allowlist |
-| `codex-rs/app-server-protocol/src/protocol/v2/thread.rs` | `ThreadStartParams`; `pub cwd: Option<String>`; `pub runtime_workspace_roots: Option<Vec<AbsolutePathBuf>>`; `pub sandbox: Option<SandboxMode>`; `pub config: Option<HashMap<String, JsonValue>>`; `pub developer_instructions: Option<String>`; `pub personality: Option<Personality>`; `pub ephemeral: Option<bool>`; `pub thread_source: Option<ThreadSource>`; `ThreadStartResponse`; `pub sandbox: SandboxPolicy`; `ThreadResumeParams`; `ThreadReadParams`; `ThreadListParams`; `pub excluded_thread_ids: Option<Vec<String>>`; `pub next_cursor: Option<String>`; `ThreadReadStateChangedNotification`; `ThreadReadState`; `ThreadUnreadPosition`; `pub first_unread: Option<ThreadUnreadPosition>`; `pub revision: String`; `pub read_states: Option<HashMap<String, ThreadReadState>>`; `pub read_state: Option<ThreadReadState>` | Thread creation exposes requested roots, selected sandbox mode, per-thread config, instructions, personality, durability, and client-supplied private source correlation; materialized effective sandbox, resume/read shape, and paginated thread inventory belong to distinct response/request owners; read-state metadata is additive on read/list responses and typed on notifications |
+| `codex-rs/app-server-protocol/src/protocol/v2/thread.rs` | `ThreadStartParams`; `pub cwd: Option<String>`; `pub runtime_workspace_roots: Option<Vec<AbsolutePathBuf>>`; `pub sandbox: Option<SandboxMode>`; `pub config: Option<HashMap<String, JsonValue>>`; `pub developer_instructions: Option<String>`; `pub personality: Option<Personality>`; `pub ephemeral: Option<bool>`; `pub thread_source: Option<ThreadSource>`; `ThreadStartResponse`; `pub sandbox: SandboxPolicy`; `ThreadResumeParams`; `ThreadReadParams`; `ThreadListParams`; `pub excluded_thread_ids: Option<Vec<String>>`; `pub next_cursor: Option<String>`; `ThreadSectionChangedNotification`; `pub section_id: Option<String>`; `ThreadReadStateChangedNotification`; `ThreadReadState`; `ThreadUnreadPosition`; `pub first_unread: Option<ThreadUnreadPosition>`; `pub revision: String`; `pub read_states: Option<HashMap<String, ThreadReadState>>`; `pub read_state: Option<ThreadReadState>` | Thread creation exposes requested roots, selected sandbox mode, per-thread config, instructions, personality, durability, and client-supplied private source correlation; materialized effective sandbox, resume/read shape, and paginated thread inventory belong to distinct response/request owners; read-state metadata is additive on read/list responses and typed on notifications |
 | `codex-rs/app-server-protocol/src/protocol/v2/thread_data.rs` | `Feature(String)`; `Thread`; `pub thread_source: Option<ThreadSource>`; `Turn`; `TurnError`; `pub session_id: String`; `pub parent_thread_id: Option<String>` | Arbitrary string source correlation is returned with thread state alongside terminal shape and sourced native ancestry; the same typed terminal failure shape governs live and history paths |
 | `codex-rs/app-server-protocol/src/protocol/v2/turn.rs` | `TurnStartParams`; `pub struct TurnStartParams`; `pub cwd: Option<PathBuf>`; `pub model: Option<String>`; `pub effort: Option<ReasoningEffort>`; `pub personality: Option<Personality>`; `pub output_schema: Option<JsonValue>` | Foreground model and effort overrides are sticky for this and subsequent turns; the personality field is deprecated; cwd and structured-output schema are per-turn overrides; no direct developer-instructions or tool-selection field exists |
-| `codex-rs/app-server-protocol/src/protocol/v2/item.rs` | `ThreadItem::AgentMessage`; `ThreadItem::CommandExecution`; `From<CoreTurnItem>`; `AgentMessageDeltaNotification`; `thread_id`; `turn_id`; `item_id`; `delta`; `CommandExecutionApprovalKind`; `WriteStdin`; `ToolRequestUserInputParams`; `is_blocking`; `auto_resolution_ms`; `FunctionCallOutput`; `delivery`; `questions` | Completed agent-message text and thread-owned command execution facts; selected `item/agentMessage/delta` carries actual text fragments with exact private thread/turn/item identity, all typed strings; Stdin approvals, explicit blocking policy, and private function output/asynchronous messages |
+| `codex-rs/app-server-protocol/src/protocol/v2/item.rs` | `ThreadItemPayload`; `AgentMessage {`; `CommandExecution {`; `From<CoreTurnItem>`; `AgentMessageDeltaNotification`; `thread_id`; `turn_id`; `item_id`; `delta`; `ThreadItem`; `pub started_at_ms: Option<i64>`; `pub completed_at_ms: Option<i64>`; `CommandExecutionApprovalKind`; `HumanCommand`; `WriteStdin`; `ToolRequestUserInputParams`; `is_blocking`; `auto_resolution_ms`; `FunctionCallOutput`; `delivery`; `questions` | Completed agent-message text and thread-owned command execution facts; selected `item/agentMessage/delta` carries actual text fragments with exact private thread/turn/item identity, all typed strings; Stdin approvals, explicit blocking policy, and private function output/asynchronous messages |
 | `codex-rs/app-server-protocol/schema/typescript/v2/CommandExecutionApprovalDecision.ts` | `acceptWithExecpolicyAmendment`; `execpolicy_amendment`; `applyNetworkPolicyAmendment`; `network_policy_amendment` | Approval decision variant names are camelCase, while the two nested amendment fields are snake_case; malformed or differently spelled nested fields fail protocol validation |
-| `codex-rs/app-server-protocol/src/protocol/v2/process.rs` | `ProcessSpawnParams`; `ProcessOutputDeltaNotification`; `ProcessExitedNotification` | Separate caller-process-handle events are connection-scoped and do not identify a Conversation |
+| `codex-rs/app-server-protocol/src/protocol/v2/process.rs` | `ProcessSpawnParams`; `ProcessOutputDeltaNotification`; `ProcessExitedNotification`; `output_drain_timed_out` | Separate caller-process-handle events are connection-scoped; optional drain status does not identify a Conversation or prove complete capture |
+| `codex-rs/app-server-protocol/src/protocol/v2/hook.rs` | `HookRunSummary`; `PreModelRequest`; `PostModelRequest`; `LegacyAppPathString`; `HookSource::Unknown` | Typed private hook metadata and opaque native paths; no public hook operation |
+| `codex-rs/ext/items/src/image_generation.rs` | `GeneratedImageRef`; `File`; `ImageGenerationInputImage`; `input_images`; `saved_path` | File-reference precedence, optional saved path, and validated private input-image metadata |
 | `codex-rs/app-server-protocol/src/protocol/v2/fs.rs` | `FsReadFileParams`; `FsReadFileResponse` | Absolute native input and base64 exact-byte output |
 | `codex-rs/app-server-protocol/src/protocol/v2/current_time.rs` | `CurrentTimeReadParams`; `CurrentTimeReadResponse`; `current_time_at` | Thread-scoped request and whole-Unix-seconds response shape |
 | `codex-rs/app-server-protocol/src/protocol/v2/model.rs` | `pub struct Model`; `pub id: String`; `pub model: String`; `pub supported_reasoning_efforts: Vec<ReasoningEffortOption>`; `pub default_reasoning_effort: ReasoningEffort`; `pub supports_personality: bool`; `pub is_default: bool`; `ModelListResponse`; `pub next_cursor: Option<String>` | Preset versus selection identity, sourced default marker/effort, and reasoning support belong to model rows; the deprecated personality field is validated but never enables selection |
@@ -61,35 +63,35 @@ stable review coordinates:
 | `codex-rs/models-manager/src/manager.rs` | `default_model_from_available`; `requested_model_is_available` | Native selection and default resolution use the model slug rather than preset id |
 | `codex-rs/app-server/src/request_processors/fs_processor.rs` | `pub(crate) async fn read_file`; `/*sandbox*/ None`; `fn map_fs_error`; `io::ErrorKind::InvalidInput`; `internal_error(err.to_string())` | Native read supplies no atomic restricted-context confinement; apart from invalid input, filesystem failures share one untyped internal-error category while preserving the server message |
 | `codex-rs/app-server/src/error_code.rs` | `INVALID_REQUEST_ERROR_CODE`; `METHOD_NOT_FOUND_ERROR_CODE`; `INVALID_PARAMS_ERROR_CODE`; `INTERNAL_ERROR_CODE`; `OVERLOADED_ERROR_CODE`; `server_draining_error`; `serverShuttingDown` | Integer JSON-RPC codes support safe request/internal/overload detail without interpreting server prose; shutdown adds private reason data to the existing invalid-request code |
-| `codex-rs/app-server-protocol/src/protocol/v2/shared.rs` | `CodexErrorInfo` | Typed terminal failure details retain selected optional HTTP status |
+| `codex-rs/app-server-protocol/src/protocol/v2/shared.rs` | `CodexErrorInfo`; `ModelNotFound`; `PolicyCapacityUnavailable` | Typed terminal failure details retain selected optional HTTP status |
 | `codex-rs/app-server-protocol/src/protocol/v2/notification.rs` | `ErrorNotification`; `will_retry` | Retry notifications do not interrupt a turn |
 | `codex-rs/app-server-protocol/src/protocol/v2/mcp.rs` | `ListMcpServerStatusParams`; `McpServerStatus`; `ListMcpServerStatusResponse`; `pub next_cursor: Option<String>` | Paged effective MCP inventory is independently inspectable and must be absent when portable policy cannot confine it |
 | `codex-rs/protocol/src/config_types.rs` | `pub enum WebSearchMode`; `Disabled`; `Cached`; `Indexed`; `Live` | Web search is a separate selected configuration axis rather than a consequence of shell sandbox policy |
 | `codex-rs/app-server/src/current_time.rs` | `send_request_to_connections`; `require_single_current_time_connection`; `External clocks are not interchangeable` | App Server requests time from the one connected client subscribed to the thread |
 | `codex-rs/app-server/src/request_processors/initialize_processor.rs` | `get_codex_user_agent`; `InitializeResponse`; `experimental_api_enabled`; `opt_out_notification_methods`; `odd cross-client behavior` | Initialization returns server identity and installs connection-owned notification exclusions, while per-connection capabilities are unsafe authority for shared interactive threads |
 | `codex-rs/app-server/src/transport.rs` | `codex_app_server_transport::start_stdio_connection`; `codex_app_server_transport::start_websocket_acceptor`; `should_skip_notification_for_connection`; `opted_out_notification_methods.contains` | Exact method-name exclusions suppress typed notifications for one connection without suppressing requests or responses |
-| `codex-rs/app-server/src/bespoke_event_handling.rs` | `receiver.await`; `resolve_server_request_on_thread_listener`; `emit_turn_completed_with_status`; `handle_turn_complete`; `handle_turn_interrupted`; `handle_token_count_event` | A completed response waiter asks the one thread listener to publish resolution only after its callback completes; terminal notification omits items, while status/error and usage arrive through separate typed facts |
-| `codex-rs/app-server/src/outgoing_message.rs` | `notify_client_response`; `take_request_callback`; `cancel_requests_for_thread`; `request_id_to_callback.remove`; `send_server_notification_to_connections`; `send_request_to_connections`; `OutgoingEnvelope::Broadcast` | Client response and thread-wide lifecycle cancellation both remove the same pending callback entries; empty notification targets and absent request targets broadcast connection-wide, while explicit request targets remain targeted |
-| `codex-rs/app-server/src/request_processors/thread_lifecycle.rs` | `ThreadListenerCommand::ResolveServerRequest`; `resolve_pending_server_request`; `ServerRequestResolvedNotification`; `thread_unload_delay`; `ensure_listener_task_running`; `apply_bespoke_event_handling`; `unload_thread_without_subscribers`; `ThreadClosed`; `thread_read_state::publish`; `thread_read_state::notify` | The later identity-only notification reports request and thread ids without disclosing which completion cause won; one listener applies the ordered thread event stream serially, and the last-subscriber idle timeout unloads a thread and emits `thread/closed`; eligible read-state publication precedes terminal notification |
+| `codex-rs/app-server/src/bespoke_event_handling.rs` | `receiver.await`; `resolve_server_request_on_thread_listener`; `NetworkApprovalResolved`; `emit_turn_completed_with_status`; `handle_turn_complete`; `handle_turn_interrupted`; `handle_token_count_event` | A completed response waiter asks the one thread listener to publish resolution only after its callback completes; terminal notification omits items, while status/error and usage arrive through separate typed facts |
+| `codex-rs/app-server/src/outgoing_message.rs` | `resolve_server_request`; `ServerRequestResolvedNotification`; `notify_client_response`; `take_request_callback`; `cancel_requests_for_thread`; `request_id_to_callback.remove`; `send_server_notification_to_connections`; `send_request_to_connections`; `OutgoingEnvelope::Broadcast` | Client response and thread-wide lifecycle cancellation both remove the same pending callback entries; empty notification targets and absent request targets broadcast connection-wide, while explicit request targets remain targeted |
+| `codex-rs/app-server/src/request_processors/thread_lifecycle.rs` | `ThreadListenerCommand::ResolveServerRequest`; `resolve_pending_server_request`; `thread_unload_delay`; `ensure_listener_task_running`; `apply_bespoke_event_handling`; `unload_thread_without_subscribers`; `ThreadClosed`; `thread_read_state::publish`; `thread_read_state::notify` | The later identity-only notification reports request and thread ids without disclosing which completion cause won; one listener applies the ordered thread event stream serially, and the last-subscriber idle timeout unloads a thread and emits `thread/closed`; eligible read-state publication precedes terminal notification |
 | `codex-rs/core/src/stream_events_utils.rs` | `finalize_non_tool_response_item`; `handle_output_item_done` | Nonempty final-answer or unphased agent text is finalized as an item before task completion |
 | `codex-rs/core/src/tasks/mod.rs` | `on_task_finished`; `EventMsg::TurnComplete` | Task completion emits the terminal turn after its final agent item |
 | `codex-rs/app-server/src/lib.rs` | `try_attach_thread_listener`; `thread_created_rx` | Initialized connections attach listeners to newly created native threads |
 | `codex-rs/app-server/src/request_processors/thread_processor.rs` | `thread_set_name_response_inner`; `update_thread_metadata`; `send_response`; `ThreadNameUpdated`; `config_snapshot.sandbox_policy()`; `collect_resume_override_mismatches`; `developerInstructions override was provided and ignored while running`; `thread_unsubscribe_response_inner`; `unsubscribe_connection_from_thread`; `thread_background_terminals_clean_inner`; `Op::CleanBackgroundTerminals`; `thread_background_terminals_list_inner`; `list_background_terminals`; `paginated_thread_full_turns`; `history_settings`; `persisted_permission_profile`; `has_permission_override` | Set-name awaits its metadata update and responds before its notification; effective sandbox can differ from request; loaded resume may ignore overrides; detachment, cleanup, and inspection are distinct; `thread/read(includeTurns=true)` still hydrates full history; cold resume restores thread-owned permission state unless explicitly overridden |
 | `codex-rs/login/src/auth/default_client.rs` | `get_codex_user_agent`; `env!("CARGO_PKG_VERSION")` | The first slash-delimited user-agent component contains the build package version |
 | `codex-rs/app-server/src/models.rs` | `supported_models`; `show_in_picker`; `model_from_preset`; `supports_personality: false` | Default listing excludes hidden presets and always reports retired personality support as false |
-| `codex-rs/app-server/src/request_processors/thread_delete.rs` | `pub(crate) async fn thread_delete`; `thread_delete_response`; `send_thread_deleted_notifications` | Descendant-first deletion, response-before-broadcast ordering, and one notification per deleted thread |
+| `codex-rs/app-server/src/request_processors/thread_delete.rs` | `pub(crate) async fn thread_delete`; `ensure_no_attached_threads`; `thread_delete_response`; `send_thread_deleted_notifications` | Descendant-first deletion, response-before-broadcast ordering, and one notification per deleted thread |
 | `codex-rs/protocol/src/models.rs` | `MessagePhase`; `PartialAnswer` | Commentary and partial answers are not final answers; only final-answer or absent-phase text can supply portable completion |
 | `codex-rs/protocol/src/protocol.rs` | `TokenUsageInfo::new_or_append`; `last_token_usage`; `SessionMeta`; `pub dynamic_tools: Option<Vec<DynamicToolSpec>>` | Usage is partial, while native dynamic tools persist in session metadata |
 | `codex-rs/core/src/session/mod.rs` | `conversation_history.get_dynamic_tools`; `dynamic_tools` | Resume restores persisted dynamic tools when no replacement is supplied |
 | `codex-rs/core/src/session/handlers.rs` | `clean_background_terminals`; `close_unified_exec_processes`; `Op::CleanBackgroundTerminals` | Accepted cleanup closes the thread's background terminals |
-| `codex-rs/features/src/lib.rs` | `Feature::Collab`; `key: "multi_agent"`; `default_enabled: true`; `Feature::MultiAgentV2`; `key: "multi_agent_v2"`; `Feature::SpawnCsv`; `key: "enable_fanout"`; `Stage::Removed` | Active multi-agent controls stay disabled; retired fanout is neither written nor required as effective-state evidence |
+| `codex-rs/features/src/lib.rs` | `Feature::Collab`; `key: "multi_agent"`; `default_enabled: true`; `Feature::MultiAgentV2`; `key: "multi_agent_v2"`; `Feature::SpawnCsv`; `key: "enable_fanout"`; `Stage::Removed`; `Feature::DeferredToolWorldState`; `key: "deferred_tool_world_state"` | Active multi-agent controls stay disabled; retired fanout is neither written nor required as effective-state evidence |
 | `codex-rs/core/src/tools/handlers/multi_agents/spawn.rs` | `handle_spawn_agent`; `Ok(SpawnAgentResult` | Native spawn can return a child identity while descendant work continues |
 | `codex-rs/app-server-protocol/src/protocol/v2/experimental_feature.rs` | `ExperimentalFeatureListParams`; `pub thread_id: Option<String>`; `pub enabled: bool`; `ExperimentalFeatureListResponse` | Paginated per-loaded-thread effective feature state |
 | `codex-rs/app-server/src/request_processors/catalog_processor.rs` | `experimental_feature_list_response`; `load_latest_config_with_session_layers`; `config.features.enabled` | Feature inspection reads refreshed effective thread config |
 | `codex-rs/app-server-client/src/remote.rs` | `UDS_WEBSOCKET_HANDSHAKE_URL`; `server_version`; `userAgent`; `split_once('/')`; `split_whitespace().next()`; `Message::Text`; `Message::Binary` | Unix handshake URI, parsed user-agent version token, and selected-client binary-frame discard |
 | `codex-rs/thread-store/src/local/update_thread_metadata.rs` | `requires_rollout_compatibility_update`; `patch.name.is_some()`; `live_writer::persist_thread` | A live name update takes the rollout-compatibility path and materializes the rollout before success |
 | `codex-rs/app-server-transport/src/transport/stdio.rs` | `std::io::stdin().lock().lines()` | One JSON value per stdio line |
-| `codex-rs/app-server-transport/src/transport/websocket.rs` | `IncomingWebSocketMessage::Text(text)` | JSON text framing |
+| `codex-rs/app-server-transport/src/transport/websocket.rs` | `IncomingWebSocketMessage::Text(text)`; `WEBSOCKET_COMPRESSION_HEADER`; `WebSocketCompression::Plain` | JSON text framing without an explicit compression handshake |
 | `codex-rs/protocol/src/dynamic_tools.rs` | `DynamicToolSpec` | Native tool declarations remain private |
 | `codex-rs/protocol/src/items.rs` | `AgentMessageDelivery`; `AsyncUserInputQuestion` | Async delivery discriminator and exact question shape |
 | `codex-rs/core/src/tools/handlers/request_user_input.rs` | `is_blocking: mode == ModeKind::Plan` | Default-mode requests are nonblocking |
@@ -99,6 +101,10 @@ stable review coordinates:
 | `codex-rs/app-server/src/request_processors/thread_read_state.rs` | `fn eligible`; `pub(super) async fn publish`; `pub(super) async fn notify`; `manager.subscribed_connection_ids(id)` | Durable local receipts use thread subscribers; feature-source threads are ineligible |
 | `codex-rs/app-server/src/config_manager.rs` | `load_latest_config`; `load_non_project_config`; `without_project_context()` | Configuration reads without a cwd exclude project context |
 | `codex-rs/app-server-client/src/server_request.rs` | `AppServerReplyHandle`; `server_request_reply_handle`; `compare_exchange(false, true`; `self.request_id.clone()` | The upstream client retains originating-connection, exact-id, single-use replies without reconnect or retry; no wire method is added |
+| `codex-rs/app-server-protocol/src/protocol/v2/model_provider_error.rs` | `ModelProviderError`; `ModelProviderMismatch`; `ModelProviderNotConfigured`; `ModelProviderPolicyConflict` | Structured private resume and inference admission rejection data |
+| `codex-rs/app-server/src/request_processors/config_errors.rs` | `config_load_error`; `invalid_request(provider_error.to_string())`; `serde_json::to_value(provider_error)` | Provider configuration rejection retains the invalid-request RPC code and private structured data |
+| `codex-rs/app-server/src/request_processors/persisted_resume_settings.rs` | `PersistedResumeSettings`; `latest_owned_thread_settings`; `latest_persisted_model_settings`; `unnamed_permission_profile` | Resume restoration remains subordinate to explicit permission overrides |
+| `codex-rs/config/src/config_requirements.rs` | `deserialize_permissions_network`; `pub review_domains: Option<Vec<String>>`; `permissions.network`; `shared network constraints` | Managed network requirements remain separate from caller profile configuration |
 
 ## Selected method matrix
 
@@ -149,8 +155,10 @@ state guard.
 The connection preserves raw JSON-RPC identifiers until a response is sent.
 A stable internal rendering may be used as a lookup key, but it never replaces
 the original identifier in a response. Malformed JSON, malformed JSON-RPC,
-and malformed payloads for known methods are protocol failures. Binary frames
-are discarded without a state transition, matching the selected clients.
+and malformed payloads for known methods are protocol failures. Kit does not
+request compression; binary frames are discarded without a state transition.
+Target compression requires explicit header negotiation; the upstream client
+now wraps framing in `send_text`.
 Unexpected transport closure is an integration failure. Closure or fatal
 decode failure completes all pending Kit-originated requests with a failure
 rather than leaving waiters parked.
@@ -162,8 +170,10 @@ as generic state-only events. Completed item and terminal turn processing
 retain their independent authoritative roles.
 
 Initialization is part of connection establishment. The selected initialize
-payload omits `mcpServerOpenaiFormElicitation`; omission means that extended
-OpenAI MCP form elicitation is not enabled. `explicitGatewayOauth` and `extensions` also remain unadvertised; experimental
+payload omits `requiredHumanApproval` because the portable resolver does not
+establish fresh human provenance. It also omits `mcpServerOpenaiFormElicitation`;
+omission means that extended OpenAI MCP form elicitation is not enabled.
+`explicitGatewayOauth` and `extensions` also remain unadvertised; experimental
 API negotiation and disabled attestation retain their existing meaning. An
 initialization failure tears
 down the partially opened connection. The response `userAgent` supplies the
@@ -297,6 +307,7 @@ metadata acquires an invented Workspace or Conversation.
 
 | Method | DTO member | Scope and disposition |
 |---|---|---|
+| `thread/section/changed` | `thread.rs` | Thread; required nullable string section identity stays private and nonterminal |
 | `thread/readState/changed` | `thread.rs` | Thread; validated private read-state metadata, never Kit acknowledgment or completion |
 | `thread/reverted` | `thread.rs` | Thread; owned root or verified descendant invalidates with `InvalidState/AttachmentMismatch`; foreign history is ignored and durable recovery/cleanup ownership is retained |
 | `thread/queue/changed` | `thread.rs` | Thread; unsupported queued execution |
@@ -528,3 +539,80 @@ Fresh durable threads may use paginated native storage. The retained
 `excludeTurns: true`. No legacy-storage override or unused paging API is added.
 Internal native workers can reject archive/deletion: preserve native rejection
 and durable cleanup obligations, without force deletion or ambiguous replay.
+
+## Target approval, metadata, and compatibility boundaries
+
+A valid `humanCommand` request receives one correlated Unsupported response
+without an Interaction, continuation, or synthetic Process event. Normal field
+validation still applies; malformed known requests receive the existing protocol
+error. Ordinary command and terminal-input decisions retain one-shot policy.
+
+Network callback retirement uses the same identity-only `serverRequest/resolved`
+notification. An exact native thread and raw request ID can atomically cancel a
+still-pending continuation and notification. The retained cancelled identity
+prevents republication until ordinary reclamation. Resolution intent or ambiguous
+native acceptance remains recovery-owned; disappearance proves neither success
+nor permission to resend. Foreign, duplicate, and reclaimed callbacks cannot be
+adopted or retargeted.
+
+`thread/section/changed` requires `threadId` and `sectionId`, which is a string
+or null. Section identity is opaque private metadata. Verified root/descendant
+scope has no notification, revision, acknowledgment, or terminal effect.
+
+`modelNotFound` maps to Integration at Prompt/ModelGeneration with
+ResourceMissing; `policyCapacityUnavailable` maps to the same context with
+ServiceUnavailable. Neither supplies HTTP status. The same mapping governs
+unary, streaming, interrupted causes, durable failures, and full-history recovery.
+Malformed encodings of these known variants remain Protocol.
+
+Items remain flat JSON with optional `startedAtMs` and `completedAtMs`: omission,
+null, and signed 64-bit integers are valid in live and historical items. Envelope
+timestamps remain independently required. Item times do not reorder output or
+supply terminal authority. Generated-image `fileId`/inline `result` and user-audio
+references remain private non-assistant data; function-output input audio retains
+its selected `audio_url` field. No media download or public audio behavior follows.
+
+Structured `modelProviderMismatch` and `modelProviderNotConfigured` rejection
+data maps to Integration/PreconditionFailed; `modelProviderPolicyConflict` maps
+to Integration/PolicyRejected. Recognized data is decoded privately; provider
+names and native prose never escape. Unknown tags retain RPC-code fallback.
+Malformed recognized data yields Protocol/MalformedData while retaining the
+received response's request identity, code, and rejection authority. It does not
+terminate the transport or turn a received rejection into transport ambiguity.
+Known structured data cannot trigger legacy message-based cleanup exceptions.
+Resume continues to send explicit
+cwd, roots, permission and network configuration with `excludeTurns: true`, then
+uses authoritative full history. There is no automatic retry, new-thread
+substitution, or provider switch. Attached threads can prevent source-thread
+deletion; that rejection retains the native cleanup obligation after portable
+commit. No attached-thread inventory or force-delete operation is added.
+
+Generated-image references preserve the native File-first untagged precedence,
+including migration records carrying both `fileId` and empty `result`. Status
+remains an open native string. Input-image paths and saved paths retain their
+absolute-path requirement; hashes and attachment references remain opaque and
+cause no filesystem access. User-message content decodes selected text, image,
+audio, local media, skill and mention shapes identically in live events and
+history. Valid observed user audio remains private state; DynamicToolCall audio
+retains its existing Unsupported policy. Function-call-output inline audio is
+unchanged.
+
+`hook/started` and `hook/completed` validate the selected run summary, including
+pre/post-model events, source, signed times, status and entries. Legacy source
+paths remain arbitrary UTF-8; they are never resolved locally. Unconsumed
+`hooks/list` environment metadata stays private source inventory only.
+`process/exited.outputDrainTimedOut` accepts omission, null or a boolean and
+rejects other types. It remains connection-private and grants no conversation
+ownership, public Process fact, or complete-output guarantee.
+
+Managed requirements accept `[permissions.network]`, including `review_domains`,
+separately from profile network configuration. Mixing legacy managed-network
+tables with the new table is invalid and the table name is reserved. Kit neither
+migrates caller policy nor adds native TOML passthrough. Deferred tool world state
+is enabled by default upstream; tool execution/inventory qualification retains
+those defaults and its existing assertions.
+
+New client operations `thread/sample`, `thread/sample/cancel`,
+`thread/memory/read`, `thread/guardianReview`, `account/gcp/setup`,
+`accountSession/list`, `accountSession/switch`, and `feedback/save` remain outside
+the adapter. Removed detached review adds no replacement portable operation.

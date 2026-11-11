@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use rmcp::model::{CreateElicitationRequestParams, CreateElicitationResult, ElicitationAction};
+use rmcp::model::{ElicitRequestParams, ElicitResult, ElicitationAction};
 use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard, mpsc, oneshot};
 use uuid::Uuid;
 
@@ -125,15 +125,15 @@ impl McpInteractionBroker {
 
     pub(crate) async fn request_elicitation(
         &self,
-        params: CreateElicitationRequestParams,
-    ) -> Result<CreateElicitationResult, ToolError> {
+        params: ElicitRequestParams,
+    ) -> Result<ElicitResult, ToolError> {
         if !self.form_enabled {
             return Err(ToolError::Unsupported {
                 operation: "MCP form elicitation is not enabled".to_owned(),
             });
         }
         let (prompt, schema) = match params {
-            CreateElicitationRequestParams::FormElicitationParams {
+            ElicitRequestParams::FormElicitationParams {
                 message,
                 requested_schema,
                 ..
@@ -143,9 +143,14 @@ impl McpInteractionBroker {
                     message: format!("failed to serialize MCP elicitation schema: {error}"),
                 })?,
             ),
-            CreateElicitationRequestParams::UrlElicitationParams { .. } => {
+            ElicitRequestParams::UrlElicitationParams { .. } => {
                 return Err(ToolError::Unsupported {
                     operation: "MCP URL elicitation".to_owned(),
+                });
+            }
+            _ => {
+                return Err(ToolError::Unsupported {
+                    operation: "unrecognized MCP elicitation mode".to_owned(),
                 });
             }
         };
@@ -179,21 +184,13 @@ impl McpInteractionBroker {
         })?;
         request.validate_response(&response)?;
         Ok(match response {
-            ToolInteractionResponse::Submit { content, .. } => CreateElicitationResult {
-                action: ElicitationAction::Accept,
-                content: Some(content),
-                meta: None,
-            },
-            ToolInteractionResponse::Decline { .. } => CreateElicitationResult {
-                action: ElicitationAction::Decline,
-                content: None,
-                meta: None,
-            },
-            ToolInteractionResponse::Cancel { .. } => CreateElicitationResult {
-                action: ElicitationAction::Cancel,
-                content: None,
-                meta: None,
-            },
+            ToolInteractionResponse::Submit { content, .. } => {
+                ElicitResult::new(ElicitationAction::Accept).with_content(content)
+            }
+            ToolInteractionResponse::Decline { .. } => {
+                ElicitResult::new(ElicitationAction::Decline)
+            }
+            ToolInteractionResponse::Cancel { .. } => ElicitResult::new(ElicitationAction::Cancel),
         })
     }
 }

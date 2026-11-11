@@ -213,8 +213,9 @@ idempotent, exactly once across clones, and seals future listing/handler
 admission.
 
 Accepted model-visible execution failures are completed error results. Outer
-errors describe invalid input/state, transport, protocol, cancellation, or
-lifecycle failure.
+errors describe input/output validation, invalid state, transport, protocol,
+cancellation, or lifecycle failure. Output validation may fail after execution;
+an outer error does not imply the absence of tool effects.
 
 MCP serving is a separate non-Clone `McpServer`. It accepts an `Arc<T>` for any
 `T: ToolsetBackend`, starts eagerly, owns and joins its task,
@@ -409,8 +410,10 @@ and Session-half dispatchers and require exact absence of deleted public symbols
 - `scripts/vendor_update.py` and crate-local vendor metadata own pinned-source
   refreshes.
 
-The graph retains LanceDB 0.40.0 and Lance 13.0.0 for the local Database and
-StateStore products and selects exact SurrealDB SDK/Core 4.0.0.
+Storage selects LanceDB 0.41.0 and the exact Lance 14.0.2
+family for the local Database and StateStore products, while retaining exact
+SurrealDB SDK/Core 4.0.0. The committed Cargo lock records the resolved graph;
+each subsequent change requires its applicable fresh qualification of both Lance products.
 External Rust dependencies come
 from crates.io; Cargo patches, replacements and external path overrides are
 forbidden. The path and alias guards have no upstream source exemptions.
@@ -420,13 +423,14 @@ exceptions accept unresolved risk and require removal when compatible upstream
 fixes become available. The exact policy belongs to
 [the dependency security policy](docs/security-dependencies.md).
 
-LanceDB 0.40.0 enables its single approved `remote` feature because published
-job decoding references error variants guarded by that feature. The adapter
-contract remains local filesystem/memory storage. This build exception brings
-the native HTTP/Flight/OAuth dependencies into the registry graph; it does not
-expose LanceDB Cloud or enable cloud object-store features. Direct dependency
-default features remain disabled. Supported optional backends and their
-validation lanes belong to [Storage's feature guidance](storage-kit/README.md#features).
+The refresh preserves LanceDB's single approved `remote` feature. It originally
+worked around 0.40.0 job decoding references to feature-gated error variants;
+0.41.0 corrects that defect. The adapter contract remains local filesystem/memory
+storage. The retained feature brings native HTTP/Flight/OAuth dependencies into
+the registry graph; it does not expose LanceDB Cloud or enable cloud object-store
+features. Direct dependency default features remain disabled. Supported optional
+backends and their validation lanes belong to
+[Storage's feature guidance](storage-kit/README.md#features).
 
 Root docs explain workspace ownership once. Crate READMEs teach downstream
 workflows, crate architecture files describe private ownership, crate AGENTS

@@ -371,6 +371,11 @@ impl ToolScript {
             outcome,
         }
     }
+
+    pub(super) fn with_call_id(mut self, call_id: String) -> Self {
+        self.expected.call_id = Some(call_id);
+        self
+    }
 }
 
 #[derive(Default)]

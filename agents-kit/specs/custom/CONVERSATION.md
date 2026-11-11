@@ -15,10 +15,13 @@ After admission, Custom:
 3. loads the bounded portable transcript and private managed-knowledge context;
 4. materializes that transcript as `Message<P::Model::Continuation>` values
    without continuation and constructs one typed `GenerateRequest`;
-5. calls `ModelBackend::generate` for terminal delivery or consumes actual
+5. releases the registered execution only after durable Kit admission and
+   publishes `Preparing response`, then calls `ModelBackend::generate` for terminal delivery or consumes actual
    `generate_stream` events for incremental observation inside the same loop;
 6. validates the returned finish reason and function-call shape before
-   constructing handlers or advancing the transcript, then executes accepted
+   constructing handlers or advancing the transcript, validates the complete
+   batch's selection and action budget, and publishes `Tool calls requested`
+   once before approvals or handlers, then executes accepted
    `FunctionCall` values through the selected `Toolset -> ToolHandler` routes,
    bounded by `CustomLoopLimits`;
 7. appends the returned assistant `Message<P::Model::Continuation>` unchanged
@@ -30,6 +33,21 @@ The Custom loop owns transcript advancement, parallel action bounds, durable
 approval notifications, final-response detection, cancellation, and the
 existing lifecycle deadline. providers-kit owns only provider/model rendering
 and normalized call/result correlation.
+
+Kit execution admission is distinct from remote Model acceptance. The route
+registers ownership before the first poll, which may perform local validation
+but stops at a private one-shot release gate before publication or generation.
+Only successful durable admission opens that gate. Rejected admission closes
+the gate and joins the unreleased execution, even if cancellation bookkeeping
+also fails; cleanup never grants permission to execute. A first-generation
+Provider `InvalidInput` or `Unsupported` may therefore occur after Kit
+admission. Its normalized terminal error is preserved, with no successful
+transcript turn or tool effect, and settled admission remains reusable.
+
+Milestones share that execution owner and the existing notification journal;
+they add no task, public type, or lower-crate behavior. Their exact values,
+cadence, publication recovery, and replay rules belong to
+[`NOTIFICATIONS.md`](NOTIFICATIONS.md).
 
 Explicit reasoning selections map exactly from `minimal`, `low`, `medium`,
 `high`, and `maximum` to Provider's corresponding portable effort values.
@@ -134,6 +152,24 @@ abort observer cannot cancel a successor's interactions. A cancellation-intent
 conflict is reconciled only when the captured terminal notification positively
 proves durable completion. A closed notification source is not that proof, and
 non-conflict failures remain errors.
+
+The original optional prompt deadline travels with the execution call and is
+checked before and after milestone publication and before the next Model,
+handler acquisition, new tool Interaction publication, or handler step. A
+handler that returns an Interaction after that deadline is cancelled once
+without publishing the new request. Deadline bookkeeping continues polling
+the same retained execution while its cancellation-intent mutation waits. This
+allows an already-admitted publication to release an exclusive StateStore
+writer without abandoning its receipt or starting another effect. If execution
+settles first, the owner retains that result while cancellation bookkeeping
+settles; it never polls a completed future again. Explicit cleanup cannot
+substitute for this deadline-owned settlement.
+If durable cancellation intent fails, the same owner still signals the exact
+local route and drives retained execution during interaction cleanup. A
+journal writer cannot prevent its own receipt from being polled. The intent
+failure remains primary internally, with route, interaction, and execution
+cleanup failures retained as supplementary evidence. This does not replace a
+Timeout already delivered to the prompt observer or claim remote cancellation.
 
 Once Custom acquires a tool handler, an interaction validation, publication, or
 wait failure cancels that handler exactly once before returning the original

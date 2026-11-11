@@ -22,6 +22,7 @@ use crate::backends::custom::server::runtime::{CustomProviderRun, CustomRoute};
 use crate::backends::custom::server_requests::CustomServerRequests;
 use crate::backends::custom::state_store::CustomBuildClaimEscrow;
 use crate::backends::custom::tools::CustomTools;
+use crate::core::notification_store::NotificationStore;
 use crate::{
     ConversationId, CustomAgentConfig, CustomLoopLimits, KitError, ModelInfo, ToolInfo,
     ToolSelection, WorkspaceContext, WorkspaceDefaults, WorkspaceId, WorkspaceNetworkAccess,
@@ -150,6 +151,7 @@ struct CustomServerInner<
     routes: Mutex<CustomRouteRegistry<S, D, P, T>>,
     tools: CustomTools<T>,
     requests: CustomServerRequests<S, D, T>,
+    notifications: NotificationStore<S>,
     config: CustomAgentConfig,
     lifecycle_timeout: Duration,
     cleanup: Arc<CustomServerCleanupOwner>,
@@ -1029,6 +1031,7 @@ impl<S: StateStoreBackend, D: DatabaseBackend, P: ProviderBackend, T: ToolsetBac
         provider: Arc<P>,
         tools: CustomTools<T>,
         requests: CustomServerRequests<S, D, T>,
+        notifications: NotificationStore<S>,
         config: CustomAgentConfig,
         lifecycle_timeout: Duration,
     ) -> Self {
@@ -1038,6 +1041,7 @@ impl<S: StateStoreBackend, D: DatabaseBackend, P: ProviderBackend, T: ToolsetBac
                 routes: Mutex::new(CustomRouteRegistry::new()),
                 tools,
                 requests,
+                notifications,
                 config,
                 lifecycle_timeout,
                 cleanup: Arc::new(CustomServerCleanupOwner::new()),
@@ -1168,7 +1172,9 @@ impl<S: StateStoreBackend, D: DatabaseBackend, P: ProviderBackend, T: ToolsetBac
                 self.provider()?,
                 self.inner.tools.clone(),
                 self.inner.requests.clone(),
+                self.inner.notifications.clone(),
                 self.inner.config.tool_approval(),
+                self.inner.lifecycle_timeout,
             ),
         ));
         let insertion = {

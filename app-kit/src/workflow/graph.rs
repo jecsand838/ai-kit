@@ -12,24 +12,7 @@ impl WorkflowDefinition {
     /// This projection owns metadata only; it never retains executable bindings
     /// or lower handles. Callable metadata is resolved when bindings are supplied.
     ///
-    /// # Example
-    ///
-    /// ```
-    /// use app_kit::workflow::WorkflowDefinition;
-    ///
-    /// let definition = WorkflowDefinition::parse(r#"{
-    ///     "schema":"app-kit.workflow/v2", "id":"counter", "revision":"r1",
-    ///     "state":{"count":0}, "required":["count"],
-    ///     "reducers":{"count":"reject_concurrent"}, "entry":"increment",
-    ///     "nodes":[{"id":"increment","step":{"kind":"state","mutations":[
-    ///         {"kind":"increment","target":"count","value":{"kind":"literal","value":1}}
-    ///     ]}}], "routes":{}
-    /// }"#)?;
-    /// let graph = definition.graph();
-    /// assert_eq!(graph.nodes[0].id, "increment");
-    /// assert_eq!(graph.nodes[0].writes, ["count"]);
-    /// # Ok::<(), app_kit::AppError>(())
-    /// ```
+    /// See [parse, inspect and export](WorkflowDefinition#parse-inspect-and-export).
     pub fn graph(&self) -> GraphDescription {
         self.compiled.graph::<NoActions, NoConditions>(&[], &[])
     }
@@ -44,24 +27,7 @@ impl WorkflowDefinition {
     /// Returns `InvalidInput` when the projection exceeds JSON or output-size limits,
     /// or `Integration` if graph metadata cannot be encoded.
     ///
-    /// # Example
-    ///
-    /// ```
-    /// use app_kit::workflow::WorkflowDefinition;
-    ///
-    /// let definition = WorkflowDefinition::parse(r#"{
-    ///     "schema":"app-kit.workflow/v2", "id":"counter", "revision":"r1",
-    ///     "state":{"count":0}, "required":["count"],
-    ///     "reducers":{"count":"reject_concurrent"}, "entry":"increment",
-    ///     "nodes":[{"id":"increment","step":{"kind":"state","mutations":[
-    ///         {"kind":"increment","target":"count","value":{"kind":"literal","value":1}}
-    ///     ]}}], "routes":{}
-    /// }"#)?;
-    /// use app_kit::workflow::GraphFormat;
-    /// let mermaid = definition.export(GraphFormat::Mermaid)?;
-    /// assert!(mermaid.starts_with("flowchart TD"));
-    /// # Ok::<(), app_kit::AppError>(())
-    /// ```
+    /// See [parse, inspect and export](WorkflowDefinition#parse-inspect-and-export).
     pub fn export(&self, format: GraphFormat) -> Result<String, AppError> {
         format.render(&self.graph())
     }
@@ -126,24 +92,7 @@ impl GraphDescription {
     /// record exceeds JSON bounds. Unbound caller actions may have no source metadata;
     /// the method does not invent callback source.
     ///
-    /// # Example
-    ///
-    /// ```
-    /// use app_kit::workflow::WorkflowDefinition;
-    ///
-    /// let definition = WorkflowDefinition::parse(r#"{
-    ///     "schema":"app-kit.workflow/v2", "id":"counter", "revision":"r1",
-    ///     "state":{"count":0}, "required":["count"],
-    ///     "reducers":{"count":"reject_concurrent"}, "entry":"increment",
-    ///     "nodes":[{"id":"increment","step":{"kind":"state","mutations":[
-    ///         {"kind":"increment","target":"count","value":{"kind":"literal","value":1}}
-    ///     ]}}], "routes":{}
-    /// }"#)?;
-    /// let record = definition.graph().tracking_record()?;
-    /// assert_eq!(record["type"], "application");
-    /// assert_eq!(record["entrypoint"], "increment");
-    /// # Ok::<(), app_kit::AppError>(())
-    /// ```
+    /// See [parse, inspect and export](WorkflowDefinition#parse-inspect-and-export).
     pub fn tracking_record(&self) -> Result<Value, AppError> {
         let mut actions = Vec::with_capacity(self.nodes.len());
         for node in &self.nodes {

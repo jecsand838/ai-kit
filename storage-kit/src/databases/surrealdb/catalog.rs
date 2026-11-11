@@ -11,6 +11,11 @@ use crate::{
 
 use super::{data, manager::SurrealManager, mapper};
 
+enum CatalogRemoval {
+    Collection { ignore_missing: bool },
+    Columns { fields: Vec<String> },
+}
+
 pub(super) async fn handle(
     db: &SurrealManager,
     request: CatalogRequest,
@@ -110,80 +115,102 @@ async fn drop_collection(
 ) -> Result<CatalogResponse, StorageError> {
     db.ensure_mutable("drop_collection")?;
     let table = db.resolve_table(&locator)?;
-    db.remove_collection_table(&locator, &table, ignore_missing)
-        .await?;
+    db.remove_catalog(
+        &locator,
+        &table,
+        CatalogRemoval::Collection { ignore_missing },
+    )
+    .await?;
     Ok(CatalogResponse::Completed)
 }
 
 impl SurrealManager {
-    async fn remove_collection_table(
+    async fn remove_catalog(
         &self,
         locator: &StorageLocator,
         table: &str,
-        ignore_missing: bool,
+        removal: CatalogRemoval,
     ) -> Result<(), StorageError> {
-        let remove = if ignore_missing {
-            format!("REMOVE TABLE IF EXISTS {table}")
-        } else {
-            format!("REMOVE TABLE {table}")
-        };
-        let sql = format!(
-            "BEGIN TRANSACTION; {remove}; IF schema::table::exists($guard_table) {{ DELETE type::record($guard_table, $guard_id) RETURN NONE; }}; COMMIT TRANSACTION;"
-        );
-        let bindings = BTreeMap::from([
-            (
-                "guard_table".to_owned(),
-                serde_json::json!(Self::PARTITION_REPLACEMENT_GUARD_TABLE),
-            ),
-            (
-                "guard_id".to_owned(),
-                serde_json::json!(mapper::table_name(locator).trim()),
-            ),
-        ]);
-        self.with_request_timeout(
-            "drop_collection",
-            "removing a SurrealDB collection",
-            async {
-                let mut attempt = 0_usize;
-                loop {
-                    let errors = self
-                        .run_consuming_statement_errors(
-                            Some(locator),
-                            sql.clone(),
-                            bindings.clone(),
-                        )
-                        .await?;
-                    if errors.is_empty() {
-                        return Ok(());
-                    }
-                    // SurrealDB 3.3 reports a failed atomic COMMIT as one typed
-                    // conflict plus NotExecuted siblings. Index compaction can
-                    // cause this rollback even after a successful full-text query.
-                    let conflict = errors.iter().any(|(_, error)| {
-                        matches!(
-                            error.details(),
-                            ErrorDetails::Query(Some(QueryError::TransactionConflict))
-                        )
-                    });
-                    let rolled_back = errors.iter().all(|(_, error)| {
-                        matches!(
-                            error.details(),
-                            ErrorDetails::Query(Some(
-                                QueryError::TransactionConflict | QueryError::NotExecuted
-                            ))
-                        )
-                    });
-                    if attempt >= self.config().max_retries as usize || !conflict || !rolled_back {
-                        return Err(self.map_err("drop_collection", format!("{errors:?}")));
-                    }
-                    // The outer deadline also covers context selection and backoff.
-                    // Transport failure and unknown commit outcomes never reach a
-                    // replay; only the confirmed rolled-back transaction does.
-                    tokio::time::sleep(Duration::from_millis(1_u64 << attempt.min(6))).await;
-                    attempt += 1;
+        let (operation, action, sql, bindings) = match removal {
+            CatalogRemoval::Collection { ignore_missing } => {
+                let remove = if ignore_missing {
+                    format!("REMOVE TABLE IF EXISTS {table}")
+                } else {
+                    format!("REMOVE TABLE {table}")
+                };
+                let sql = format!(
+                    "BEGIN TRANSACTION; {remove}; IF schema::table::exists($guard_table) {{ DELETE type::record($guard_table, $guard_id) RETURN NONE; }}; COMMIT TRANSACTION;"
+                );
+                let bindings = BTreeMap::from([
+                    (
+                        "guard_table".to_owned(),
+                        serde_json::json!(Self::PARTITION_REPLACEMENT_GUARD_TABLE),
+                    ),
+                    (
+                        "guard_id".to_owned(),
+                        serde_json::json!(mapper::table_name(locator).trim()),
+                    ),
+                ]);
+                (
+                    "drop_collection",
+                    "removing a SurrealDB collection",
+                    sql,
+                    bindings,
+                )
+            }
+            CatalogRemoval::Columns { fields } => {
+                let mut sql = "BEGIN TRANSACTION;".to_owned();
+                for field in &fields {
+                    sql.push_str(&format!(" REMOVE FIELD {field} ON TABLE {table};"));
                 }
-            },
-        )
+                sql.push_str(&format!(
+                    " UPDATE {table} UNSET {} RETURN NONE; COMMIT TRANSACTION;",
+                    fields.join(", ")
+                ));
+                (
+                    "alter_collection",
+                    "removing SurrealDB collection columns",
+                    sql,
+                    BTreeMap::new(),
+                )
+            }
+        };
+        self.with_request_timeout(operation, action, async {
+            let mut attempt = 0_usize;
+            loop {
+                let errors = self
+                    .run_consuming_statement_errors(Some(locator), sql.clone(), bindings.clone())
+                    .await?;
+                if errors.is_empty() {
+                    return Ok(());
+                }
+                // A failed native atomic COMMIT reports a typed conflict
+                // plus NotExecuted siblings. Only that confirmed rollback
+                // permits replay of the complete removal transaction.
+                let conflict = errors.iter().any(|(_, error)| {
+                    matches!(
+                        error.details(),
+                        ErrorDetails::Query(Some(QueryError::TransactionConflict))
+                    )
+                });
+                let rolled_back = errors.iter().all(|(_, error)| {
+                    matches!(
+                        error.details(),
+                        ErrorDetails::Query(Some(
+                            QueryError::TransactionConflict | QueryError::NotExecuted
+                        ))
+                    )
+                });
+                if attempt >= self.config().max_retries as usize || !conflict || !rolled_back {
+                    return Err(self.map_err(operation, format!("{errors:?}")));
+                }
+                // The outer deadline also covers context selection and backoff.
+                // Transport failure and unknown commit outcomes never reach a
+                // replay; only the confirmed rolled-back transaction does.
+                tokio::time::sleep(Duration::from_millis(1_u64 << attempt.min(6))).await;
+                attempt += 1;
+            }
+        })
         .await
     }
 }
@@ -266,15 +293,7 @@ async fn alter_collection(
             if fields.is_empty() {
                 return Ok(CatalogResponse::Completed);
             }
-            let mut sql = "BEGIN TRANSACTION;".to_owned();
-            for field in &fields {
-                sql.push_str(&format!(" REMOVE FIELD {field} ON TABLE {table};"));
-            }
-            sql.push_str(&format!(
-                " UPDATE {table} UNSET {} RETURN NONE; COMMIT TRANSACTION;",
-                fields.join(", ")
-            ));
-            db.run_response(Some(&request.locator), sql, BTreeMap::new())
+            db.remove_catalog(&request.locator, &table, CatalogRemoval::Columns { fields })
                 .await?;
         }
     }

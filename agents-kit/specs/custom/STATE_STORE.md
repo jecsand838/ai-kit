@@ -15,6 +15,15 @@ lower-crate configuration. Provider continuation metadata and intermediate
 function messages exist only inside the active prompt loop and are never
 reconstructed during reopen.
 
+The existing accepted-generation bit records durable Kit execution admission,
+not proof that a remote Model accepted a request. It must commit before the
+private execution gate permits the first milestone or generation. Failed
+admission leaves that gate closed and retains the original failure through
+cleanup. No record format or compatibility floor changes for this distinction.
+Bounded prompt milestones use the existing notification journal and retain
+normal immutable publication and acknowledgment evidence; they do not create
+another durable prompt status or recovery controller.
+
 Every mutation uses the public owned StateStore transaction API. Exact
 `TransactionConflict` may be retried or reconciled only where the operation
 contract permits and only within its existing lifecycle deadline. All other

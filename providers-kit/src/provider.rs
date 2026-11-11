@@ -288,8 +288,8 @@ pub trait ProviderBackend: Send + Sync + 'static {
 
     /// Uploads one provider-managed file.
     ///
-    /// This example requires a real configured service, valid credentials, and any exact
-    /// resource ids shown. Only delete or cancel resources the caller owns.
+    /// For service use, supply configuration and any applicable credentials.
+    /// Retain the returned lifecycle id and delete only files the caller owns.
     /// The default trait implementation returns Unsupported.
     ///
     /// # Errors
@@ -298,37 +298,8 @@ pub trait ProviderBackend: Send + Sync + 'static {
     ///
     /// # Examples
     ///
-    /// ```no_run
-    ///
-    /// # #[tokio::main(flavor = "current_thread")]
-    /// # async fn main() -> Result<(), providers_kit::KitError> {
-    /// use providers_kit::{
-    ///     Provider, ProviderBackend, ProviderConfig,
-    ///     config::{ApiKey, OpenAiConfig, ProviderKind, TransportConfig},
-    /// };
-    /// let request = providers_kit::files::FileUploadRequest::new(
-    ///     "notes.txt", "text/plain", b"notes".to_vec(),
-    /// )?;
-    /// let provider = Provider::from_config(ProviderConfig::new(
-    ///     ProviderKind::OpenAi(OpenAiConfig::new(ApiKey::new("replace-with-your-key")?)),
-    ///     TransportConfig::default(),
-    /// ))?;
-    /// let result = provider.upload_file(request).await;
-    /// let deletion = match &result {
-    ///     Ok(file) => provider.delete_file(file.id.clone()).await,
-    ///     Err(_) => Ok(()),
-    /// };
-    /// let cleanup = provider.shutdown().await;
-    /// if let Err(error) = &cleanup {
-    ///     eprintln!("Cleanup failed: {error}");
-    /// }
-    /// let _value = result?;
-    /// deletion?;
-    /// cleanup?;
-    ///
-    /// # Ok(())
-    /// # }
-    /// ```
+    /// See the [owned-file workflow](crate::files#retain-ownership-through-deletion)
+    /// for upload, metadata, bounded download, deletion, and shared shutdown.
     ///
     fn upload_file(
         &self,
@@ -348,8 +319,8 @@ pub trait ProviderBackend: Send + Sync + 'static {
 
     /// Lists provider-managed files.
     ///
-    /// This example requires a real configured service, valid credentials, and any exact
-    /// resource ids shown. Only delete or cancel resources the caller owns.
+    /// For service use, supply configuration and any applicable credentials.
+    /// Discovery alone does not establish ownership of a returned file.
     /// The default trait implementation returns Unsupported.
     ///
     /// # Errors
@@ -358,29 +329,9 @@ pub trait ProviderBackend: Send + Sync + 'static {
     ///
     /// # Examples
     ///
-    /// ```no_run
-    ///
-    /// # #[tokio::main(flavor = "current_thread")]
-    /// # async fn main() -> Result<(), providers_kit::KitError> {
-    /// use providers_kit::{
-    ///     Provider, ProviderBackend, ProviderConfig,
-    ///     config::{ApiKey, OpenAiConfig, ProviderKind, TransportConfig},
-    /// };
-    /// let provider = Provider::from_config(ProviderConfig::new(
-    ///     ProviderKind::OpenAi(OpenAiConfig::new(ApiKey::new("replace-with-your-key")?)),
-    ///     TransportConfig::default(),
-    /// ))?;
-    /// let result = provider.list_files(providers_kit::files::FileListRequest::default()).await;
-    /// let cleanup = provider.shutdown().await;
-    /// if let Err(error) = &cleanup {
-    ///     eprintln!("Cleanup failed: {error}");
-    /// }
-    /// let _value = result?;
-    /// cleanup?;
-    ///
-    /// # Ok(())
-    /// # }
-    /// ```
+    /// Use [`FileListRequest`] for bounded pages and continuation cursors. The
+    /// [owned-file workflow](crate::files#retain-ownership-through-deletion)
+    /// demonstrates provider construction and cleanup.
     ///
     fn list_files(
         &self,
@@ -400,8 +351,8 @@ pub trait ProviderBackend: Send + Sync + 'static {
 
     /// Fetches metadata for one provider-managed file.
     ///
-    /// This example requires a real configured service, valid credentials, and any exact
-    /// resource ids shown. Only delete or cancel resources the caller owns.
+    /// For service use, supply configuration, any applicable credentials, and
+    /// the exact lifecycle file id.
     /// The default trait implementation returns Unsupported.
     ///
     /// # Errors
@@ -410,29 +361,8 @@ pub trait ProviderBackend: Send + Sync + 'static {
     ///
     /// # Examples
     ///
-    /// ```no_run
-    ///
-    /// # #[tokio::main(flavor = "current_thread")]
-    /// # async fn main() -> Result<(), providers_kit::KitError> {
-    /// use providers_kit::{
-    ///     Provider, ProviderBackend, ProviderConfig,
-    ///     config::{ApiKey, OpenAiConfig, ProviderKind, TransportConfig},
-    /// };
-    /// let provider = Provider::from_config(ProviderConfig::new(
-    ///     ProviderKind::OpenAi(OpenAiConfig::new(ApiKey::new("replace-with-your-key")?)),
-    ///     TransportConfig::default(),
-    /// ))?;
-    /// let result = provider.file_info("owned-file-id".into()).await;
-    /// let cleanup = provider.shutdown().await;
-    /// if let Err(error) = &cleanup {
-    ///     eprintln!("Cleanup failed: {error}");
-    /// }
-    /// let _value = result?;
-    /// cleanup?;
-    ///
-    /// # Ok(())
-    /// # }
-    /// ```
+    /// See the [owned-file workflow](crate::files#retain-ownership-through-deletion)
+    /// for metadata lookup using the returned upload id and explicit cleanup.
     ///
     fn file_info(
         &self,
@@ -452,8 +382,8 @@ pub trait ProviderBackend: Send + Sync + 'static {
 
     /// Deletes one provider-managed file.
     ///
-    /// This example requires a real configured service, valid credentials, and any exact
-    /// resource ids shown. Only delete or cancel resources the caller owns.
+    /// For service use, supply configuration and any applicable credentials.
+    /// Delete only a caller-owned file identified by its exact lifecycle id.
     /// The default trait implementation returns Unsupported.
     ///
     /// # Errors
@@ -462,29 +392,8 @@ pub trait ProviderBackend: Send + Sync + 'static {
     ///
     /// # Examples
     ///
-    /// ```no_run
-    ///
-    /// # #[tokio::main(flavor = "current_thread")]
-    /// # async fn main() -> Result<(), providers_kit::KitError> {
-    /// use providers_kit::{
-    ///     Provider, ProviderBackend, ProviderConfig,
-    ///     config::{ApiKey, OpenAiConfig, ProviderKind, TransportConfig},
-    /// };
-    /// let provider = Provider::from_config(ProviderConfig::new(
-    ///     ProviderKind::OpenAi(OpenAiConfig::new(ApiKey::new("replace-with-your-key")?)),
-    ///     TransportConfig::default(),
-    /// ))?;
-    /// let result = provider.delete_file("owned-file-id".into()).await;
-    /// let cleanup = provider.shutdown().await;
-    /// if let Err(error) = &cleanup {
-    ///     eprintln!("Cleanup failed: {error}");
-    /// }
-    /// let _value = result?;
-    /// cleanup?;
-    ///
-    /// # Ok(())
-    /// # }
-    /// ```
+    /// See the [owned-file workflow](crate::files#retain-ownership-through-deletion)
+    /// for deletion on success or failure while preserving the primary error.
     ///
     fn delete_file(&self, _id: String) -> impl Future<Output = Result<(), KitError>> + Send + '_ {
         async {
@@ -501,8 +410,8 @@ pub trait ProviderBackend: Send + Sync + 'static {
 
     /// Downloads one provider-managed file under the caller's byte limit.
     ///
-    /// This example requires a real configured service, valid credentials, and any exact
-    /// resource ids shown. Only delete or cancel resources the caller owns.
+    /// For service use, supply configuration, any applicable credentials, and
+    /// the exact file id. The nonzero byte limit bounds downloaded content.
     /// The default trait implementation returns Unsupported.
     ///
     /// # Errors
@@ -511,34 +420,8 @@ pub trait ProviderBackend: Send + Sync + 'static {
     ///
     /// # Examples
     ///
-    /// ```no_run
-    ///
-    /// # #[tokio::main(flavor = "current_thread")]
-    /// # async fn main() -> Result<(), providers_kit::KitError> {
-    /// use providers_kit::{
-    ///     Provider, ProviderBackend, ProviderConfig,
-    ///     config::{ApiKey, OpenAiConfig, ProviderKind, TransportConfig},
-    /// };
-    /// let provider = Provider::from_config(ProviderConfig::new(
-    ///     ProviderKind::OpenAi(OpenAiConfig::new(ApiKey::new("replace-with-your-key")?)),
-    ///     TransportConfig::default(),
-    /// ))?;
-    /// let result = provider
-    ///     .download_file(
-    ///         "owned-file-id".into(),
-    ///         std::num::NonZeroUsize::new(1024 * 1024).unwrap(),
-    ///     )
-    ///     .await;
-    /// let cleanup = provider.shutdown().await;
-    /// if let Err(error) = &cleanup {
-    ///     eprintln!("Cleanup failed: {error}");
-    /// }
-    /// let _value = result?;
-    /// cleanup?;
-    ///
-    /// # Ok(())
-    /// # }
-    /// ```
+    /// See the [owned-file workflow](crate::files#retain-ownership-through-deletion)
+    /// for bounded download and separate remote-file and local-provider cleanup.
     ///
     fn download_file(
         &self,
@@ -562,10 +445,10 @@ pub trait ProviderBackend: Send + Sync + 'static {
     /// Supplied OpenAI status reads opt into the configured bounded transport
     /// retries; every attempt shares the original absolute request deadline.
     /// This does not retry decoding or successful-response body failures. The
-    /// lookup used by `batch_results` is excluded. See the [batch workflow](crate::batch).
+    /// lookup used by `batch_results` is excluded.
     ///
-    /// This example requires a real configured service, valid credentials, and any exact
-    /// resource ids shown. Only delete or cancel resources the caller owns.
+    /// For service use, supply configuration, any applicable credentials, and
+    /// the exact batch job id. Only delete or cancel resources the caller owns.
     /// The default trait implementation returns Unsupported.
     ///
     /// # Errors
@@ -574,29 +457,9 @@ pub trait ProviderBackend: Send + Sync + 'static {
     ///
     /// # Examples
     ///
-    /// ```no_run
-    ///
-    /// # #[tokio::main(flavor = "current_thread")]
-    /// # async fn main() -> Result<(), providers_kit::KitError> {
-    /// use providers_kit::{
-    ///     Provider, ProviderBackend, ProviderConfig,
-    ///     config::{ApiKey, OpenAiConfig, ProviderKind, TransportConfig},
-    /// };
-    /// let provider = Provider::from_config(ProviderConfig::new(
-    ///     ProviderKind::OpenAi(OpenAiConfig::new(ApiKey::new("replace-with-your-key")?)),
-    ///     TransportConfig::default(),
-    /// ))?;
-    /// let result = provider.batch_status("owned-batch-id".into()).await;
-    /// let cleanup = provider.shutdown().await;
-    /// if let Err(error) = &cleanup {
-    ///     eprintln!("Cleanup failed: {error}");
-    /// }
-    /// let _value = result?;
-    /// cleanup?;
-    ///
-    /// # Ok(())
-    /// # }
-    /// ```
+    /// See the [bounded batch workflow](crate::batch#observe-or-cancel-an-owned-job)
+    /// for polling an owned job under one application deadline and inspecting its
+    /// terminal outcome.
     ///
     fn batch_status(
         &self,
@@ -617,11 +480,10 @@ pub trait ProviderBackend: Send + Sync + 'static {
     /// Requests cancellation of one batch job.
     ///
     /// Acknowledgement is not terminality: the returned job may still be running.
-    /// Observe its status until terminal before cleaning up owned input files; see
-    /// the [bounded batch workflow](crate::batch).
+    /// Observe its status until terminal before cleaning up owned input files.
     ///
-    /// This example requires a real configured service, valid credentials, and any exact
-    /// resource ids shown. Only delete or cancel resources the caller owns.
+    /// For service use, supply configuration and any applicable credentials.
+    /// Cancel only a caller-owned job identified by its exact returned id.
     /// The default trait implementation returns Unsupported.
     ///
     /// # Errors
@@ -630,29 +492,8 @@ pub trait ProviderBackend: Send + Sync + 'static {
     ///
     /// # Examples
     ///
-    /// ```no_run
-    ///
-    /// # #[tokio::main(flavor = "current_thread")]
-    /// # async fn main() -> Result<(), providers_kit::KitError> {
-    /// use providers_kit::{
-    ///     Provider, ProviderBackend, ProviderConfig,
-    ///     config::{ApiKey, OpenAiConfig, ProviderKind, TransportConfig},
-    /// };
-    /// let provider = Provider::from_config(ProviderConfig::new(
-    ///     ProviderKind::OpenAi(OpenAiConfig::new(ApiKey::new("replace-with-your-key")?)),
-    ///     TransportConfig::default(),
-    /// ))?;
-    /// let result = provider.cancel_batch("owned-batch-id".into()).await;
-    /// let cleanup = provider.shutdown().await;
-    /// if let Err(error) = &cleanup {
-    ///     eprintln!("Cleanup failed: {error}");
-    /// }
-    /// let _value = result?;
-    /// cleanup?;
-    ///
-    /// # Ok(())
-    /// # }
-    /// ```
+    /// See the [bounded batch workflow](crate::batch#observe-or-cancel-an-owned-job)
+    /// for one cancellation request followed by terminal observation and shutdown.
     ///
     fn cancel_batch(
         &self,
@@ -672,8 +513,8 @@ pub trait ProviderBackend: Send + Sync + 'static {
 
     /// Downloads and normalizes batch result rows under the caller's byte limit.
     ///
-    /// This example requires a real configured service, valid credentials, and any exact
-    /// resource ids shown. Only delete or cancel resources the caller owns.
+    /// For service use, supply configuration, any applicable credentials, and
+    /// the exact batch job id. Only delete or cancel resources the caller owns.
     /// The default trait implementation returns Unsupported.
     /// The byte bound covers the downloaded result; each terminal row must be inspected
     /// independently. Row failures are result data, while download/normalization failures
@@ -685,34 +526,8 @@ pub trait ProviderBackend: Send + Sync + 'static {
     ///
     /// # Examples
     ///
-    /// ```no_run
-    ///
-    /// # #[tokio::main(flavor = "current_thread")]
-    /// # async fn main() -> Result<(), providers_kit::KitError> {
-    /// use providers_kit::{
-    ///     Provider, ProviderBackend, ProviderConfig,
-    ///     config::{ApiKey, OpenAiConfig, ProviderKind, TransportConfig},
-    /// };
-    /// let provider = Provider::from_config(ProviderConfig::new(
-    ///     ProviderKind::OpenAi(OpenAiConfig::new(ApiKey::new("replace-with-your-key")?)),
-    ///     TransportConfig::default(),
-    /// ))?;
-    /// let result = provider
-    ///     .batch_results(
-    ///         "owned-batch-id".into(),
-    ///         std::num::NonZeroUsize::new(1024 * 1024).unwrap(),
-    ///     )
-    ///     .await;
-    /// let cleanup = provider.shutdown().await;
-    /// if let Err(error) = &cleanup {
-    ///     eprintln!("Cleanup failed: {error}");
-    /// }
-    /// let _value = result?;
-    /// cleanup?;
-    ///
-    /// # Ok(())
-    /// # }
-    /// ```
+    /// See the [bounded batch workflow](crate::batch#observe-or-cancel-an-owned-job)
+    /// for bounded retrieval and independent inspection of every terminal row.
     ///
     fn batch_results(
         &self,
@@ -736,8 +551,8 @@ pub trait ProviderBackend: Send + Sync + 'static {
 
     /// Lists provider batch jobs.
     ///
-    /// This example requires a real configured service, valid credentials, and any exact
-    /// resource ids shown. Only delete or cancel resources the caller owns.
+    /// For service use, supply configuration and any applicable credentials.
+    /// Discovery alone does not establish ownership of a returned job.
     /// The default trait implementation returns Unsupported.
     ///
     /// # Errors
@@ -746,29 +561,9 @@ pub trait ProviderBackend: Send + Sync + 'static {
     ///
     /// # Examples
     ///
-    /// ```no_run
-    ///
-    /// # #[tokio::main(flavor = "current_thread")]
-    /// # async fn main() -> Result<(), providers_kit::KitError> {
-    /// use providers_kit::{
-    ///     Provider, ProviderBackend, ProviderConfig,
-    ///     config::{ApiKey, OpenAiConfig, ProviderKind, TransportConfig},
-    /// };
-    /// let provider = Provider::from_config(ProviderConfig::new(
-    ///     ProviderKind::OpenAi(OpenAiConfig::new(ApiKey::new("replace-with-your-key")?)),
-    ///     TransportConfig::default(),
-    /// ))?;
-    /// let result = provider.list_batches(providers_kit::batch::BatchListRequest::default()).await;
-    /// let cleanup = provider.shutdown().await;
-    /// if let Err(error) = &cleanup {
-    ///     eprintln!("Cleanup failed: {error}");
-    /// }
-    /// let _value = result?;
-    /// cleanup?;
-    ///
-    /// # Ok(())
-    /// # }
-    /// ```
+    /// Use [`BatchListRequest`] for bounded pages and continuation cursors. The
+    /// [batch workflow](crate::batch#observe-or-cancel-an-owned-job) demonstrates
+    /// provider construction, job ownership, and shared shutdown.
     ///
     fn list_batches(
         &self,

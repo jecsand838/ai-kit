@@ -67,7 +67,12 @@ work, propagates to descendants, and terminalizes only after accepted effects
 are reconciled. History remains retained until explicit, bounded, resumable
 deletion; terminal capacity release is independent. Mutations preserve their
 native revision and missing-record fences. App-owned deletion and shutdown work
-survives observer drop and resumes after reopen without blocking App construction.
+survives observer drop; reopen reconstructs its durable ownership. Recovered
+workspace deletion reattaches its exact fence and owner without waiting for
+lower deletion to converge. Previously sealed run-history deletion instead
+settles one tracked cleanup owner at a time before App publication; a cleanup
+failure prevents publication. The [application contract](specs/APP.md#open)
+owns the complete recovery ordering and failure rules.
 
 `AppStore<CS>` performs StateStore reads, scans, and transactions on the active
 async runtime. It owns the caller CS directly and consumes `CS::Transaction` through its

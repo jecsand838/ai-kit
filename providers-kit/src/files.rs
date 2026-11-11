@@ -17,6 +17,7 @@
 //! use std::num::NonZeroUsize;
 //! use providers_kit::{Provider, ProviderBackend, ProviderConfig};
 //! use providers_kit::config::{ApiKey, OpenAiConfig, ProviderKind, TransportConfig};
+//! use providers_kit::error::{ErrorKind, ErrorPhase, Operation, ResponseViolation};
 //! use providers_kit::files::FileUploadRequest;
 //! # #[tokio::main(flavor = "current_thread")]
 //! # async fn main() -> Result<(), providers_kit::KitError> {
@@ -29,9 +30,19 @@
 //! let work = async {
 //!     let file = uploaded.as_ref().map_err(Clone::clone)?;
 //!     let info = provider.file_info(file.id.clone()).await?;
-//!     assert_eq!(info.id, file.id);
+//!     if info.id != file.id {
+//!         return Err(providers_kit::KitError::new(
+//!             ErrorKind::InvalidResponse(ResponseViolation::IdentityMismatch { field: "file.id" }),
+//!             Operation::FileInfo, ErrorPhase::Unspecified,
+//!         ));
+//!     }
 //!     let bytes = provider.download_file(file.id.clone(), NonZeroUsize::new(1024).unwrap()).await?;
-//!     assert_eq!(bytes, b"owned note");
+//!     if bytes != b"owned note" {
+//!         return Err(providers_kit::KitError::new(
+//!             ErrorKind::InvalidResponse(ResponseViolation::ProtocolViolation { rule: "uploaded bytes round trip" }),
+//!             Operation::DownloadFile, ErrorPhase::Unspecified,
+//!         ));
+//!     }
 //!     Ok::<(), providers_kit::KitError>(())
 //! }.await;
 //! let deletion = match uploaded {
@@ -39,7 +50,8 @@
 //!     Err(_) => Ok(()),
 //! };
 //! let shutdown = provider.shutdown().await;
-//! // Retain cleanup errors as supplementary evidence on an earlier failure.
+//! // Validation failures take this same cleanup path. Keep the primary error
+//! // and attach any deletion or shutdown failures as supplementary evidence.
 //! let mut outcome = work;
 //! for cleanup in [deletion, shutdown] {
 //!     if let Err(error) = cleanup {

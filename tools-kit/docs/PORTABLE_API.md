@@ -70,6 +70,16 @@ handler variant.
 It has no source id, nested source config, serving config, or Toolset config
 wrapper.
 
+MCP construction uses initialize-based protocol revisions through `2025-11-25`.
+The client offers that revision and rejects an unsupported server selection
+before inventory, retaining bounded cleanup of its accepted session. There is
+no public protocol-version or alternate-lifecycle setting. Streamable HTTP JSON
+responses are bounded at 16 MiB for success and 64 KiB for error bodies; a
+response-size rejection is an outer error and never reexecutes a tool call.
+The supplied server requires the initialize lifecycle and rejects inline
+negotiation or discovery even when those requests name an older revision or
+carry a session identity. Ordinary request metadata remains supported.
+
 ## Declaration
 
 `ToolInfo` is the one complete model-visible declaration. It contains ToolName,
@@ -112,9 +122,17 @@ ToolResult owns content, optional structured content, `is_error`, and
 uninterpreted source-neutral result metadata. It does not repeat call id or tool
 name. The caller retains correlation.
 
-Outer ToolError represents rejected input/state transitions, protocol or
-transport failure, cancellation, timeout, unsupported behavior, or closed
-runtime. A completed model-visible error is not duplicated inside ToolError.
+MCP content maps native metadata and annotations into the existing portable
+content metadata, including audio. Serving serializes portable content metadata
+as native metadata; it does not infer new executable behavior from those values.
+
+Outer ToolError represents input/output validation failures, invalid state
+transitions, protocol or transport failure, cancellation, timeout, unsupported
+behavior, or closed runtime. `ToolError::InvalidOutput` can follow execution
+when the completed result violates its declared output schema; an outer error
+does not establish that no side effects occurred. A completed model-visible
+error is not duplicated inside ToolError and remains exempt from output-schema
+validation.
 When serving over MCP, only `Completed(ToolResult)` becomes a successful
 `tools/call` response (including `isError = true`); outer ToolError values map
 to MCP errors, with caller/request-shape failures using invalid params.

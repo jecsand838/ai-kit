@@ -62,13 +62,19 @@ Prompt-returned failure is not duplicated as an Error notification. Typed
 asynchronous warning/error facts unrelated to a prompt result may map to the
 portable kinds when the selected semantics are complete. Selected
 thread-scoped `item/started` and `item/completed` facts carrying
-`ThreadItem::CommandExecution`, with verified conversation ownership, map to
+`ThreadItemPayload::CommandExecution`, with verified conversation ownership, map to
 portable `Process` transitions without native process ids or
 command/environment leakage. The separate connection-scoped `process/spawn`,
 `process/outputDelta`, and `process/exited` family is keyed only by a caller
 process handle and cannot independently acquire a Conversation owner. Progress may
 coalesce only before durable publication; essential message, file, warning,
 error, terminal, and interaction facts are never silently dropped.
+
+Known media, hook and process-drain payload fields receive typed validation even
+when their disposition is private. Valid observed user-message audio does not
+become Unsupported merely because it has no portable notification. Hook paths,
+attachment references and drain status remain opaque native metadata. Malformed
+known fields fail Protocol at their consumed live/history boundaries.
 
 ## Runtime-Only Facts
 
@@ -125,6 +131,41 @@ is `Unsupported`, including a final-phase item; it cannot become an answer or
 an invented Interaction. The added `partial_answer` phase is valid private item
 data, like commentary; it cannot replace the final answer. Only final-answer
 or absent-phase text is eligible in both live and historical completion.
+
+## Bounded Prompt Milestones
+
+The original live accepted-prompt owner emits at most two durable Progress
+facts: `Preparing response` after complete local validation and durable Kit
+admission, before `turn/start`; then `Tool calls requested` for the first
+eligible live tool fact. Both have `detail = None`. The latter requires the
+exact bound root thread and the native turn accepted by the original owner,
+and is sourced only by a started in-progress command, a supported command/file
+approval, or an admitted registered managed-tool callback. It commits before
+the derived Process/Interaction publication or managed handler acquisition.
+Early callbacks retain their existing disposition while omitting the milestone.
+Descendants, wrong turns, completed-only facts, native metadata, history and
+recovery-created contexts never establish eligibility.
+
+Each live claim has pending, committed or failed publication state. One call
+owns the sampled deadline, notification ID, timestamp, conflict handling and
+receipt reconciliation. A pending publication fences successful prompt delivery;
+a failure remains primary even if native completion races with it. Duplicate
+facts cannot invoke publication again. The original prompt owner handles bounded
+native cancellation/reconciliation; the semantic reader retains terminal
+observation and does not turn a milestone failure into a native callback reply.
+No turn or tool effect is replayed. Unconfirmed native settlement retains the
+durable prompt and seals further runtime admission.
+
+Milestone eligibility is deliberately process-local. A new runtime never
+backfills a missing milestone from history, while already committed facts replay
+unchanged through the existing journal. No record-version change is required.
+
+A terminal fact observed while the native start receipt is pending makes that
+live turn permanently ineligible for later tool progress. A committed milestone
+whose receipt arrives after cancellation remains the same durable fact, but it
+does not admit subsequent interactions or tool execution. Queued callbacks
+retain their original live context across route lookup and cannot acquire a
+newer generation after failure reconciliation.
 
 ## Durable Publication And Delivery
 
@@ -205,3 +246,13 @@ Interrupted terminal errors remain Cancelled with the normalized Integration
 cause, preserving the same operation, phase, safe detail and redaction as
 recovered history. Prompt failure is not duplicated as a notification; terminal
 publication still follows durable settlement and cleanup.
+
+`thread/section/changed` is typed private thread metadata with a required nullable
+string `sectionId`. Repeated owned or verified-descendant changes neither publish
+notifications nor acknowledge delivery, mutate workspace revisions, or complete
+a prompt. Foreign sections cannot acquire the active conversation.
+
+Flat item-level `startedAtMs`/`completedAtMs` accept omission, null, or signed
+64-bit integers in live and recovered items. Malformed values are Protocol.
+Notification-envelope lifecycle times remain independently required; item times
+are private and cannot reorder completed output or establish terminal authority.

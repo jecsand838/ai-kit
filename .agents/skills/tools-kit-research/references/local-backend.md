@@ -12,9 +12,13 @@ Use this reference for `Toolset::local(Vec<ToolRegistration>)`.
 ## Verify
 
 - ToolInfo contains the complete declaration and schemas.
-- Registration-time validation rejects empty/duplicate names and invalid
-  schemas.
-- Invocation-time validation rejects invalid arguments/results.
+- `ToolName` construction rejects invalid names. Local Toolset construction
+  rejects duplicate names and permits an empty inventory.
+- `JsonSchema` construction wraps a passive schema document. Local registration
+  does not compile schemas; the owning invocation and completion operations
+  compile them and reject malformed schemas or invalid arguments/results.
+  Successful output must satisfy a declared output schema; completed
+  model-visible error results retain their schema-validation exemption.
 - ToolRegistration owns one private handler implementation without duplicated
   function/interactive registration families.
 - Interaction requests remain source-neutral and resumable through one

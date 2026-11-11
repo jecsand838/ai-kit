@@ -31,11 +31,11 @@ tokio = { workspace = true, features = ["fs", "macros", "rt-multi-thread", "sync
 url = { workspace = true }
 uuid = { version = "1", features = ["serde", "v4", "v5"] }
 
-# LanceDB 0.40 job code requires remote error types; keep storage adapters local.
-lancedb = { version = "=0.40.0", default-features = false, features = ["remote"] }
-lance = { version = "=13.0.0", default-features = false }
-lance-io = { version = "=13.0.0", default-features = false }
-lance-table = { version = "=13.0.0", default-features = false }
+# Retain remote selection; 0.41 fixes the old job decoder defect. Kit stays local.
+lancedb = { version = "=0.41.0", default-features = false, features = ["remote"] }
+lance = { version = "=14.0.2", default-features = false }
+lance-io = { version = "=14.0.2", default-features = false }
+lance-table = { version = "=14.0.2", default-features = false }
 object_store = { version = "=0.14.2", default-features = false }
 arrow-array = { version = "58.4.1" }
 arrow-schema = { version = "58.4.1" }
@@ -43,8 +43,8 @@ arrow-schema = { version = "58.4.1" }
 surrealdb = { version = "=4.0.0", default-features = false, features = ["protocol-ws", "protocol-http", "rustls", "kv-mem", "kv-surrealkv"], optional = true }
 surrealdb-core = { version = "=4.0.0", default-features = false, optional = true }
 tokio-postgres = { version = "0.7.18", default-features = false, features = ["runtime"], optional = true }
-turso = { version = "=0.8.2", default-features = false, optional = true }
-redb = { version = "=4.3.0", default-features = false, optional = true }
+turso = { version = "=0.8.3", default-features = false, optional = true }
+redb = { version = "=4.5.0", default-features = false, optional = true }
 
 [target.'cfg(unix)'.dependencies]
 rustix = { version = "=1.1.4", default-features = false, features = ["fs"] }

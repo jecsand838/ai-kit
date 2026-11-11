@@ -1,21 +1,23 @@
 mod serving;
 mod sessions;
 
-use std::{sync::Arc, time::Duration};
+use std::{borrow::Cow, sync::Arc, time::Duration};
 
 use axum::{
     Router,
-    extract::Request,
-    http::{StatusCode, header},
+    body::{Body, to_bytes},
+    extract::{Request, State},
+    http::{HeaderMap, Method, StatusCode, header},
     middleware::{self, Next},
     response::{IntoResponse, Response},
 };
 use rmcp::{
     ErrorData as McpError, RoleServer, ServerHandler,
     model::{
-        CallToolRequestParams, CallToolResult, ClientResult, CreateElicitationRequestParams,
-        ElicitationAction, ElicitationSchema, ListToolsResult, PaginatedRequestParams,
-        ServerCapabilities, ServerInfo, ServerRequest,
+        CallToolRequestParams, CallToolResponse, CallToolResult, ClientJsonRpcMessage,
+        ClientRequest, ClientResult, ElicitRequestParams, ElicitationAction, ElicitationSchema,
+        GetMeta, ListToolsResult, PaginatedRequestParams, ProtocolVersion, ServerCapabilities,
+        ServerConfig, ServerRequest,
     },
     service::{ElicitationMode, PeerRequestOptions, RequestContext},
     transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService},
@@ -92,25 +94,24 @@ const INTERACTION_CLEANUP_TIMEOUT: Duration = Duration::from_secs(1);
 ///                 let ToolHandlerOutput::Completed(result) = output else {
 ///                     return Err(ToolError::Protocol { message: "unexpected interaction".into() });
 ///                 };
-///                 assert!(!result.is_error);
-///                 assert_eq!(result.structured_content, Some(serde_json::json!({"value":42})));
-///                 Ok::<(), ToolError>(())
+///                 Ok::<_, ToolError>(result)
 ///             }.await;
 ///             let client_closed = client.shutdown().await;
 ///             if let Err(error) = &client_closed {
 ///                 eprintln!("Cleanup failed: {error}");
 ///             }
-///             invoked?;
-///             client_closed
+///             let result = invoked?;
+///             client_closed?;
+///             Ok::<_, ToolError>(result)
 ///         }.await;
 ///         let serving_closed = server.shutdown().await; // Consumes and joins serving.
 ///         if let Err(error) = &serving_closed {
 ///             eprintln!("Cleanup failed: {error}");
 ///         }
-///         client_work?;
+///         let result = client_work?;
 ///         serving_closed?;
-///         assert_eq!(source.list_tools().await?.len(), 1); // Source remains usable.
-///         Ok(())
+///         let remaining_tools = source.list_tools().await?.len(); // Source remains usable.
+///         Ok((result, remaining_tools))
 ///     }
 ///     Err(error) => Err(error),
 /// }
@@ -119,7 +120,10 @@ const INTERACTION_CLEANUP_TIMEOUT: Duration = Duration::from_secs(1);
 /// if let Err(error) = &source_closed {
 ///     eprintln!("Cleanup failed: {error}");
 /// }
-/// observed?;
+/// let (result, remaining_tools) = observed?;
+/// assert!(!result.is_error);
+/// assert_eq!(result.structured_content, Some(serde_json::json!({"value":42})));
+/// assert_eq!(remaining_tools, 1);
 /// source_closed?;
 /// # Ok(())
 /// # }
@@ -166,6 +170,9 @@ impl McpServer {
             _protocol: Arc::clone(&protocol),
         };
         let transport_config = StreamableHttpServerConfig::default();
+        let http_policy = McpHttpPolicy {
+            max_request_body_bytes: transport_config.max_request_body_bytes,
+        };
         let stream_cancellation = transport_config.cancellation_token.clone();
         let service: StreamableHttpService<McpServeHandler<T>, Sessions> =
             StreamableHttpService::new(
@@ -181,7 +188,10 @@ impl McpServer {
             );
         let router = Router::new()
             .nest_service(config.endpoint_path(), service)
-            .layer(middleware::from_fn(McpOriginPolicy::enforce));
+            .layer(middleware::from_fn_with_state(
+                http_policy,
+                McpHttpPolicy::enforce,
+            ));
         let stopping = Arc::clone(&serving);
         serving.start(async move {
             axum::serve(listener, router)
@@ -247,8 +257,13 @@ impl<T: ToolsetBackend> Clone for McpServeHandler<T> {
 }
 
 impl<T: ToolsetBackend> ServerHandler for McpServeHandler<T> {
-    fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+    fn get_info(&self) -> ServerConfig {
+        ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
+            .with_protocol_version(ProtocolVersion::V_2025_11_25)
+    }
+
+    fn supported_protocol_versions(&self) -> Cow<'static, [ProtocolVersion]> {
+        Cow::Borrowed(ProtocolVersion::known_up_to(&ProtocolVersion::V_2025_11_25))
     }
 
     async fn list_tools(
@@ -280,7 +295,7 @@ impl<T: ToolsetBackend> ServerHandler for McpServeHandler<T> {
         &self,
         request: CallToolRequestParams,
         context: RequestContext<RoleServer>,
-    ) -> Result<CallToolResult, McpError> {
+    ) -> Result<CallToolResponse, McpError> {
         let handler = self.clone();
         let owner = Arc::clone(&self.serving);
         let cancellation = context.ct.clone();
@@ -299,6 +314,7 @@ impl<T: ToolsetBackend> ServerHandler for McpServeHandler<T> {
         observation
             .await
             .map_err(|_| McpError::internal_error("MCP server invocation task terminated", None))?
+            .map(CallToolResponse::Complete)
     }
 }
 
@@ -570,8 +586,8 @@ impl McpServerInteractionPolicy {
                 let schema = self.elicitation_schema(schema.clone())?;
                 let deadline = time::Instant::now() + INTERACTION_TIMEOUT;
                 let admission = context.peer.send_cancellable_request(
-                    ServerRequest::CreateElicitationRequest(rmcp::model::Request::new(
-                        CreateElicitationRequestParams::FormElicitationParams {
+                    ServerRequest::ElicitRequest(rmcp::model::Request::new(
+                        ElicitRequestParams::FormElicitationParams {
                             meta: None,
                             message: request.prompt.clone(),
                             requested_schema: schema,
@@ -652,7 +668,7 @@ impl McpServerInteractionPolicy {
                     tool: Some(request.tool_name.clone()),
                     message: format!("MCP client elicitation failed: {error}"),
                 })?;
-                let ClientResult::CreateElicitationResult(result) = response else {
+                let ClientResult::ElicitResult(result) = response else {
                     return Err(ToolError::Protocol {
                         message: "MCP client returned an unexpected elicitation response"
                             .to_owned(),
@@ -666,6 +682,12 @@ impl McpServerInteractionPolicy {
                     ),
                     ElicitationAction::Decline => ToolInteractionResponse::decline(id, None),
                     ElicitationAction::Cancel => ToolInteractionResponse::cancel(id, None),
+                    _ => {
+                        return Err(ToolError::Protocol {
+                            message: "MCP client returned an unrecognized elicitation action"
+                                .to_owned(),
+                        });
+                    }
                 };
                 // A rejected response can leave the unique handler pending.
                 // Validate before advancing it so the owning call cancels and
@@ -698,16 +720,83 @@ impl McpServerInteractionPolicy {
     }
 }
 
-struct McpOriginPolicy;
+#[derive(Clone)]
+struct McpHttpPolicy {
+    max_request_body_bytes: usize,
+}
 
-impl McpOriginPolicy {
-    async fn enforce(request: Request, next: Next) -> Response {
+impl McpHttpPolicy {
+    async fn enforce(State(policy): State<Self>, request: Request, next: Next) -> Response {
         if let Some(origin) = request.headers().get(header::ORIGIN)
             && !Self::is_loopback(origin)
         {
             return StatusCode::FORBIDDEN.into_response();
         }
+        if request.method() != Method::POST {
+            return next.run(request).await;
+        }
+
+        let (parts, body) = request.into_parts();
+        let body = match to_bytes(body, policy.max_request_body_bytes).await {
+            Ok(body) => body,
+            Err(_) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    "MCP request body could not be read within its size limit",
+                )
+                    .into_response();
+            }
+        };
+        // The selected native transport can select stateless handling from
+        // complete request metadata even when it names a legacy revision or
+        // carries a session id. Reject that lifecycle before native tasks start.
+        // Invalid JSON keeps native validation; accepted bytes are never rewritten.
+        if let Ok(message) = serde_json::from_slice::<ClientJsonRpcMessage>(&body)
+            && !Self::supports_lifecycle(&message, &parts.headers)
+        {
+            return (
+                StatusCode::BAD_REQUEST,
+                "MCP requests require the initialize lifecycle",
+            )
+                .into_response();
+        }
+        // Inspection has ended before native dispatch and body collection stays
+        // inside the existing HTTP request owner, with the native size bound.
+        let request = Request::from_parts(parts, Body::from(body));
         next.run(request).await
+    }
+
+    fn supports_lifecycle(message: &ClientJsonRpcMessage, headers: &HeaderMap) -> bool {
+        let version = if let ClientJsonRpcMessage::Request(request) = message {
+            if matches!(&request.request, ClientRequest::InitializeRequest(_)) {
+                return true;
+            }
+            if matches!(&request.request, ClientRequest::DiscoverRequest(_)) {
+                return false;
+            }
+            let metadata = request.request.get_meta();
+            if metadata
+                .missing_required_keys(&ProtocolVersion::V_2026_07_28)
+                .is_empty()
+            {
+                return false;
+            }
+            metadata.protocol_version()
+        } else {
+            None
+        };
+        let version = version.or_else(|| {
+            headers
+                .get("mcp-protocol-version")
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| {
+                    serde_json::from_value::<ProtocolVersion>(serde_json::Value::String(
+                        value.to_owned(),
+                    ))
+                    .ok()
+                })
+        });
+        version.is_none_or(|version| version.has_initialize())
     }
 
     fn is_loopback(origin: &axum::http::HeaderValue) -> bool {

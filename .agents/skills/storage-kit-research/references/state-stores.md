@@ -250,16 +250,20 @@ State-store research output must include:
 
 ## Integrated Lance dependency boundary
 
-The current supplied Database and StateStore share LanceDB 0.40.0 and the exact
-Lance/lance-io/lance-table 13.0.0 family, using ObjectStore 0.14.2. Crates.io's
-stable release identities were checked on 2026-10-23; prerelease tags are not
-selected. Keep defaults disabled. The sole enabled LanceDB `remote` feature is
-an approved workaround for 0.40.0's unconditional job decoder referring to the
-feature-gated `Error::Http`. It does not authorize remote configuration or the
-`aws`, `gcs`, `azure` and `oss` features. Verify filesystem paths stay local before
-native URI dispatch. Preserve StateStore schema 1, file format 2.0 and
-disabled stable row IDs. Only the direct Lance 13 StateStore is in scope; do not
-add an older-engine implementation, cross-version harness or support promise.
+The selected native family is LanceDB 0.41.0 and the exact
+Lance/lance-io/lance-table 14.0.2 family for both Database and StateStore, retaining
+ObjectStore 0.14.2 and the compatible Arrow 58 family. Bind source research to the
+resolved registry checksums; prerelease tags are not selected. Keep defaults
+disabled. Preserve the sole enabled LanceDB `remote` feature: it originally
+worked around 0.40.0's unconditional job decoder referring to feature-gated
+`Error::Http`, but 0.41.0 fixes that defect. It does not authorize remote
+configuration or the `aws`, `gcs`, `azure` and `oss` features. Verify filesystem
+paths stay local before native URI dispatch. Preserve StateStore schema 1,
+file format 2.0 and disabled stable row IDs. Only the direct Lance 14 StateStore
+is in scope; do not add an older-engine implementation, cross-version harness
+or support promise. Qualification requires native-source and behavioral evidence
+for the selected source and invocation; prior Lance 13 receipts retain their
+original scope.
 Current-engine cold reopen, exact revisions/tombstones, namespace isolation and
 retained-reference cleanup require executable proof. Use the current supported
 native CommitHandler, ObjectStore and cleanup APIs: the local/memory resolver's
@@ -269,8 +273,14 @@ finalization; the existing StateStore owner retains completion and reconciliatio
 authority. The positive-timeout versus disabled-timeout native control establishes
 that cancellation policy, not a reproduction of the default 1,800-second expiry.
 Caller admission, scenario and cleanup deadlines remain unchanged. Native cleanup
-retains reference/manifest authority, and
-the StateStore's owned-file boundary must protect unknown payloads. Native 13
-already scans all data with `delete_unverified`; only transaction/deletion
-listings still need the existing timestamp-independent orphan supplement.
-Readable manifests alone do not prove safe mutation or maintenance.
+retains reference/manifest authority. Validate all retained references before
+reclamation; unsupported overlays, foreign bases, and new file layouts fail
+closed. Refresh surviving references after full GC, retain exclusive snapshot
+protection through owned joining, and delete only supported unreferenced files
+through the existing durable owner. Do not infer general preservation of foreign
+files inside the reserved native table directories. Native 13 already scanned
+all data with `delete_unverified`, leaving transaction/deletion listings to the
+timestamp-independent orphan supplement. Revalidate that native behavior and
+every retained-reference/layout assumption against the selected Lance 14 source
+before changing the supplement. Readable manifests alone do not prove safe
+mutation or maintenance.

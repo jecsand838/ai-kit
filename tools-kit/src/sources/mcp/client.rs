@@ -9,7 +9,7 @@ use rmcp::{
     ServiceExt,
     model::{
         CallToolRequest, CallToolRequestParams, ClientRequest, PaginatedRequestParams,
-        ServerResult, Tool,
+        ProtocolVersion, ServerResult, Tool,
     },
     service::{Peer, PeerRequestOptions, RequestHandle, RoleClient, RunningService, ServiceError},
     transport::{
@@ -61,7 +61,7 @@ pub(crate) struct McpRemoteCancelSlot {
 
 enum McpRemoteCancelState {
     Establishing,
-    Active(RequestHandle<RoleClient>),
+    Active(Box<RequestHandle<RoleClient>>),
     Finished,
 }
 
@@ -82,7 +82,7 @@ impl McpRemoteCancelSlot {
     fn store(&self, handle: RequestHandle<RoleClient>) {
         let mut state = self.state();
         if !matches!(&*state, McpRemoteCancelState::Finished) {
-            *state = McpRemoteCancelState::Active(handle);
+            *state = McpRemoteCancelState::Active(Box::new(handle));
         }
         drop(state);
         self.changed.notify_waiters();
@@ -223,6 +223,19 @@ impl McpClient {
             tool: None,
             message: format!("failed to initialize MCP session: {error}"),
         })?;
+
+        if !running_service.peer_info().is_some_and(|info| {
+            ProtocolVersion::known_up_to(&ProtocolVersion::V_2025_11_25)
+                .contains(&info.protocol_version)
+        }) {
+            return Err(Self::close_after_build_failure(
+                running_service,
+                ToolError::Protocol {
+                    message: "MCP server selected an unsupported protocol revision".to_owned(),
+                },
+            )
+            .await);
+        }
 
         let peer = running_service.peer().clone();
         let client = Self {

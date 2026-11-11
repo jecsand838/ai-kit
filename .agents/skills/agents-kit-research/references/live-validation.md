@@ -46,8 +46,11 @@ bash agents-kit/scripts/precheck_strict_live.sh
 bash agents-kit/scripts/verify_strict_live.sh
 ```
 
-Documentation-only work runs the non-live gates specified in
-`agents-kit/AGENTS.md` and does not claim runtime proof.
+Documentation-only work follows the non-live scope and gates selected by its
+active workflow. [`agents-kit/AGENTS.md`](../../../../agents-kit/AGENTS.md) sets
+crate rules; [`docs/STRICT_TESTING.md`](../../../../agents-kit/docs/STRICT_TESTING.md)
+owns the crate's proof lanes. These references do not activate the separate
+development workflow or establish runtime qualification.
 
 ## Protocol Proof Rules
 
@@ -146,3 +149,14 @@ process, send nonempty stdin, observe the actual approval and preserve exact
 output, durable delivery and cleanup. Existing fresh-thread completion, abort and
 reopen scenarios exercise full-read recovery with target history defaults.
 Deterministic protocol fixtures cannot substitute for these live obligations.
+
+For Codex 0.167.1 retain all 29 canonical cases and configured model roles.
+Require exact native initialization and unadvertised `requiredHumanApproval`,
+original callback correlation, actual stdin process readback, and one Unsupported
+nonblocking-input response. Passive capture adds no RPCs or model calls.
+Source-backed fixtures cover human-only rejection, pending callback retirement
+versus admitted/ambiguous resolution, required nullable section metadata, typed
+model/capacity errors, and flat item timestamps. They do not prove managed
+network-proxy execution, native same-endpoint prompt serialization, or human-review
+support. Keep deferred tool world state enabled and preserve separate managed
+requirements/profile network configuration without rewriting caller policy.

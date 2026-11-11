@@ -21,12 +21,13 @@ use crate::core::notification_store::{
     ResolutionDisposition, ResolutionIntent, ResolutionSettlement,
 };
 use crate::core::state::{ConversationRecord, WorkspaceRecord};
-use crate::prompt::PromptOutput;
+use crate::prompt::{PromptMilestone, PromptOutput};
 use crate::{
     AgentId, AgentInfo, AgentStorage, ConversationId, KitError, KnowledgeOwnerId, NewWorkspace,
     NotificationId, PromptResponse, UpdateWorkspaceRequest, WorkspaceId,
 };
 
+pub(crate) use prompt::CodexPromptEffect;
 use prompt::{CodexPromptContext, CodexPromptTasks};
 use records::{
     CodexAttachment, CodexCleanup, CodexContinuation, CodexContinuationState, CodexNativeSelection,
@@ -52,7 +53,7 @@ pub(crate) struct CodexStateStore<S: StateStoreBackend> {
     prompt_changes: tokio::sync::watch::Sender<u64>,
     runtime_open: Arc<AtomicBool>,
     instructions: Arc<Option<String>>,
-    prompt_contexts: Arc<Mutex<BTreeMap<ConversationId, CodexPromptContext>>>,
+    prompt_contexts: Arc<Mutex<BTreeMap<ConversationId, Arc<Mutex<CodexPromptContext>>>>>,
     prompt_tasks: Arc<Mutex<CodexPromptTasks>>,
     retained_cleanups: Arc<Mutex<Vec<CodexCleanup>>>,
 }
@@ -343,7 +344,10 @@ impl<S: StateStoreBackend> CodexStateStore<S> {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .values()
         {
-            context.fail(error);
+            context
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .fail(error);
         }
     }
 
@@ -359,23 +363,127 @@ impl<S: StateStoreBackend> CodexStateStore<S> {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         match contexts.entry(conversation_id.clone()) {
-            std::collections::btree_map::Entry::Occupied(mut entry) => {
-                if !entry.get().owns(client_message_id) {
+            std::collections::btree_map::Entry::Occupied(entry) => {
+                let mut context = entry
+                    .get()
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                if !context.owns(client_message_id) {
                     return Err(KitError::conflict(
                         "prompt context belongs to another generation",
                     ));
                 }
-                entry.get_mut().retain_output(output);
+                context.retain_output(output);
             }
             std::collections::btree_map::Entry::Vacant(entry) => {
-                entry.insert(CodexPromptContext::new(
+                entry.insert(Arc::new(Mutex::new(CodexPromptContext::new(
                     client_message_id.to_owned(),
                     validator,
                     output,
-                ));
+                ))));
             }
         }
         Ok(())
+    }
+
+    pub(crate) fn enable_prompt_progress(
+        &self,
+        binding: &CodexThreadBinding,
+        client_message_id: &str,
+        deadline: Option<tokio::time::Instant>,
+        lifecycle_timeout: std::time::Duration,
+    ) -> Result<(), KitError> {
+        let contexts = self
+            .prompt_contexts
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let context = contexts
+            .get(binding.conversation_id())
+            .ok_or_else(|| KitError::invalid_state("live prompt progress has no matching owner"))?;
+        let mut context = context
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if !context.owns(client_message_id) {
+            return Err(KitError::invalid_state(
+                "live prompt progress has no matching owner",
+            ));
+        }
+        context.enable_progress(binding.thread_id(), deadline, lifecycle_timeout)
+    }
+
+    pub(crate) fn prompt_effect(
+        &self,
+        thread_id: &str,
+        turn_id: &str,
+    ) -> Option<CodexPromptEffect> {
+        self.prompt_contexts
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .values()
+            .find_map(|context| CodexPromptEffect::capture(context, thread_id, turn_id))
+    }
+
+    pub(crate) fn prompt_progress_failure(
+        &self,
+        conversation_id: &ConversationId,
+    ) -> Option<KitError> {
+        self.prompt_contexts
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(conversation_id)
+            .and_then(|context| {
+                context
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .progress_failure()
+            })
+    }
+
+    pub(crate) async fn publish_prompt_progress(
+        &self,
+        conversation_id: &ConversationId,
+        milestone: PromptMilestone,
+        turn_id: Option<&str>,
+    ) -> Result<(), KitError> {
+        let context = self
+            .prompt_contexts
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(conversation_id)
+            .map(Arc::clone);
+        let Some(context) = context else {
+            return Ok(());
+        };
+        let claim = {
+            let mut context = context
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if let Some(error) = context.progress_failure() {
+                return Err(error);
+            }
+            context.claim_progress(milestone, turn_id)
+        };
+        let Some((id, deadline)) = claim else {
+            return Ok(());
+        };
+        // This one publication retains the exact live context and receipt identity
+        // across storage awaits. A replacement generation cannot settle its claim.
+        let result = self
+            .notifications
+            .publish_with_id_before(
+                conversation_id,
+                id.clone(),
+                milestone.into_notification(),
+                deadline,
+            )
+            .await;
+        context
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .settle_progress(&id, &result);
+        self.prompt_changes
+            .send_modify(|version| *version = version.wrapping_add(1));
+        result
     }
 
     pub(crate) async fn observe_prompt_delta(
@@ -395,9 +503,13 @@ impl<S: StateStoreBackend> CodexStateStore<S> {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .get_mut(conversation_id)
-            && context.owns(record.client_message_id())
         {
-            context.fragment(turn_id, text);
+            let mut context = context
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if context.owns(record.client_message_id()) {
+                context.fragment(turn_id, text);
+            }
         }
         Ok(())
     }
@@ -687,9 +799,13 @@ impl<S: StateStoreBackend> CodexStateStore<S> {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .get_mut(conversation_id)
-            && context.owns(client_message_id)
         {
-            context.accept_output(turn_id);
+            let mut context = context
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if context.owns(client_message_id) {
+                context.accept_output(turn_id);
+            }
         }
         let key = Self::prompt_key(conversation_id)?;
         let store = self.storage.store();
@@ -1016,7 +1132,12 @@ impl<S: StateStoreBackend> CodexStateStore<S> {
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .get(conversation_id)
-                .map(CodexPromptContext::is_clearing);
+                .map(|context| {
+                    context
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .is_clearing()
+                });
             match context {
                 Some(true) => return Ok(false),
                 Some(false) => {
@@ -1043,7 +1164,12 @@ impl<S: StateStoreBackend> CodexStateStore<S> {
                         .lock()
                         .unwrap_or_else(|poisoned| poisoned.into_inner())
                         .get(conversation_id)
-                        .map(CodexPromptContext::is_clearing);
+                        .map(|context| {
+                            context
+                                .lock()
+                                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                                .is_clearing()
+                        });
                     match context {
                         None => {}
                         Some(true) => return Ok(false),
@@ -1177,6 +1303,28 @@ impl<S: StateStoreBackend> CodexStateStore<S> {
             }
             return Ok(None);
         }
+        let turn_id = record
+            .turn_id()
+            .ok_or_else(|| KitError::invalid_state("terminal prompt has no prompt execution id"))?;
+        let contexts = self
+            .prompt_contexts
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(context) = contexts.get(conversation_id) {
+            let context = context
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if !context.owns(client_message_id) {
+                return Ok(Some((turn_id.to_owned(), result)));
+            }
+            if context.progress_pending() {
+                return Ok(None);
+            }
+            if let Some(error) = context.progress_failure() {
+                return Ok(Some((turn_id.to_owned(), Err(error))));
+            }
+        }
+        drop(contexts);
         if let Ok(response) = &result
             && let Some(schema) = record.output_schema()
         {
@@ -1190,9 +1338,6 @@ impl<S: StateStoreBackend> CodexStateStore<S> {
                 ));
             }
         }
-        let turn_id = record
-            .turn_id()
-            .ok_or_else(|| KitError::invalid_state("terminal prompt has no prompt execution id"))?;
         Ok(Some((turn_id.to_owned(), result)))
     }
 
@@ -1316,6 +1461,12 @@ impl<S: StateStoreBackend> CodexStateStore<S> {
     ) -> Result<CodexTerminalDisposition, KitError> {
         let mut reconciled_interaction = false;
         loop {
+            let context = self
+                .prompt_contexts
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .get(conversation_id)
+                .map(Arc::clone);
             match self
                 .terminalize_prompt_attempt(
                     conversation_id,
@@ -1326,6 +1477,12 @@ impl<S: StateStoreBackend> CodexStateStore<S> {
                 .await
             {
                 Ok(CodexTerminalDisposition::Applied) => {
+                    if let Some(context) = context {
+                        context
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner())
+                            .observe_terminal(turn_id);
+                    }
                     if reconciled_interaction {
                         self.notifications.finish_reconciliation(conversation_id);
                     } else {
@@ -1503,7 +1660,16 @@ impl<S: StateStoreBackend> CodexStateStore<S> {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let context = validators
             .entry(conversation_id.clone())
-            .or_insert_with(|| CodexPromptContext::new(client_message_id.to_owned(), None, None));
+            .or_insert_with(|| {
+                Arc::new(Mutex::new(CodexPromptContext::new(
+                    client_message_id.to_owned(),
+                    None,
+                    None,
+                )))
+            });
+        let mut context = context
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         if !context.owns(client_message_id) {
             return Err(KitError::conflict(
                 "structured validator belongs to another generation",
@@ -1540,7 +1706,11 @@ impl<S: StateStoreBackend> CodexStateStore<S> {
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
             if let Some(context) = contexts.get(conversation_id) {
-                if !context.clears_turn(turn_id) {
+                if !context
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .clears_turn(turn_id)
+                {
                     return Err(KitError::invalid_state(
                         "prompt cleanup lost its matching durable owner",
                     ));
@@ -1566,7 +1736,10 @@ impl<S: StateStoreBackend> CodexStateStore<S> {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .get_mut(conversation_id)
         {
-            context.begin_clear(record.client_message_id(), turn_id)?;
+            context
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .begin_clear(record.client_message_id(), turn_id)?;
         }
         transaction.delete(key).await.map_err(|error| {
             Self::storage_error(
@@ -1589,11 +1762,15 @@ impl<S: StateStoreBackend> CodexStateStore<S> {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         if let Some(context) = contexts.get(conversation_id) {
+            let context = context
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             if !context.owns(record.client_message_id()) || !context.clears_turn(turn_id) {
                 return Err(KitError::conflict(
                     "prompt cleanup context belongs to another generation",
                 ));
             }
+            drop(context);
             contexts.remove(conversation_id);
         }
         Ok(())
@@ -3244,7 +3421,7 @@ impl<S: StateStoreBackend> CodexStateStore<S> {
         conversation_id: &ConversationId,
         request: CodexInteractionRequest,
         deadline: tokio::time::Instant,
-    ) -> Result<NotificationId, KitError> {
+    ) -> Result<(), KitError> {
         let (request_id, thread_id, turn_id, kind, notification) = request.into_parts();
         kind.validate_notification(&notification)?;
         let store = self.storage.store();
@@ -3288,7 +3465,13 @@ impl<S: StateStoreBackend> CodexStateStore<S> {
                         KitError::invalid_state("interaction has no active prompt owner")
                     })?;
                 let mut prompt = Self::decode_prompt(snapshot, conversation_id)?;
+                // Preserve foreign-turn rejection before checking same-owner
+                // cancellation in this exact publication transaction. An earlier
+                // standalone observation cannot admit later actionable work.
                 prompt.observe_turn(turn_id)?;
+                if prompt.observe_tool_turn(turn_id)? == CodexToolAdmission::Suppress {
+                    return Ok(None);
+                }
                 Self::require_interaction_admission(deadline)?;
                 transaction
                     .put(storage_kit::state::record::StateRecord::new(
@@ -3344,7 +3527,7 @@ impl<S: StateStoreBackend> CodexStateStore<S> {
                 )
                 .await
                 .map_err(NotificationInteractionCheckError::into_match_sdk)?;
-                return Ok((existing.notification_id().clone(), false));
+                return Ok(Some((existing.notification_id().clone(), false)));
             }
             let (notification_id, _) = NotificationStore::<S>::publish_in_transaction(
                 &mut transaction,
@@ -3378,15 +3561,18 @@ impl<S: StateStoreBackend> CodexStateStore<S> {
                         ErrorPhase::StateWrite,
                     )
                 })?;
-            Ok::<_, KitError>((notification_id, true))
+            Ok::<_, KitError>(Some((notification_id, true)))
         }
         .await;
         // A stage admitted before expiry is awaited to completion. Deadline
         // expiry prevents commit admission and explicitly rolls back staging.
         let staged = staged.and_then(|publication| {
-            Self::require_interaction_admission(deadline).map(|()| publication)
+            if publication.is_some() {
+                Self::require_interaction_admission(deadline)?;
+            }
+            Ok(publication)
         });
-        let (notification_id, inserted) = match staged {
+        let publication = match staged {
             Ok(publication) => publication,
             Err(error) => {
                 return Err(
@@ -3400,6 +3586,16 @@ impl<S: StateStoreBackend> CodexStateStore<S> {
                 );
             }
         };
+        let Some((_, inserted)) = publication else {
+            transaction.rollback().await.map_err(|error| {
+                Self::storage_error(
+                    error,
+                    "cancelled interaction transaction could not close",
+                    ErrorPhase::Cleanup,
+                )
+            })?;
+            return Ok(());
+        };
         if !inserted {
             transaction.rollback().await.map_err(|error| {
                 Self::storage_error(
@@ -3408,7 +3604,7 @@ impl<S: StateStoreBackend> CodexStateStore<S> {
                     ErrorPhase::Cleanup,
                 )
             })?;
-            return Ok(notification_id);
+            return Ok(());
         }
         transaction.commit().await.map_err(|error| {
             Self::storage_error(
@@ -3418,7 +3614,127 @@ impl<S: StateStoreBackend> CodexStateStore<S> {
             )
         })?;
         self.notifications.wake_receivers();
-        Ok(notification_id)
+        Ok(())
+    }
+
+    pub(crate) async fn retire_pending_request(
+        &self,
+        thread_id: &str,
+        request_id: &serde_json::Value,
+        deadline: tokio::time::Instant,
+    ) -> Result<(), KitError> {
+        Self::require_interaction_admission(deadline)?;
+        let store = self.storage.store();
+        let continuations = tokio::time::timeout_at(deadline, Self::all_continuations(store))
+            .await
+            .map_err(|_| {
+                KitError::timeout("callback inventory deadline elapsed")
+                    .in_phase(ErrorPhase::StateRead)
+            })??;
+        Self::require_interaction_admission(deadline)?;
+        let mut matches = continuations.into_iter().filter(|(_, continuation)| {
+            continuation.agent_id() == &self.agent_id
+                && continuation.thread_id() == thread_id
+                && continuation.request_id() == request_id
+        });
+        let Some((key, expected)) = matches.next() else {
+            return Ok(());
+        };
+        if matches.next().is_some() {
+            return Err(KitError::invalid_state(
+                "server request identity is duplicated",
+            ));
+        }
+        Self::require_interaction_admission(deadline)?;
+        let mut transaction = store.begin_transaction().await.map_err(|error| {
+            Self::storage_error(
+                error,
+                "callback retirement could not begin",
+                ErrorPhase::StateWrite,
+            )
+        })?;
+        let staged = async {
+            let Some(snapshot) = transaction.load(key.clone()).await.map_err(|error| {
+                Self::storage_error(
+                    error,
+                    "continuation could not be loaded",
+                    ErrorPhase::StateRead,
+                )
+            })?
+            else {
+                return Ok(false);
+            };
+            let actual = Self::decode_continuation(snapshot, expected.conversation_id())?;
+            if !actual.has_same_request(&expected) {
+                return Err(KitError::invalid_state(
+                    "continuation changed during callback retirement",
+                ));
+            }
+            if actual.state() != CodexContinuationState::Pending {
+                return Ok(false);
+            }
+            // Resolution intent lives in the notification journal. Both records
+            // must still be pending in this transaction; disappearance is never
+            // evidence that an admitted or enqueued response was accepted.
+            if !NotificationStore::<S>::cancel_pending_interaction_in_transaction(
+                &mut transaction,
+                actual.conversation_id(),
+                actual.notification_id(),
+            )
+            .await
+            .map_err(NotificationSettlementError::into_reconciliation_sdk)?
+            {
+                return Ok(false);
+            }
+            let cancelled = actual.with_state(CodexContinuationState::Cancelled)?;
+            transaction
+                .put(storage_kit::state::record::StateRecord::new(
+                    key,
+                    serde_json::to_value(cancelled).map_err(|_| {
+                        KitError::invalid_state("continuation could not be encoded")
+                    })?,
+                ))
+                .await
+                .map_err(|error| {
+                    Self::storage_error(
+                        error,
+                        "retired continuation could not be stored",
+                        ErrorPhase::StateWrite,
+                    )
+                })?;
+            Self::require_interaction_admission(deadline)?;
+            Ok(true)
+        }
+        .await;
+        match staged {
+            Ok(true) => {
+                transaction.commit().await.map_err(|error| {
+                    Self::storage_error(
+                        error,
+                        "callback retirement could not commit",
+                        ErrorPhase::StateCommit,
+                    )
+                })?;
+                self.notifications.wake_receivers();
+                Ok(())
+            }
+            Ok(false) => transaction.rollback().await.map_err(|error| {
+                Self::storage_error(
+                    error,
+                    "callback observation could not close",
+                    ErrorPhase::Cleanup,
+                )
+            }),
+            Err(error) => Err(
+                error.with_cleanup_result(transaction.rollback().await.map_err(|cleanup| {
+                    Self::storage_error(
+                        cleanup,
+                        "callback retirement could not close",
+                        ErrorPhase::Cleanup,
+                    )
+                })),
+            ),
+        }
     }
 
     pub(crate) async fn continuation(

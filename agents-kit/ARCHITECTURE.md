@@ -165,6 +165,25 @@ delivery runtime owns exclusive leases, wakes, and tracked terminal
 reclamation tasks. A receiver's open, terminal-draining, receipt-reconciling,
 and ended phases are exhaustive states rather than independent flags.
 
+Codex and Custom reuse the same passive Progress values for two bounded
+historical prompt milestones. A private value enum shares their labels; each
+backend's existing prompt owner retains eligibility, ordering, and effect
+fences. No generic progress producer or backend-event envelope is introduced.
+Codex contexts reconstructed during recovery cannot mint milestones. Its live
+context claims each milestone before journal publication and retains pending,
+success, or failure state, notifying the original prompt owner on failure while
+keeping protocol observation alive.
+
+Custom shares its existing notification journal through its runtime. One private
+execution-release gate separates registered ownership from durable Kit
+admission, and the original optional prompt deadline travels with the call.
+The tracked execution directly awaits admitted publication. Deadline
+cancellation bookkeeping must continue polling that same execution so an
+exclusive storage writer can settle; retaining an unpolled future is
+insufficient. The call rechecks cancellation and the original deadline before
+its next model or tool effect. Failed admission closes and joins an unreleased
+run rather than opening its gate during cleanup.
+
 Accepted prompts remain runtime-owned after caller-future drop. Abort and
 parent lifecycle use one generation-fenced cancellation owner. Custom publishes
 durable terminalization independently of unary reply acknowledgement, so abort
@@ -278,3 +297,10 @@ Codex alone persists a private version-4 structured failure snapshot because
 its foreground outcomes are reconstructed from durable prompt records. It
 contains no free-form messages or native diagnostics. Notification record
 version 2 and Custom/OpenCode prompt records retain their existing formats.
+
+Codex callback disappearance is coordinated by its existing event runtime and
+StateStore owner. Exact native thread/request identity selects the existing
+continuation; a backend-neutral pending-only journal operation permits atomic
+cancellation before resolution intent. Resolving or ambiguous interactions retain
+the existing recovery fence. The protocol and notification classifiers do not
+mutate persistence, and no new lifecycle or public owner is introduced.

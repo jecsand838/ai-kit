@@ -199,6 +199,37 @@ or automatic model-visible tool.
 - No synchronization guard or live StateStore transaction crosses provider,
   tool, Database, process, notification, or network I/O.
 
+Codex and Custom publish at most two durable Progress milestones for an
+original live prompt: `Preparing response` and `Tool calls requested`, both
+with no detail. Preparing follows complete local validation and durable Kit
+admission, before the first Model generation or native turn dispatch. Custom's
+Tool milestone follows complete finish-reason, shape, selection, and
+action-budget validation of the first nonempty call batch, before approvals
+or handler execution. Codex's Tool milestone requires a supported live trigger
+attributed to the exact root thread and authoritatively accepted native turn.
+Early, descendant, completed-only, historical, and recovered observations cannot
+supply missing attribution; recovery never backfills milestones.
+
+The existing prompt owner and notification journal own publication. Each
+publication retains one identity, timestamp, payload, and lifecycle deadline,
+capped by the original prompt deadline when present. Retries never refresh
+that deadline. An admitted commit remains owned through cancellation, caller
+loss, and expiry; its receipt settles before the next Kit-dispatched effect,
+which rechecks cancellation and the original deadline. Custom must continue
+polling that execution during deadline cancellation so an exclusive storage
+writer can settle. Publication failure remains a prompt failure even if native
+completion succeeds; reconciliation never replays Model, native-turn, Tool,
+or callback effects.
+
+These immutable historical facts prove neither current activity, native
+acceptance, tool completion, nor prompt success. Preserve ordinary replay,
+acknowledgment, interaction barriers, and terminal retention; never overwrite
+or evict unread facts. Two facts per prompt do not remove the journal's finite
+lifetime capacity. Add no timer, producer task, public configuration, kind,
+or persistence version; OpenCode's mapping remains unchanged. The exact
+eligibility and publication contract belongs to
+[`specs/NOTIFICATIONS.md`](specs/NOTIFICATIONS.md) and its backend owners.
+
 ## Backend And Protocol Ownership
 
 - Codex and OpenCode keep selected protocol DTOs and transport behavior

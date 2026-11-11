@@ -580,6 +580,17 @@ counts. A separate partition case checks one inserted, one updated, and one
 deleted identity, preserved unrelated records/schema/indexes, and empty
 replacement clearing only the selected apostrophe-containing partition value.
 
+The `lancedb_namespace_pagination_memory` and
+`lancedb_namespace_pagination_filesystem_reopen` cases create 257 sibling
+namespaces through schema-only public collection creation, crossing the native
+256-name listing page limit. Every collection must open and appear as the sole
+member of its namespace; missing sibling and parent listings remain empty.
+The filesystem case drops all Database owners before checking the same inventory
+on reopen. No namespace iteration order is assumed. All collection locators are
+owned before mutation so cleanup covers partial creation, assertion failures and
+timeouts. These cases retain the 30-second connection, 120-second scenario and
+20-second per-collection cleanup bounds and concrete heap-pinned runner.
+
 The Lance deleted-row scan regressions create rows `0..8`, append `8..16`,
 `16..24`, and `24..32` separately, then delete
 `{0,3,7,8,10,15,16,17,18,19,20,21,22,23,24,28,31}` through public operations.
@@ -637,14 +648,22 @@ the locked native versions remain unchanged.
 
 `surreal_partition_deadline` uses the pinned native public CBOR v2 codec to
 exercise exact conflict classification and the original operation deadline for
-partition replacement and collection removal. Collection cases cover retry
-exhaustion including zero retries, context selection, query waits, and backoff
-inside one deadline. Controls preserve mixed primary errors and reject
+partition replacement, collection removal and column removal. Operation-aware
+query recognition counts each actual atomic mutation. Both removal families
+cover retry exhaustion including zero retries, context selection, query waits,
+and backoff inside one deadline. Controls preserve mixed primary errors and reject
 not-executed-only responses, conflict-shaped untyped messages, indeterminate
 commits, and accepted requests whose transport response is lost.
 These loopback fixtures prove normalization and deadlines outside strict-live;
 they are not real-service evidence. Their threads are bounded and joined even
 when an assertion fails.
+
+The native schema case checks complete three-record snapshots after column
+removal, re-addition of the same name with a different computed constant, and a
+second removal. Identities and unrelated fields remain exact. The changed
+constant proves that the original field definition was removed through public
+behavior; Surreal's collection response does not expose schema metadata.
+This case remains required for Lance and all four supported Surreal modes.
 
 The Lance strict cases supervise separate test processes to verify observer
 loss, last-owner drop, and bounded lock admission without requiring that a
@@ -676,6 +695,11 @@ Keep focused cases for:
   row-lock timeout rollback, admitted commit after waiter loss, and canonical
   pagination under an explicitly non-binary database collation;
 - Redb FIFO admission, queued drop, admitted rollback, and thread joins;
+  separate file-backed rollback/drop growth regressions stage 2,048 records
+  with 4 KiB payloads under 1 MiB and 32 MiB caches, then commit a small marker
+  and close every owner. Cold reopens verify exact original values/revisions,
+  tombstones, absent aborted writes, the later commit, neighboring namespace
+  isolation, complete pages/cursors, and revision continuation after recreation;
 - PostgreSQL/SQLite actor finalization after caller loss;
 - exact conflict and non-conflict error propagation;
 - feature-disabled type absence;

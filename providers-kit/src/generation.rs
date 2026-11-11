@@ -37,23 +37,29 @@
 //!     let mut completed = None;
 //!     while let Some(event) = stream.next().await {
 //!         match event? {
-//!             GenerateEvent::Started { model: returned } => assert_eq!(returned, *model.model_id()),
+//!             GenerateEvent::Started { model: returned } => {
+//!                 if returned != *model.model_id() {
+//!                     return Err("stream started with a different model".into());
+//!                 }
+//!             }
 //!             GenerateEvent::ContentDelta { delta } => text.push_str(&delta),
 //!             GenerateEvent::Completed(response) => {
-//!                 assert!(completed.is_none(), "duplicate completion");
+//!                 if completed.is_some() { return Err("duplicate completion".into()); }
 //!                 completed = Some(response);
 //!             }
 //!             GenerateEvent::ThinkingDelta { .. } | GenerateEvent::HostedTool(_) | GenerateEvent::Usage(_) => {}
 //!         }
 //!     }
 //!     let response = completed.ok_or("stream ended before Completed")?;
-//!     assert_eq!(response.model, *model.model_id());
-//!     assert_eq!(response.finish_reason, Some(FinishReason::Stop));
+//!     if response.model != *model.model_id() || response.finish_reason != Some(FinishReason::Stop) {
+//!         return Err("expected a stopped response from the selected model".into());
+//!     }
 //!     let final_text: String = response.message.content().iter().filter_map(|part| match part {
 //!         ContentPart::Text { text } => Some(text.as_str()), _ => None,
 //!     }).collect();
-//!     assert!(!final_text.trim().is_empty());
-//!     assert_eq!(text, final_text); // Fidelity within Kit output, not native parity.
+//!     if final_text.trim().is_empty() { return Err("empty completed text".into()); }
+//!     // Fidelity within Kit output, not native parity.
+//!     if text != final_text { return Err("deltas differ from completed text".into()); }
 //!     Ok::<_, Box<dyn std::error::Error>>(response.message)
 //! }.await;
 //! let cleanup = provider.shutdown().await;
@@ -94,22 +100,27 @@
 //!         .with_tools(vec![ProviderToolSpec::Function(lookup)])?
 //!         .with_generation(GenerationConfig::default().with_tool_choice(ToolChoice::Required))?;
 //!     let first = model.generate(&request).await?;
-//!     assert_eq!(first.model, *model.model_id());
-//!     assert_eq!(first.finish_reason, Some(FinishReason::ToolCall));
+//!     if first.model != *model.model_id() || first.finish_reason != Some(FinishReason::ToolCall) {
+//!         return Err("expected a tool-call response from the selected model".into());
+//!     }
 //!     let [call] = first.message.function_calls() else { return Err("expected one lookup".into()); };
-//!     assert_eq!(call.name(), "lookup");
-//!     assert_eq!(call.arguments(), &serde_json::json!({}));
+//!     if call.name() != "lookup" || call.arguments() != &serde_json::json!({}) {
+//!         return Err("unexpected lookup name or arguments".into());
+//!     }
 //!     let local_item = serde_json::json!({"name":"paper","quantity":3});
 //!     let result = FunctionResult::new(call.id().map(str::to_owned), call.name(),
 //!         vec![ContentPart::Json { value: local_item }], false)?;
-//!     assert_eq!(result.call_id(), call.id());
+//!     if result.call_id() != call.id() { return Err("function-result correlation changed".into()); }
 //!     let followup = GenerateRequest::new(vec![initial, first.message, Message::tool(vec![result])?])?;
 //!     let second = model.generate(&followup).await?;
-//!     assert_eq!(second.model, *model.model_id());
-//!     assert_eq!(second.finish_reason, Some(FinishReason::Stop));
-//!     assert!(second.message.function_calls().is_empty());
-//!     assert!(second.message.content().iter().any(|part| matches!(part,
-//!         ContentPart::Text { text } if !text.trim().is_empty())));
+//!     if second.model != *model.model_id() || second.finish_reason != Some(FinishReason::Stop) {
+//!         return Err("expected a stopped follow-up from the selected model".into());
+//!     }
+//!     if !second.message.function_calls().is_empty() { return Err("unexpected follow-up call".into()); }
+//!     if !second.message.content().iter().any(|part| matches!(part,
+//!         ContentPart::Text { text } if !text.trim().is_empty())) {
+//!         return Err("empty follow-up text".into());
+//!     }
 //!     Ok::<(), Box<dyn std::error::Error>>(())
 //! }.await;
 //! let cleanup = provider.shutdown().await;
@@ -171,14 +182,16 @@
 //!         .with_response_format(ResponseFormat::JsonSchema(schema))
 //!         .with_reasoning(ReasoningConfig { effort: Some(ReasoningEffort::Low), ..Default::default() });
 //!     let response = model.generate(&request).await?;
-//!     assert_eq!(response.model, *model.model_id());
-//!     assert_eq!(response.finish_reason, Some(FinishReason::Stop));
+//!     if response.model != *model.model_id() || response.finish_reason != Some(FinishReason::Stop) {
+//!         return Err("expected a stopped response from the selected model".into());
+//!     }
 //!     let text: String = response.message.content().iter().filter_map(|part| match part {
 //!         ContentPart::Text { text } => Some(text.as_str()), _ => None,
 //!     }).collect();
 //!     let value: serde_json::Value = serde_json::from_str(&text)?;
-//!     assert!(value["summary"].is_string());
-//!     assert_eq!(value.as_object().ok_or("expected an object")?.len(), 1);
+//!     if !value["summary"].is_string() || value.as_object().ok_or("expected an object")?.len() != 1 {
+//!         return Err("expected only one string summary field".into());
+//!     }
 //!     Ok::<(), Box<dyn std::error::Error>>(())
 //! }.await;
 //! let cleanup = provider.shutdown().await;

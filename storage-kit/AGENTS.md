@@ -148,27 +148,28 @@ refusal on disposable copies of the sealed 3.3.0 fixture.
   configuration errors before I/O when the implementation is disabled.
   Do not add `toolsets` or a `state-store` umbrella feature.
 
-The integrated local Lance family is frozen to LanceDB 0.40.0, exact
-`lance`, `lance-io`, and `lance-table` 13.0.0, exact `object_store` 0.14.2,
+The integrated local Lance family is frozen to LanceDB 0.41.0, exact
+`lance`, `lance-io`, and `lance-table` 14.0.2, exact `object_store` 0.14.2,
 and Unix `rustix` 1.1.4 filesystem support, with default features disabled.
-Only LanceDB's `remote` feature is enabled as an approved compilation workaround:
-0.40.0's unconditional job decoder refers to `Error::Http`, which that feature
-gates. Do not enable `aws`, `gcs`, `azure` or `oss`, or expose native cloud
+Only LanceDB's existing `remote` feature remains enabled. It was an approved
+workaround for 0.40.0's unconditional job decoder referencing gated `Error::Http`;
+0.41.0 fixes that defect, so the feature is no longer a compilation requirement.
+Do not enable `aws`, `gcs`, `azure` or `oss`, or expose native cloud
 configuration. Supplied configuration accepts only local filesystem and memory
 storage; resolve filesystem paths before native dispatch. The private ObjectStore,
 ObjectStoreProvider and CommitHandler seams add no public behavior. Directory
 qualification remains scoped to macOS and Linux.
 
 Dependencies resolve from the public registry without workspace source patches.
-Retain LanceDB 0.40.0, Lance 13, exact SurrealDB client/Core 4.0.0 and registry
+Retain LanceDB 0.41.0, Lance 14.0.2, exact SurrealDB client/Core 4.0.0 and registry
 ObjectStore 0.14.2. Resolve the Arrow 58 family together at 58.4.1.
 Temporary, explicit advisory exceptions and their review requirements belong to
 [the dependency security policy](../docs/security-dependencies.md).
 
-The supplied StateStore has one direct Lance 13 implementation. Preserve its
+The supplied StateStore has one direct Lance 14.0.2 implementation. Preserve its
 private schema version 1, Lance file format 2.0 and disabled stable row IDs;
 do not add an older-engine implementation or compatibility harness. Prove current
-Lance 13 cold reopen with exact records, revisions, tombstones and namespace
+Lance 14.0.2 cold reopen with exact records, revisions, tombstones and namespace
 isolation through the existing public test owners. Validate all retained native
 references before reclamation; unsupported overlays, foreign bases or new file
 layouts fail closed. The local/memory commit handler treats absent versions as

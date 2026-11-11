@@ -930,6 +930,353 @@ async fn redb_drop_rolls_back_and_settles_before_file_reopen() {
 
 #[cfg(feature = "redb")]
 #[tokio::test]
+async fn redb_file_rollback_after_growth_preserves_records_and_reopens() {
+    for cache_mib in [1, 32] {
+        let case = RedbFileGrowth::new(cache_mib * 1024 * 1024);
+        tokio::time::timeout(
+            Duration::from_secs(30),
+            case.run(RedbGrowthTermination::Rollback),
+        )
+        .await
+        .expect("bounded rollback after growth and reopen");
+    }
+}
+
+#[cfg(feature = "redb")]
+#[tokio::test]
+async fn redb_file_drop_after_growth_preserves_records_and_reopens() {
+    for cache_mib in [1, 32] {
+        let case = RedbFileGrowth::new(cache_mib * 1024 * 1024);
+        tokio::time::timeout(
+            Duration::from_secs(30),
+            case.run(RedbGrowthTermination::Drop),
+        )
+        .await
+        .expect("bounded drop after growth and reopen");
+    }
+}
+
+#[cfg(feature = "redb")]
+enum RedbGrowthTermination {
+    Rollback,
+    Drop,
+}
+
+#[cfg(feature = "redb")]
+struct RedbFileGrowth {
+    directory: tempfile::TempDir,
+    cache_size_bytes: usize,
+}
+
+#[cfg(feature = "redb")]
+impl RedbFileGrowth {
+    fn new(cache_size_bytes: usize) -> Self {
+        Self {
+            directory: tempdir().expect("temporary growth directory"),
+            cache_size_bytes,
+        }
+    }
+
+    async fn connect(&self) -> StateStore {
+        let config = RedbStateStoreConfig::file(self.directory.path().join("growth.redb"))
+            .with_cache_size_bytes(self.cache_size_bytes)
+            .with_operation_timeout(Duration::from_secs(2))
+            .expect("valid operation timeout");
+        StateStore::connect(StateStoreConfig::redb(config))
+            .await
+            .expect("open growth file")
+    }
+
+    fn key(fragment: impl Into<String>) -> StateKey {
+        StateKey::new("redb-growth", fragment).expect("growth key")
+    }
+
+    fn snapshot(
+        fragment: impl Into<String>,
+        value: serde_json::Value,
+        revision: u64,
+    ) -> StateRecordSnapshot {
+        StateRecordSnapshot::new(
+            StateRecord::new(Self::key(fragment), value),
+            StateRevision::new(revision).expect("expected revision"),
+        )
+    }
+
+    async fn assert_inventory(&self, store: &StateStore, expected: &[StateRecordSnapshot]) {
+        for snapshot in expected {
+            assert_eq!(
+                store
+                    .load(snapshot.record.key.clone())
+                    .await
+                    .expect("load exact committed record")
+                    .as_ref(),
+                Some(snapshot),
+            );
+        }
+        let request = StateListRequest::new("redb-growth")
+            .expect("namespace")
+            .with_limit(17)
+            .expect("page limit");
+        let mut cursor = None;
+        for (page_index, records) in expected.chunks(17).enumerate() {
+            let mut next = request.clone();
+            if let Some(previous) = cursor {
+                next = next.start_after(previous).expect("cursor");
+            }
+            let page = store.list(next).await.expect("exact visible inventory");
+            assert_eq!(page.records, records, "page {page_index}");
+            let expected_cursor = if (page_index + 1) * 17 < expected.len() {
+                Some(
+                    records
+                        .last()
+                        .expect("nonempty page")
+                        .record
+                        .key
+                        .key()
+                        .to_owned(),
+                )
+            } else {
+                None
+            };
+            assert_eq!(page.next_start_after, expected_cursor);
+            cursor = page.next_start_after;
+        }
+        let exhausted = store
+            .list(
+                request
+                    .start_after(
+                        expected
+                            .last()
+                            .expect("nonempty inventory")
+                            .record
+                            .key
+                            .key(),
+                    )
+                    .expect("final cursor"),
+            )
+            .await
+            .expect("exhausted inventory");
+        assert!(exhausted.records.is_empty());
+        assert!(exhausted.next_start_after.is_none());
+    }
+
+    async fn run(&self, termination: RedbGrowthTermination) {
+        // Author expected state before observing the engine, including exact revisions.
+        let mut expected: Vec<_> = (0..64)
+            .map(|index| {
+                Self::snapshot(
+                    format!("original/{index:04}"),
+                    serde_json::json!({"index": index, "version": "original"}),
+                    2,
+                )
+            })
+            .collect();
+        let neighbor = StateRecordSnapshot::new(
+            StateRecord::new(
+                StateKey::new("redb-growth-neighbor", "original/0000").expect("neighbor key"),
+                serde_json::json!({"namespace": "neighbor"}),
+            ),
+            StateRevision::new(1).expect("neighbor revision"),
+        );
+        let store = self.connect().await;
+        let mut seed = store.begin_transaction().await.expect("seed transaction");
+        for snapshot in &expected {
+            seed.put(StateRecord::new(
+                snapshot.record.key.clone(),
+                serde_json::json!("first write"),
+            ))
+            .await
+            .expect("seed first revision");
+            seed.put(snapshot.record.clone())
+                .await
+                .expect("seed second revision");
+        }
+        seed.put(StateRecord::new(
+            Self::key("tombstone/deleted"),
+            serde_json::json!("deleted seed"),
+        ))
+        .await
+        .expect("seed deleted record");
+        seed.delete(Self::key("tombstone/deleted"))
+            .await
+            .expect("seed revision-two tombstone");
+        seed.delete(Self::key("tombstone/absent"))
+            .await
+            .expect("seed revision-one tombstone");
+        seed.put(neighbor.record.clone())
+            .await
+            .expect("seed neighbor");
+        seed.commit().await.expect("commit seed");
+        self.assert_inventory(&store, &expected).await;
+
+        let mut doomed = store.begin_transaction().await.expect("doomed transaction");
+        let payload = "x".repeat(4096);
+        // Substantial allocation relative to the seed, independent of native page layout.
+        for index in 0..2048 {
+            let staged = Self::snapshot(
+                format!("aborted/{index:04}"),
+                serde_json::json!({"index": index, "payload": payload}),
+                1,
+            );
+            doomed
+                .put(staged.record.clone())
+                .await
+                .expect("stage growth");
+            assert_eq!(
+                doomed
+                    .load(staged.record.key.clone())
+                    .await
+                    .expect("read staged growth"),
+                Some(staged),
+            );
+        }
+        for snapshot in &expected[..16] {
+            let overwritten = StateRecordSnapshot::new(
+                StateRecord::new(
+                    snapshot.record.key.clone(),
+                    serde_json::json!("aborted overwrite"),
+                ),
+                StateRevision::new(3).expect("staged revision"),
+            );
+            doomed
+                .put(overwritten.record.clone())
+                .await
+                .expect("overwrite original");
+            assert_eq!(
+                doomed
+                    .load(overwritten.record.key.clone())
+                    .await
+                    .expect("read overwrite"),
+                Some(overwritten),
+            );
+        }
+        for snapshot in &expected[16..32] {
+            doomed
+                .delete(snapshot.record.key.clone())
+                .await
+                .expect("delete original");
+            assert!(
+                doomed
+                    .load(snapshot.record.key.clone())
+                    .await
+                    .expect("read deletion")
+                    .is_none()
+            );
+        }
+        for (fragment, revision) in [("tombstone/deleted", 3), ("tombstone/absent", 2)] {
+            let staged =
+                Self::snapshot(fragment, serde_json::json!("aborted recreation"), revision);
+            doomed
+                .put(staged.record.clone())
+                .await
+                .expect("recreate tombstone");
+            assert_eq!(
+                doomed
+                    .load(staged.record.key.clone())
+                    .await
+                    .expect("read recreation"),
+                Some(staged),
+            );
+        }
+        doomed
+            .delete(Self::key("absent-delete"))
+            .await
+            .expect("stage absent deletion");
+        assert!(
+            doomed
+                .load(Self::key("absent-delete"))
+                .await
+                .expect("read absent deletion")
+                .is_none()
+        );
+        match termination {
+            RedbGrowthTermination::Rollback => doomed.rollback().await.expect("rollback growth"),
+            RedbGrowthTermination::Drop => drop(doomed),
+        }
+
+        // Queue the next writer immediately: its success proves dropped work settled.
+        let marker = Self::snapshot("later", serde_json::json!({"committed": "after abort"}), 1);
+        let mut next = store
+            .begin_transaction()
+            .await
+            .expect("subsequent transaction");
+        next.put(marker.record.clone())
+            .await
+            .expect("put subsequent marker");
+        next.commit().await.expect("commit after growth abort");
+        expected.push(marker);
+        drop(store);
+
+        for opening in 0..2 {
+            let store = self.connect().await;
+            expected.sort_by(|left, right| left.record.key.key().cmp(right.record.key.key()));
+            self.assert_inventory(&store, &expected).await;
+            for index in (if opening == 0 { 0 } else { 1 })..2048 {
+                assert!(
+                    store
+                        .load(Self::key(format!("aborted/{index:04}")))
+                        .await
+                        .expect("load aborted key")
+                        .is_none(),
+                    "aborted record {index} survived opening {opening}",
+                );
+            }
+            let neighbor_page = store
+                .list(StateListRequest::new("redb-growth-neighbor").expect("neighbor namespace"))
+                .await
+                .expect("neighbor inventory");
+            assert_eq!(
+                neighbor_page.records.as_slice(),
+                std::slice::from_ref(&neighbor)
+            );
+            assert!(neighbor_page.next_start_after.is_none());
+            if opening == 0 {
+                for fragment in ["tombstone/deleted", "tombstone/absent", "absent-delete"] {
+                    assert!(
+                        store
+                            .load(Self::key(fragment))
+                            .await
+                            .expect("load aborted tombstone")
+                            .is_none()
+                    );
+                }
+                let mut recreate = store
+                    .begin_transaction()
+                    .await
+                    .expect("revision proof transaction");
+                for (fragment, revision) in [
+                    ("tombstone/deleted", 3),
+                    ("tombstone/absent", 2),
+                    ("absent-delete", 1),
+                    ("aborted/0000", 1),
+                ] {
+                    let snapshot = Self::snapshot(
+                        fragment,
+                        serde_json::json!({"recreated": fragment}),
+                        revision,
+                    );
+                    recreate
+                        .put(snapshot.record.clone())
+                        .await
+                        .expect("put revision proof");
+                    assert_eq!(
+                        recreate
+                            .load(snapshot.record.key.clone())
+                            .await
+                            .expect("read exact preserved revision"),
+                        Some(snapshot.clone()),
+                    );
+                    expected.push(snapshot);
+                }
+                recreate.commit().await.expect("commit preserved revisions");
+            }
+            drop(store);
+        }
+    }
+}
+
+#[cfg(feature = "redb")]
+#[tokio::test]
 async fn admitted_redb_transaction_retains_terminal_authority_after_store_drop() {
     let store = StateStore::connect(StateStoreConfig::redb(RedbStateStoreConfig::memory()))
         .await

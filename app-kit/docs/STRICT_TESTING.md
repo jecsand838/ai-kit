@@ -76,6 +76,20 @@ backoff tests. No Provider/Tool dependencies or service substitutes are added.
 These are ordinary correctness tests. An error category alone does not prove
 that a dispatched prompt was rejected before it performed work.
 
+## Passive Agent Progress compatibility
+
+The existing caller-owned Agent fixture in `workflow_execution` places passive
+Progress around a real Interaction and replays those exact facts during
+recovery. Only the Interaction becomes an App resolution target. Tests preserve
+its sequence, generation, identity, timestamp, and payload; resolve it once;
+and reject phantom interactions or prompt reexecution. Lost foreground
+completion remains Unknown and requires an explicit caller decision. Each
+original and reopened App must consume its owned Agent shutdown once.
+
+This is App consumer compatibility evidence, not native Codex or Custom
+publication proof. The routine App gate includes both cases without changing
+App production, its API, or the documented capacity exclusions below.
+
 ## Run the complete App gate
 
 ```bash
@@ -105,9 +119,13 @@ process-recovery assertions remain required.
 The [documentation tests](../tests/docs_examples.rs) check required guide and
 executable navigation, ordinary local file links and parsing of the complete
 JSON workflow corpus. Behavioral cases execute the documented linear State
-workflow, numeric loop, timer, join, child, map and synchronous Pipeline against real in-memory LanceDB
-storage and assert their explained results. These checks do not prove Markdown anchor
-validity, prose accuracy, example compilation or real-service journeys.
+workflow, numeric loop, timer, join, child, map and synchronous Pipeline against
+real in-memory LanceDB storage and assert their explained results. The case
+`documented_halts_and_step_limits_preserve_session_and_wave_boundaries` also
+checks fresh and resumed session halt behavior, counting of committed activations,
+and a complete parallel wave exceeding the caller's step limit. These checks
+do not prove Markdown anchor validity, prose accuracy, example compilation or
+real-service journeys.
 Compile the examples with `cargo check --locked -p app-kit --examples`, and run the short
 service-free executables to verify their assertions; `multi_agent` needs the
 configured real services described in its source. The long performance consumer

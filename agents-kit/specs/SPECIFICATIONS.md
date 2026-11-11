@@ -6,7 +6,7 @@ backend deltas without adding signatures.
 
 ## Selected Sources
 
-- Codex App Server: `rust-v0.163.0`
+- Codex App Server: `rust-v0.167.1`
 - OpenCode Server: `v1.19.3`
 
 [`../vendor/vendor-lock.toml`](../vendor/vendor-lock.toml) mirrors the selected

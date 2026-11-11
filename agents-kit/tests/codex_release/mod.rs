@@ -10,6 +10,10 @@ use storage_kit::state::config::{LanceStateStoreConfig, StateStoreConfig};
 use storage_kit::state::record::{StateKey, StateRecord};
 use storage_kit::{StateStore, StateStoreBackend, StateTransactionBackend};
 
+mod callbacks;
+mod items;
+mod payloads;
+
 #[tokio::test]
 async fn materialization_rejects_invalid_history_and_cleans_native_creation() {
     use agents_kit::config::{AgentConfig, CodexConfig};
@@ -227,11 +231,15 @@ impl CodexFixture {
         let observed = std::panic::AssertUnwindSafe(async {
             let mut notifications = fixture.conversation.notification_stream().unwrap();
             let mut stream = fixture.conversation.prompt_stream(PromptRequest::new("request").unwrap()).await.unwrap();
-            let turn = fixture.peer.turn().await;
+            CodexFixture::next_progress(&mut notifications, "Preparing response").await;
+            let turn = fixture.peer.accepted_turn(&mut stream).await;
             params["threadId"] = json!("stream-thread");
             params["turnId"] = json!(turn);
             let id = json!("callback-distinct-from-item");
             fixture.peer.events.send(json!({"id":id,"method":method,"params":params})).await.unwrap();
+            if method == "item/commandExecution/requestApproval" && title.is_some() {
+                CodexFixture::next_progress(&mut notifications, "Tool calls requested").await;
+            }
             let (notification, response) = tokio::time::timeout(Duration::from_secs(3), async {
                 tokio::select! {
                     response = fixture.peer.responses.recv() => (None, response.unwrap()),
@@ -261,6 +269,7 @@ impl CodexFixture {
                 }
             } else {
                 assert!(notification.is_none(), "unsupported/malformed request published an interaction");
+                assert!(tokio::time::timeout(Duration::from_millis(20), notifications.recv()).await.is_err(), "unsupported/malformed request published an extra notification");
             }
             assert!(fixture.peer.responses.try_recv().is_err(), "one response per request");
         }).catch_unwind().await;
@@ -273,6 +282,7 @@ async fn approval_kind_is_typed_and_keeps_callback_identity() {
     for (kind, title, code) in [
         (None, Some("Command approval"), None),
         (Some(json!("command")), Some("Command approval"), None),
+        (Some(json!("humanCommand")), None, Some(-32601)),
         (
             Some(json!("writeStdin")),
             Some("Terminal input approval"),
@@ -290,6 +300,46 @@ async fn approval_kind_is_typed_and_keeps_callback_identity() {
         CodexFixture::release_request("item/commandExecution/requestApproval", params, title, code)
             .await;
     }
+}
+
+#[tokio::test]
+async fn human_command_is_unsupported_without_publication_or_capability() {
+    use storage_kit::state::record::StateListRequest;
+    let raw = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory()))
+        .await
+        .unwrap();
+    let mut fixture = CodexFixture::build_with_store(CodexPeer::start().await, raw.clone()).await;
+    let observed = std::panic::AssertUnwindSafe(async {
+        let initialization = fixture.peer.requests.lock().unwrap().iter()
+            .find(|request| request["method"] == "initialize").unwrap().clone();
+        assert_eq!(initialization["params"]["capabilities"]["experimentalApi"], true);
+        assert!(initialization["params"]["capabilities"].get("requiredHumanApproval").is_none());
+        let mut notifications = fixture.conversation.notification_stream().unwrap();
+        let mut stream = fixture.conversation.prompt_stream(PromptRequest::new("human request").unwrap()).await.unwrap();
+        CodexFixture::next_progress(&mut notifications, "Preparing response").await;
+        let turn = fixture.peer.accepted_turn(&mut stream).await;
+        for id in [json!(73), json!("73")] {
+            for malformed in [false, true] {
+                let mut params = json!({"threadId":"stream-thread","turnId":turn,"itemId":"same-item",
+                    "kind":"humanCommand","startedAtMs":0,"command":"private-command",
+                    "availableDecisions":["accept","decline","cancel"]});
+                if malformed { params["command"] = json!(42); }
+                fixture.peer.events.send(json!({"id":id,"method":"item/commandExecution/requestApproval","params":params})).await.unwrap();
+                let response = tokio::time::timeout(Duration::from_secs(3), fixture.peer.responses.recv()).await.unwrap().unwrap();
+                assert_eq!(response["id"], id);
+                assert_eq!(response["error"]["code"], if malformed { -32602 } else { -32601 });
+                assert!(!response.to_string().contains("private-command"));
+                assert!(fixture.peer.responses.try_recv().is_err());
+            }
+        }
+        assert!(raw.list(StateListRequest::new("agents_kit_codex_continuations_v1").unwrap()).await.unwrap().records.is_empty());
+        fixture.peer.complete(&turn, "human request unsupported").await;
+        assert!(matches!(stream.recv().await, Some(Ok(PromptEvent::Completed(response))) if response.output() == "human request unsupported"));
+        assert!(stream.recv().await.is_none());
+        assert!(tokio::time::timeout(Duration::from_millis(20), notifications.recv()).await.is_err(),
+            "unsupported requests must publish no tool milestone, Interaction, or synthetic Process");
+    }).catch_unwind().await;
+    fixture.finish_release(observed, None).await;
 }
 
 #[tokio::test]
@@ -434,6 +484,7 @@ impl CodexFixture {
         let observed = std::panic::AssertUnwindSafe(async {
             let mut notifications = fixture.conversation.notification_stream().unwrap();
             let mut stream = fixture.conversation.prompt_stream(PromptRequest::new("event").unwrap()).await.unwrap();
+            CodexFixture::next_progress(&mut notifications, "Preparing response").await;
             let turn = fixture.peer.turn().await;
             fixture.peer.notify("item/agentMessage/delta", json!({"threadId":"stream-thread","turnId":turn,"itemId":"accepted","delta":"accepted"})).await;
             assert!(matches!(stream.recv().await, Some(Ok(PromptEvent::OutputDelta { text })) if text == "accepted"));
@@ -545,6 +596,71 @@ async fn metadata_objects_reject_positional_arrays_and_preserve_optional_nulls()
         )
         .await;
     }
+}
+
+#[tokio::test]
+async fn section_metadata_is_typed_private_and_requires_nullable_section() {
+    for thread in ["stream-thread", "child-thread", "foreign-thread"] {
+        for section in [Value::Null, json!("opaque-section"), json!("")] {
+            CodexFixture::release_event(
+                "thread/section/changed",
+                json!({"threadId":thread,"sectionId":section}),
+                None,
+            )
+            .await;
+        }
+    }
+}
+
+#[tokio::test]
+async fn section_metadata_rejects_malformed_known_fields() {
+    for params in [
+        json!({"threadId":"stream-thread"}),
+        json!({"threadId":"stream-thread","sectionId":42}),
+        json!({"threadId":"stream-thread","sectionId":{}}),
+        json!({"threadId":" stream-thread","sectionId":null}),
+        json!({"threadId":null,"sectionId":null}),
+        json!(["stream-thread", null]),
+    ] {
+        CodexFixture::release_event("thread/section/changed", params, Some(ErrorKind::Protocol))
+            .await;
+    }
+}
+
+#[tokio::test]
+async fn repeated_section_metadata_cannot_acknowledge_delivery_or_change_revision() {
+    let mut fixture = CodexFixture::build().await;
+    let observed = std::panic::AssertUnwindSafe(async {
+        let before = fixture.workspace.info().await.unwrap();
+        let mut notifications = fixture.conversation.notification_stream().unwrap();
+        let mut stream = fixture.conversation.prompt_stream(PromptRequest::new("section metadata").unwrap()).await.unwrap();
+        CodexFixture::next_progress(&mut notifications, "Preparing response").await;
+        let turn = fixture.peer.accepted_turn(&mut stream).await;
+        fixture.peer.notify("item/started", json!({"threadId":"stream-thread","turnId":turn,"startedAtMs":0,
+            "item":{"id":"process","type":"commandExecution","status":"inProgress","command":"private-command",
+            "cwd":fixture.root,"commandActions":[],"aggregatedOutput":null,"exitCode":null}})).await;
+        CodexFixture::next_progress(&mut notifications, "Tool calls requested").await;
+        let original = tokio::time::timeout(Duration::from_secs(3), notifications.recv()).await.unwrap().unwrap().unwrap();
+        assert!(matches!(original.kind(), ConversationNotificationKind::Process { .. }));
+        drop(notifications);
+        for thread in ["stream-thread", "child-thread", "foreign-thread", "stream-thread"] {
+            for section in [json!("opaque"), Value::Null] {
+                fixture.peer.notify("thread/section/changed", json!({"threadId":thread,"sectionId":section})).await;
+            }
+        }
+        fixture.peer.notify("item/agentMessage/delta", json!({"threadId":"stream-thread","turnId":turn,"itemId":"barrier","delta":"after sections"})).await;
+        assert!(matches!(tokio::time::timeout(Duration::from_secs(3), stream.recv()).await.unwrap(), Some(Ok(PromptEvent::OutputDelta { text })) if text == "after sections"));
+        let mut replay = fixture.conversation.notification_stream().unwrap();
+        let replayed = tokio::time::timeout(Duration::from_secs(3), replay.recv()).await.unwrap().unwrap().unwrap();
+        assert_eq!(replayed.id(), original.id());
+        assert_eq!(replayed.kind(), original.kind());
+        assert_eq!(fixture.workspace.info().await.unwrap().revision(), before.revision());
+        fixture.peer.complete(&turn, "section terminal").await;
+        assert!(matches!(stream.recv().await, Some(Ok(PromptEvent::Completed(response))) if response.output() == "section terminal"));
+        assert!(stream.recv().await.is_none());
+        assert!(tokio::time::timeout(Duration::from_millis(20), replay.recv()).await.is_err(), "section metadata cannot append notifications after the replayed Process");
+    }).catch_unwind().await;
+    fixture.finish_release(observed, None).await;
 }
 
 #[tokio::test]
@@ -961,7 +1077,7 @@ async fn selected_runtime_rejects_previous_version_before_handle_publication() {
     use agents_kit::config::{AgentConfig, CodexConfig};
     use agents_kit::{AgentBuilder, AgentStorage};
     let peer = CodexPeer::start().await;
-    *peer.identity.lock().unwrap() = json!("codex/0.144.1");
+    *peer.identity.lock().unwrap() = json!("codex/0.163.0");
     let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory()))
         .await
         .unwrap();
@@ -1069,107 +1185,108 @@ async fn persisted_personality_is_rejected_on_reopen_without_native_mutation() {
 #[tokio::test]
 async fn native_deletion_rejection_retains_cleanup_without_automatic_replay() {
     use agents_kit::workspace::DeleteWorkspaceRequest;
-    let raw = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory()))
-        .await
-        .unwrap();
-    let CodexFixture {
-        peer,
-        agent,
-        workspace,
-        conversation,
-        root,
-    } = CodexFixture::build_with_store(CodexPeer::start().await, raw.clone()).await;
-    let observed = std::panic::AssertUnwindSafe(async {
-        let info = workspace.info().await.unwrap();
-        peer.reject(
-            "thread/delete",
-            -32600,
-            "cannot delete internal worker thread: secret-native-id",
-        );
-        agent
-            .delete_workspace(
-                DeleteWorkspaceRequest::new(info.id().clone(), info.revision()).unwrap(),
-            )
+    for message in [
+        "cannot delete internal worker thread: secret-native-id",
+        "cannot delete thread with attached threads: secret-native-id",
+    ] {
+        let raw = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory()))
             .await
-            .expect("committed portable deletion retains separate native cleanup ownership");
-        let key = StateKey::new(
-            "agents_kit_codex_cleanup_v1",
-            format!(
-                "{}:delete:workspace:{}",
-                agent.id().as_str(),
-                info.id().as_str()
-            ),
-        )
-        .unwrap();
-        let retained = raw
-            .load(key.clone())
-            .await
-            .unwrap()
-            .expect("native rejection cannot complete deletion obligation");
-        assert_eq!(retained.record.value["action"], "delete");
-        assert_eq!(
-            retained.record.value["thread_ids"],
-            json!(["stream-thread"])
-        );
-        assert_eq!(
+            .unwrap();
+        let CodexFixture {
+            peer,
+            agent,
+            workspace,
+            conversation,
+            root,
+        } = CodexFixture::build_with_store(CodexPeer::start().await, raw.clone()).await;
+        let observed = std::panic::AssertUnwindSafe(async {
+            let info = workspace.info().await.unwrap();
+            peer.reject("thread/delete", -32600, message);
             agent
-                .workspace_info(info.id().clone())
+                .delete_workspace(
+                    DeleteWorkspaceRequest::new(info.id().clone(), info.revision()).unwrap(),
+                )
                 .await
-                .unwrap_err()
-                .kind(),
-            ErrorKind::NotFound
-        );
-        assert!(agent.list_workspaces().await.unwrap().is_empty());
-        assert_eq!(
-            peer.requests
-                .lock()
+                .expect("committed portable deletion retains separate native cleanup ownership");
+            let key = StateKey::new(
+                "agents_kit_codex_cleanup_v1",
+                format!(
+                    "{}:delete:workspace:{}",
+                    agent.id().as_str(),
+                    info.id().as_str()
+                ),
+            )
+            .unwrap();
+            let retained = raw
+                .load(key.clone())
+                .await
                 .unwrap()
-                .iter()
-                .filter(|request| request["method"] == "thread/delete")
-                .count(),
-            1
-        );
-        assert_eq!(
-            raw.load(key.clone()).await.unwrap().unwrap().record.value,
-            retained.record.value
-        );
-        (key, retained.record.value)
-    })
-    .catch_unwind()
-    .await;
-    drop(conversation);
-    drop(workspace);
-    let mut cleanup = NativeCleanup::new(Duration::from_secs(4));
-    cleanup.settle(agent.shutdown()).await;
-    if let Ok((key, value)) = &observed {
+                .expect("native rejection cannot complete deletion obligation");
+            assert_eq!(retained.record.value["action"], "delete");
+            assert_eq!(
+                retained.record.value["thread_ids"],
+                json!(["stream-thread"])
+            );
+            assert_eq!(
+                agent
+                    .workspace_info(info.id().clone())
+                    .await
+                    .unwrap_err()
+                    .kind(),
+                ErrorKind::NotFound
+            );
+            assert!(agent.list_workspaces().await.unwrap().is_empty());
+            assert_eq!(
+                peer.requests
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .filter(|request| request["method"] == "thread/delete")
+                    .count(),
+                1
+            );
+            assert_eq!(
+                raw.load(key.clone()).await.unwrap().unwrap().record.value,
+                retained.record.value
+            );
+            (key, retained.record.value)
+        })
+        .catch_unwind()
+        .await;
+        drop(conversation);
+        drop(workspace);
+        let mut cleanup = NativeCleanup::new(Duration::from_secs(4));
+        cleanup.settle(agent.shutdown()).await;
+        if let Ok((key, value)) = &observed {
+            cleanup
+                .settle(async {
+                    assert_eq!(
+                        raw.load(key.clone()).await.unwrap().unwrap().record.value,
+                        *value
+                    );
+                    assert_eq!(
+                        peer.requests
+                            .lock()
+                            .unwrap()
+                            .iter()
+                            .filter(|request| request["method"] == "thread/delete")
+                            .count(),
+                        1,
+                        "shutdown must not replay a rejected deletion mutation"
+                    );
+                    Ok::<(), agents_kit::KitError>(())
+                })
+                .await;
+        }
         cleanup
             .settle(async {
-                assert_eq!(
-                    raw.load(key.clone()).await.unwrap().unwrap().record.value,
-                    *value
-                );
-                assert_eq!(
-                    peer.requests
-                        .lock()
-                        .unwrap()
-                        .iter()
-                        .filter(|request| request["method"] == "thread/delete")
-                        .count(),
-                    1,
-                    "shutdown must not replay a rejected deletion mutation"
-                );
+                peer.shutdown().await;
                 Ok::<(), agents_kit::KitError>(())
             })
             .await;
+        cleanup
+            .settle(async { std::fs::remove_dir_all(root) })
+            .await;
+        cleanup.finish(observed.map(|_| Ok(())));
     }
-    cleanup
-        .settle(async {
-            peer.shutdown().await;
-            Ok::<(), agents_kit::KitError>(())
-        })
-        .await;
-    cleanup
-        .settle(async { std::fs::remove_dir_all(root) })
-        .await;
-    cleanup.finish(observed.map(|_| Ok(())));
 }

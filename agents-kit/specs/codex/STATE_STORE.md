@@ -101,6 +101,13 @@ native history. This read-only reconciliation neither reconstructs a portable
 result nor mutates a newer generation; it does not claim detection of repeated
 identical native events after their Kit record is compacted.
 
+The existing live prompt context also owns bounded advisory milestone claims.
+Only original admission enables them; reconstructed validator/output contexts
+remain ineligible. Pending publication prevents terminal delivery, and a failed
+publication is handed to the original prompt task without replacing native
+terminal evidence. These claims are not persisted or recovered; the existing
+notification journal alone owns committed milestone identity and replay.
+
 Prompt start prepares durable ownership before the non-idempotent native call.
 Definite pre-acceptance failure can return to idle. Ambiguous acceptance stays
 recovery-owned. Once accepted, normal completion, failure, interruption,
@@ -139,6 +146,15 @@ missing, future, or malformed versions are rejected before decoding the
 changed body, without migration, inferred defaults, repair, deletion, or writes.
 The private namespace and ownership keys remain unchanged. Other record
 versions are unchanged.
+
+The live context remains retained by any callback already observed for its exact
+root thread and turn, even when durable terminal cleanup removes its map entry.
+That bounded in-flight reference cannot adopt a replacement prompt; no
+historical fence or record version is added. A milestone settles only its
+original context and claimed notification identity. Terminal evidence received
+before the start receipt survives receipt acceptance, and a publication failure
+discovered during a terminal read still takes the prompt-owned cancellation and
+join path.
 
 ## Interactions And Notifications
 
@@ -238,3 +254,12 @@ prompt acceptance and terminalization, abort and timeout ambiguity,
 caller-future loss, interaction acceptance, ordered notification replay,
 process-loss recovery, transaction rollback, cleanup reconciliation, and safe
 delete success boundaries.
+
+For a callback that disappears before resolution intent, the existing continuation
+and notification transition atomically from pending to cancelled. Exact native
+thread and raw request identity are required. The cancelled continuation remains
+until ordinary reclamation, preventing duplicate publication. A resolving journal
+entry or ambiguous continuation is untouched; disappearance is not acceptance.
+No persistence format, version, or migration is added. New native model-not-found
+and policy-capacity classifications use the existing version-4 ResourceMissing
+and ServiceUnavailable details, including interrupted causes.

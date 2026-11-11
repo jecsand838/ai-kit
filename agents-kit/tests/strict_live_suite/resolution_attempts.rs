@@ -21,6 +21,7 @@ use tools_kit::interaction::ToolInteractionCapabilities;
 use tools_kit::local::ToolRegistration;
 use tools_kit::schema::JsonSchema;
 
+use super::delivery_and_events::CodexProgress;
 use super::fixture::{StrictBackend, StrictFixture};
 
 struct ResolutionScenario;
@@ -74,6 +75,7 @@ impl ResolutionScenario {
     async fn interaction<F>(
         receiver: &mut ConversationNotificationReceiver,
         prompt: &mut Pin<Box<F>>,
+        progress: &mut CodexProgress,
     ) -> ConversationNotification
     where
         F: Future<Output = Result<agents_kit::prompt::PromptResponse, KitError>>,
@@ -86,10 +88,14 @@ impl ResolutionScenario {
                         let notification = notification
                             .expect("resolution delivery must remain open")
                             .expect("resolution notification must succeed");
+                        if matches!(notification.kind(), ConversationNotificationKind::Progress { .. }) {
+                            progress.observe(&notification);
+                        }
                         if matches!(
                             notification.kind(),
                             ConversationNotificationKind::Interaction { .. }
                         ) {
+                            progress.assert_preparing();
                             break notification;
                         }
                     }
@@ -106,28 +112,63 @@ impl ResolutionScenario {
     async fn prove_no_replay(
         receiver: &mut ConversationNotificationReceiver,
         resolved: &agents_kit::identity::NotificationId,
-    ) {
+        progress: &mut CodexProgress,
+        mut replay: Option<&ConversationNotification>,
+    ) -> Option<ConversationNotification> {
+        let mut last_progress = None;
         let deadline = tokio::time::Instant::now() + Self::REPLAY_WINDOW;
         loop {
             match tokio::time::timeout_at(deadline, receiver.recv()).await {
                 Err(_) => break,
-                Ok(Some(Ok(notification))) => assert_ne!(
-                    notification.id(),
-                    resolved,
-                    "resolved interaction must never replay"
-                ),
+                Ok(Some(Ok(notification))) => {
+                    assert_ne!(
+                        notification.id(),
+                        resolved,
+                        "resolved interaction must never replay"
+                    );
+                    // Receiver drop may leave the last passive acknowledgment
+                    // uncertain. Only the first exact retained fact may replay.
+                    if let Some(previous) = replay.take()
+                        && notification.id() == previous.id()
+                    {
+                        assert_eq!(
+                            &notification, previous,
+                            "reopened passive replay preserves exact identity and content"
+                        );
+                        last_progress = Some(notification);
+                        continue;
+                    }
+                    if matches!(
+                        notification.kind(),
+                        ConversationNotificationKind::Progress { .. }
+                    ) {
+                        progress.observe(&notification);
+                        last_progress = Some(notification);
+                    } else {
+                        // This later delivery proves the prior passive item advanced.
+                        last_progress = None;
+                    }
+                }
                 Ok(Some(Err(error))) => {
                     panic!("resolution delivery failed during replay proof: {error:?}")
                 }
                 Ok(None) => panic!("resolution delivery closed while runtime remained open"),
             }
         }
+        last_progress
     }
 
-    async fn drain(receiver: &mut ConversationNotificationReceiver) {
+    async fn drain(receiver: &mut ConversationNotificationReceiver, progress: &mut CodexProgress) {
         tokio::time::timeout(Self::DRAIN_TIMEOUT, async {
             while let Some(notification) = receiver.recv().await {
-                notification.expect("terminal drain must contain valid committed notifications");
+                let notification = notification
+                    .expect("terminal drain must contain valid committed notifications");
+                if matches!(
+                    notification.kind(),
+                    ConversationNotificationKind::Progress { .. }
+                ) {
+                    progress.observe(&notification);
+                }
             }
         })
         .await
@@ -188,7 +229,9 @@ async fn tool_interaction_resolution_terminalizes_once_and_never_replays() {
     .with_timeout(ResolutionScenario::TERMINAL_TIMEOUT)
     .expect("resolution prompt timeout must be valid");
     let mut prompt = Box::pin(conversation.prompt(request));
-    let interaction = ResolutionScenario::interaction(&mut receiver, &mut prompt).await;
+    let mut progress = CodexProgress::Pending;
+    let interaction =
+        ResolutionScenario::interaction(&mut receiver, &mut prompt, &mut progress).await;
     let interaction_id = interaction.id().clone();
     let ConversationNotificationKind::Interaction {
         response_schema,
@@ -230,7 +273,10 @@ async fn tool_interaction_resolution_terminalizes_once_and_never_replays() {
         .expect("resolved Codex prompt must reach terminal")
         .expect("resolved Codex prompt must succeed");
     assert_eq!(completions.load(Ordering::SeqCst), 1);
-    ResolutionScenario::prove_no_replay(&mut receiver, &interaction_id).await;
+    let last_progress =
+        ResolutionScenario::prove_no_replay(&mut receiver, &interaction_id, &mut progress, None)
+            .await;
+    progress.finish();
     drop(prompt);
 
     drop(receiver);
@@ -262,7 +308,13 @@ async fn tool_interaction_resolution_terminalizes_once_and_never_replays() {
     let mut reopened_receiver = reopened_conversation
         .notification_stream()
         .expect("reopened resolution receiver must be acquired");
-    ResolutionScenario::prove_no_replay(&mut reopened_receiver, &interaction_id).await;
+    let _ = ResolutionScenario::prove_no_replay(
+        &mut reopened_receiver,
+        &interaction_id,
+        &mut progress,
+        last_progress.as_ref(),
+    )
+    .await;
     assert_eq!(
         reopened_completions.load(Ordering::SeqCst),
         0,
@@ -273,7 +325,7 @@ async fn tool_interaction_resolution_terminalizes_once_and_never_replays() {
         .close()
         .await
         .expect("reopened resolution conversation must close");
-    ResolutionScenario::drain(&mut reopened_receiver).await;
+    ResolutionScenario::drain(&mut reopened_receiver, &mut progress).await;
     reopened_workspace
         .close()
         .await

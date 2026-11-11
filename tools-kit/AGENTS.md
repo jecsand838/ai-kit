@@ -45,8 +45,10 @@ suites, storage adapters, and higher-level mounting policy do not belong here.
 - `ToolHandlerBackend::step` is the sole execution operation.
 - A handler returns `Completed(ToolResult)` or `Interaction(...)`.
   Model-visible tool failure is a completed result with `is_error = true`.
-  Outer `ToolError` is reserved for invalid state, invalid input, protocol,
-  transport, cancellation, timeout, or closure failures.
+  Outer `ToolError` is reserved for input/output validation, invalid state,
+  protocol, transport, cancellation, timeout, or closure failures.
+  `ToolError::InvalidOutput` may follow completed execution; an outer error
+  does not establish that no side effects occurred.
 - `ToolResult` does not repeat call id or tool name; the caller already owns
   invocation correlation.
 

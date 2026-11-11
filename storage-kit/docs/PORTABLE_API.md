@@ -59,12 +59,21 @@ mutation with `UnsupportedCapability` or the documented
 manufacture ids, counts, scores, records or completion.
 
 Surreal collection removal keeps table removal and partition-coordination cleanup
-in one native transaction. It retries only a confirmed rolled-back transaction:
-a typed native transaction conflict, with any other failed statements marked
-not executed. `SurrealConfig.max_retries` bounds those retries, and the original
-request deadline includes context selection, all attempts, and backoff. Transport
-failures, indeterminate commits, mixed errors, and not-executed-only responses
-are not replayed. Completion requires a successful native commit.
+in one native transaction. Surreal `SchemaEvolutionRequest::DropColumns` keeps
+field-definition removal and stored-value removal in one native transaction.
+Both retry only a confirmed rolled-back transaction: at least one typed native
+transaction conflict, with every other failed statement either a typed conflict
+or marked not executed. `SurrealConfig.max_retries` bounds retries after the
+initial attempt, and the original request deadline includes context selection,
+all attempts, and backoff. Transport failures, indeterminate commits, mixed
+errors, untyped conflict messages, and not-executed-only responses are not
+replayed. Completion requires a successful native commit. This recovery does
+not extend to `AddColumns` or `AlterColumns`.
+
+Column-removal statement failures and the encompassing deadline use the
+`alter_collection` operation label. Lower context and transport failures retain
+their original labels. Empty column lists complete after request validation
+without a native mutation.
 
 For `SchemaEvolutionRequest::AddColumns`, the supplied Lance implementation
 eagerly fills existing rows from each `ComputedColumn.expression_sql` before
@@ -109,7 +118,7 @@ schema or count when it cannot honestly report that information. A
 that token unchanged to the same applicable query path and cannot parse it as
 a universally numeric offset. Distances, similarities and relevance scores
 are not mutually interchangeable. Absence of a raw score must remain absence.
-The selected [Lance 13 scanner](https://docs.rs/crate/lance/13.0.0/source/src/dataset/scanner.rs)
+The selected [Lance 14.0.2 scanner](https://docs.rs/crate/lance/14.0.2/source/src/dataset/scanner.rs)
 uses live-row metadata for eligible unfiltered limit/offset planning and
 defaults to deterministic scan order. The supplied Lance regression
 compares pages with an independently verified same-state scan after deletions,
@@ -287,8 +296,8 @@ backend failure to conflict.
 
 The supplied implementations rely on distinct native mechanisms:
 
-- The embedded Lance StateStore uses the pinned Lance 13.0.0 Dataset APIs beneath
-  LanceDB 0.40.0. It prepares a delta against one immutable snapshot, then guards
+- The embedded Lance StateStore uses the pinned Lance 14.0.2 Dataset APIs beneath
+  LanceDB 0.41.0. It prepares a delta against one immutable snapshot, then guards
   the exact next manifest version before conditional publication. A private
   sentinel, permanent tombstones, owned worker and local durability wrapper
   preserve the contracts above without changing their public surface. Private
@@ -300,13 +309,13 @@ The supplied implementations rely on distinct native mechanisms:
   candidate; it does not qualify the current native dependency graph.
   [Cold-copy recovery guidance](../README.md#recovery-and-cold-backups) uses
   settled filesystem ownership and adds no portable backup or import operation.
-- Redb 4.3.0 retains one native writer behind bounded FIFO logical admission.
+- Redb 4.5.0 retains one native writer behind bounded FIFO logical admission.
   Its synchronous transaction runs on the owning OS thread, with native
   commit/abort and tombstones. See the repository-only research archive
-  `vendor/redb-4.3.0.zip` (excluded from the published crate), members
+  `vendor/redb-4.5.0.zip` (excluded from the published crate), members
   `src/db.rs` and `src/transactions.rs`; no newer Redb guarantee is implied.
-- Turso 0.8.2 backs SQLite with dedicated actor connections and native
-  immediate transactions. Pinned `vendor/turso-0.8.2.zip` members under
+- Turso 0.8.3 backs SQLite with dedicated actor connections and native
+  immediate transactions. Pinned `vendor/turso-0.8.3.zip` members under
   `bindings/rust/src/` (`connection.rs`, `rows.rs`, `lib.rs`, and `transaction.rs`)
   ground its native operations: batches acquire exclusive connection access,
   while query rows retain shared access until exhaustion, error, or drop.

@@ -83,6 +83,24 @@ impl CodexServerAction {
     }
 
     fn command_approval(request: CodexCommandApprovalRequest) -> Result<Self, KitError> {
+        let (title, body) = match request.kind() {
+            CodexCommandApprovalKind::HumanCommand => {
+                return Err(KitError::unsupported(
+                    "command approval requires a verified human decision",
+                ));
+            }
+            CodexCommandApprovalKind::Command => (
+                "Command approval",
+                CodexInteractionRequest::body(
+                    [request.reason(), request.command()],
+                    "Approve this command?",
+                ),
+            ),
+            CodexCommandApprovalKind::WriteStdin => (
+                "Terminal input approval",
+                CodexInteractionRequest::body([request.reason(), None], "Approve terminal input?"),
+            ),
+        };
         let mut accept = false;
         let mut decline = false;
         let mut cancel = false;
@@ -111,15 +129,6 @@ impl CodexServerAction {
             ));
         };
         let scope = request.scope();
-        let body = match request.kind() {
-            CodexCommandApprovalKind::Command => CodexInteractionRequest::body(
-                [request.reason(), request.command()],
-                "Approve this command?",
-            ),
-            CodexCommandApprovalKind::WriteStdin => {
-                CodexInteractionRequest::body([request.reason(), None], "Approve terminal input?")
-            }
-        };
         CodexInteractionRequest::new(
             scope.request_id().clone(),
             scope.thread_id().to_owned(),
@@ -129,11 +138,7 @@ impl CodexServerAction {
                 dismissible: cancel,
             },
             ConversationNotificationKind::Interaction {
-                title: match request.kind() {
-                    CodexCommandApprovalKind::Command => "Command approval",
-                    CodexCommandApprovalKind::WriteStdin => "Terminal input approval",
-                }
-                .to_owned(),
+                title: title.to_owned(),
                 body,
                 response_schema: None,
                 dismissible: cancel,
@@ -310,6 +315,19 @@ impl CodexInteractionRequest {
 
     pub(crate) fn thread_id(&self) -> &str {
         &self.thread_id
+    }
+
+    pub(crate) fn turn_id(&self) -> Option<&str> {
+        self.turn_id.as_deref()
+    }
+
+    pub(crate) fn tool_progress_turn(&self) -> Option<&str> {
+        match &self.continuation {
+            CodexContinuationKind::CommandApproval { .. } | CodexContinuationKind::FileApproval => {
+                self.turn_id.as_deref()
+            }
+            _ => None,
+        }
     }
 
     pub(crate) fn into_parts(

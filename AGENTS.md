@@ -2,6 +2,12 @@
 
 Operating contract for the five compiled `ai-kit` crates.
 
+Before changing a crate, read this complete file and that crate's complete
+`AGENTS.md`, then the owning specifications and selected skills. Automatically
+loaded excerpts are not proof that the full applicable instructions were read.
+More-specific instructions govern their scope; explicit user direction takes
+precedence. Read linked workflow instructions only when that workflow is selected.
+
 ## Scope
 
 - Workspace crates: `providers-kit`, `storage-kit`, `tools-kit`, `agents-kit`,
@@ -184,8 +190,9 @@ Separate non-Clone `McpServer` accepts caller `Arc<T>` for any
 shutdown without shutting down the Toolset. `ToolsetBackend` has no `serve`/`stop`.
 
 Accepted model-visible failures are completed `ToolResult` values with
-`is_error = true`. Reserve outer `ToolError` for input, state, protocol,
-transport, cancellation, lifecycle and closure failures.
+`is_error = true`. Reserve outer `ToolError` for input/output validation, state,
+protocol, transport, cancellation, lifecycle and closure failures. An outer
+output-validation error can follow execution; it does not prove no effect occurred.
 
 ### Storage
 
@@ -212,11 +219,14 @@ and shared-abstraction changes require relevant alternative strict-live coverage
 Downstream persistence/knowledge fixtures use Lance; backend-specific proof
 stays in Storage.
 
-The approved LanceDB 0.40.0 dependency exception enables only its `remote`
-feature to compile the published job-error paths. Keep direct dependency
-defaults and cloud object-store features disabled. This does not authorize
-remote supplied Storage routes, additional public behavior or unrelated
-dependency features; the local filesystem/memory boundary remains required.
+Storage selects LanceDB 0.41.0 and the exact
+Lance/lance-io/lance-table 14.0.2 family. It preserves only LanceDB's existing
+`remote` feature. That feature worked around the 0.40.0 job-error compilation
+defect; 0.41.0 fixes that defect, so it is no longer a compilation requirement.
+Keep direct dependency defaults and cloud object-store features disabled. This
+does not authorize remote supplied Storage routes, additional public behavior
+or unrelated dependency features; the local filesystem/memory boundary remains
+required. Qualify both Database and StateStore against the selected native family.
 
 External Rust dependencies must resolve from crates.io. Cargo patches,
 replacements, and external path overrides are forbidden; the dependency checker

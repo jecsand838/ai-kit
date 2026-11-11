@@ -28,8 +28,9 @@ FileChanged identifies a path to refresh, not native watcher/diff facts.
 backend-host process lifecycle without exposing native process ids, command
 lines, environment, routes, or backend-specific state. A process execution
 failure may additionally produce one Error fact when it is asynchronous.
-Progress is advisory and may be coalesced. Warning, Error, and Interaction are
-never silently dropped.
+Progress is advisory and may be coalesced only before publication. Once durable,
+its identity, timestamp, order, and payload are immutable. Warning, Error, and
+Interaction are never silently dropped.
 
 `PromptResponse` does not contain notifications. Ordinary prompt returns its
 terminal result; streaming prompt observes transient OutputDelta values and
@@ -38,6 +39,45 @@ durable token notifications. Independently meaningful passive events and
 actionable interactions use this receiver.
 Prompt-returned failures are not duplicated as Error notifications. Error
 notifications report asynchronous failures unrelated to that prompt result.
+
+## Bounded Prompt Milestones
+
+The supplied Codex and Custom backends publish at most two additional durable
+Progress facts for one original live prompt, with these exact values:
+
+| Milestone | Label | Detail |
+| --- | --- | --- |
+| Preparing | `Preparing response` | `None` |
+| First supported tool request | `Tool calls requested` | `None` |
+
+These are historical milestones. They do not report current activity, native
+acceptance, tool completion, or prompt success. Tool count and model-turn count
+cannot increase their cadence. They introduce no timer, producer task, public
+configuration, notification kind, or persistence version. OpenCode's existing
+mapping remains unchanged; backends need not invent identical observations.
+
+Preparing follows complete local validation and durable Kit prompt admission,
+before the first generation or native turn dispatch. Custom's tool milestone
+follows validation of the first complete nonempty function-call batch, including
+finish reason, call shape, selection, and action budget, before approvals or
+handler execution. Codex requires a valid supported trigger attributed to the
+exact root thread and an authoritatively accepted native turn. Early,
+descendant, historical, recovered, and completed-only observations cannot
+supply missing attribution. Recovery may therefore leave a milestone absent;
+already committed facts replay with their original identities.
+
+Each publication uses the existing journal and samples one lifecycle deadline,
+capped by the original prompt deadline when present. Retries do not refresh it.
+An admitted storage commit remains owned through
+cancellation, observer loss, and deadline expiry. Its receipt must settle before
+the next effect dispatched by Kit, which rechecks cancellation and deadline. Conflicts
+and ambiguous receipts preserve one publication identity and never authorize
+replaying model, native turn, tool, or callback effects. A publication failure
+fails its prompt honestly; successful native reconciliation cannot erase it.
+
+Unread facts are not overwritten or evicted. Milestone bounds limit growth per
+prompt, not lifetime backlog: an unconsumed finite journal eventually rejects
+publication. Interaction barriers and terminal retention remain unchanged.
 
 ## Interaction
 
@@ -102,6 +142,11 @@ timestamps, and payloads. Later appends and valid interaction/lifecycle
 advancement do not contradict that receipt. Each appended item must account
 for exactly one consecutive sequence increment. Failed transaction rollback
 stops receipt retries and preserves the primary conflict with cleanup evidence.
+An exact commit `TransactionConflict` proves that acknowledgment did not commit:
+the receiver retains the delivered identity and retries the acknowledgment from
+a fresh journal view. A concurrent append must not turn that definite rejection
+into a contradictory receipt. Every other commit result retains its existing
+exact observation authority; a lost reply never authorizes blind mutation replay.
 Confirmation then reads current
 delivery state rather than returning a saved waiting state. Missing journals
 confirm only the exact terminal deletion receipt. The separate resolution

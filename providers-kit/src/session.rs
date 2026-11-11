@@ -239,7 +239,10 @@ impl SessionConfig {
         &self.generation
     }
 
-    /// Sets function and hosted declarations; native support is checked on open.
+    /// Sets function and hosted declarations.
+    ///
+    /// Realtime checks native support on open. Conversation can reject
+    /// model-specific settings later through Session events; see [`Self`].
     ///
     /// # Errors
     /// Rejects duplicate names or inconsistent selection. See [`Self`].
@@ -255,7 +258,10 @@ impl SessionConfig {
         &self.tools
     }
 
-    /// Sets the existing response format; unsupported profiles reject it on open.
+    /// Sets the existing response format.
+    ///
+    /// Realtime checks native support on open. Conversation can reject
+    /// model-specific settings later through Session events.
     /// See [`Self`] for configuration and [`ResponseFormat`] for request values.
     #[must_use]
     pub fn with_response_format(mut self, format: ResponseFormat) -> Self {
@@ -269,7 +275,10 @@ impl SessionConfig {
         self.response_format.as_ref()
     }
 
-    /// Sets the existing reasoning configuration; native support is checked on open.
+    /// Sets the existing reasoning configuration.
+    ///
+    /// Realtime checks native support on open. Conversation can reject
+    /// model-specific settings later through Session events.
     /// See [`Self`] for configuration and [`ReasoningConfig`] for request values.
     #[must_use]
     pub fn with_reasoning(mut self, reasoning: ReasoningConfig) -> Self {

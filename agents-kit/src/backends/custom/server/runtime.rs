@@ -95,8 +95,15 @@ impl CustomRouteTask {
 }
 
 enum CustomProviderRunState {
-    Proposed(Pin<Box<dyn Future<Output = Result<PromptResponse, KitError>> + Send + 'static>>),
-    Accepted(Pin<Box<dyn Future<Output = Result<PromptResponse, KitError>> + Send + 'static>>),
+    Proposed {
+        execution: Pin<Box<dyn Future<Output = Result<PromptResponse, KitError>> + Send + 'static>>,
+        release: oneshot::Sender<()>,
+    },
+    Accepted {
+        execution: Pin<Box<dyn Future<Output = Result<PromptResponse, KitError>> + Send + 'static>>,
+        release: oneshot::Sender<()>,
+    },
+    Running(Pin<Box<dyn Future<Output = Result<PromptResponse, KitError>> + Send + 'static>>),
     Buffered(Option<Result<PromptResponse, KitError>>),
     Resolving,
 }
@@ -358,12 +365,14 @@ impl<S: StateStoreBackend, D: DatabaseBackend, P: ProviderBackend, T: ToolsetBac
                 }
             }
         }
+        let (release, released) = oneshot::channel();
         Ok(CustomProviderRun {
             route: Arc::clone(self),
             generation,
-            state: CustomProviderRunState::Proposed(Box::pin(
-                call.execute(self.runtime.clone(), cancellation),
-            )),
+            state: CustomProviderRunState::Proposed {
+                execution: Box::pin(call.execute(self.runtime.clone(), cancellation, released)),
+                release,
+            },
         })
     }
 
@@ -860,11 +869,13 @@ impl<S: StateStoreBackend, D: DatabaseBackend, P: ProviderBackend, T: ToolsetBac
 {
     pub(crate) fn decline(mut self) -> Result<(), KitError> {
         match std::mem::replace(&mut self.state, CustomProviderRunState::Resolving) {
-            CustomProviderRunState::Proposed(_execution) => {
+            CustomProviderRunState::Proposed { .. } => {
                 self.route.finish(self.generation);
                 Ok(())
             }
-            CustomProviderRunState::Accepted(_) | CustomProviderRunState::Buffered(_) => {
+            CustomProviderRunState::Accepted { .. }
+            | CustomProviderRunState::Running(_)
+            | CustomProviderRunState::Buffered(_) => {
                 Err(KitError::invalid_state("model run was already accepted"))
             }
             CustomProviderRunState::Resolving => {
@@ -875,11 +886,20 @@ impl<S: StateStoreBackend, D: DatabaseBackend, P: ProviderBackend, T: ToolsetBac
 
     pub(crate) async fn accept(&mut self) -> Result<(), KitError> {
         let state = std::mem::replace(&mut self.state, CustomProviderRunState::Resolving);
-        let CustomProviderRunState::Proposed(mut execution) = state else {
+        let CustomProviderRunState::Proposed {
+            mut execution,
+            release,
+        } = state
+        else {
+            self.state = state;
             return Err(KitError::invalid_state(
                 "model run acceptance was observed more than once",
             ));
         };
+        if let Err(error) = self.route.register(self.generation) {
+            self.route.finish(self.generation);
+            return Err(error);
+        }
         let first = poll_fn(|context| match execution.as_mut().poll(context) {
             Poll::Ready(result) => Poll::Ready(Some(result)),
             Poll::Pending => Poll::Ready(None),
@@ -891,20 +911,37 @@ impl<S: StateStoreBackend, D: DatabaseBackend, P: ProviderBackend, T: ToolsetBac
                 Err(error)
             }
             Some(result) => {
-                if let Err(error) = self.route.register(self.generation) {
-                    self.route.finish(self.generation);
-                    return Err(error);
-                }
                 self.state = CustomProviderRunState::Buffered(Some(result));
                 Ok(())
             }
             None => {
-                if let Err(error) = self.route.register(self.generation) {
-                    self.route.finish(self.generation);
-                    return Err(error);
-                }
-                self.state = CustomProviderRunState::Accepted(execution);
+                self.state = CustomProviderRunState::Accepted { execution, release };
                 Ok(())
+            }
+        }
+    }
+
+    pub(crate) fn release_execution(&mut self) -> Result<(), KitError> {
+        match std::mem::replace(&mut self.state, CustomProviderRunState::Resolving) {
+            CustomProviderRunState::Accepted { execution, release } => {
+                self.state = CustomProviderRunState::Running(execution);
+                release.send(()).map_err(|_| {
+                    KitError::invalid_state("accepted execution release was not retained")
+                })
+            }
+            CustomProviderRunState::Buffered(mut result) => {
+                self.state = CustomProviderRunState::Running(Box::pin(async move {
+                    result
+                        .take()
+                        .ok_or_else(|| KitError::invalid_state("model terminal state is missing"))?
+                }));
+                Ok(())
+            }
+            state => {
+                self.state = state;
+                Err(KitError::invalid_state(
+                    "execution must be accepted and released exactly once",
+                ))
             }
         }
     }
@@ -917,11 +954,16 @@ impl<S: StateStoreBackend, D: DatabaseBackend, P: ProviderBackend, T: ToolsetBac
 
     async fn resolve(&mut self) -> Result<PromptResponse, KitError> {
         match std::mem::replace(&mut self.state, CustomProviderRunState::Resolving) {
-            CustomProviderRunState::Accepted(execution) => execution.await,
+            CustomProviderRunState::Accepted { execution, release } => {
+                // Cleanup joins an unreleased run without admitting its effects.
+                drop(release);
+                execution.await
+            }
+            CustomProviderRunState::Running(execution) => execution.await,
             CustomProviderRunState::Buffered(mut result) => result
                 .take()
                 .ok_or_else(|| KitError::invalid_state("model terminal state is missing"))?,
-            CustomProviderRunState::Proposed(_) => {
+            CustomProviderRunState::Proposed { .. } => {
                 Err(KitError::invalid_state("model run was not accepted"))
             }
             CustomProviderRunState::Resolving => Err(KitError::invalid_state(
@@ -944,7 +986,7 @@ impl<S: StateStoreBackend, D: DatabaseBackend, P: ProviderBackend, T: ToolsetBac
     for CustomProviderRun<S, D, P, T>
 {
     fn drop(&mut self) {
-        if matches!(&self.state, CustomProviderRunState::Proposed(_)) {
+        if matches!(&self.state, CustomProviderRunState::Proposed { .. }) {
             self.route.finish(self.generation);
         }
     }

@@ -95,6 +95,22 @@ handler continuation. Backend/tool ids and tools-kit interaction envelopes stay
 private. Close or unrecoverable continuation loss terminally cancels the
 interaction and must not fabricate a successful tool result.
 
+A live managed callback retains the exact original prompt owner through handler
+acquisition and every handler step. Before a newly acquired handler is invoked,
+before an interaction is published, and before a resolved interaction resumes
+the handler, the tools owner rechecks that prompt's original deadline and effect
+permission. A public timeout can precede its durable cancellation intent; delayed
+intent does not authorize another tool effect.
+
+When that owner no longer permits effects, the unique handler receives one
+`Cancel` under the existing lifecycle cleanup bound. A completed result or typed
+Tool cancellation settles cleanup; another interaction or another error does
+not. No native callback result is emitted. A real cleanup failure remains with
+the existing tracked worker and runtime shutdown, supplementary to the original
+prompt failure; it never replaces an already delivered public timeout or proves
+remote native settlement. No new worker, handler reconstruction, or retry is
+introduced.
+
 The protocol reader remains responsive while handler work executes. Handler
 work is runtime-owned, bounded by the owning prompt/lifecycle, and not awaited
 while holding route, notification, hierarchy, or StateStore guards.
@@ -118,9 +134,54 @@ before delivery ends. An accepted native response is never resent after an
 ambiguous connection result. Durable interaction acceptance and cleanup facts
 remain with the conversation StateStore owner.
 
-Agent shutdown releases remaining agent-owned registration resources after
-descendant work settles. Cleanup is bounded and does not hold synchronization
-or storage transactions across tool waits.
+Cancellation remains actionable when passive notifications precede an unresolved
+managed Interaction in the journal. Lifecycle cancellation removes the exact
+local pending responder under a short guard and transfers its complete owner,
+notification, request, original deadline, and observation receipt to its already
+registered managed worker. That worker is marked Retiring under the same task
+lock before handoff; revocation cannot race a fresh handoff into an aborted task.
+The public abort waiter observes the receipt but does not own the admitted
+retirement future. Dropping it neither drops the unique Handler nor reexecutes
+its tool.
+
+The worker drives one Handler Cancel concurrently with durable retirement, then
+joins both before completing its receipt. Completed and typed Cancelled are
+settled local cleanup; a new Interaction or another failure is retained as
+cleanup failure. One transaction verifies the complete persisted binding and
+Interaction content, cancels only its still-Pending notification, and removes
+only its matching tool obligation. Earlier unread facts retain their identities,
+contents, timestamps, and ordering. A raced Resolving or contradictory record is
+not rewritten into success. Public caller resolution remains head-ordered.
+Persisted binding, kind, and Pending checks retain StateRead attribution through
+abort, close, and shutdown; admitted commit failures retain StateCommit. A later
+Toolset shutdown failure remains supplementary to the retained retirement error.
+
+The original cleanup deadline bounds new retirement stages, Handler cancellation,
+and confirmation. An admitted commit remains owned until its result is known,
+even when its observation receipt is delayed past that deadline. A definite
+conflict is returned without replay; an unknown commit permits only exact
+before/expected journal observation plus matching obligation absence to prove
+atomic retirement. Unproven retirement seals the existing conversation admission
+and retains its exact owner/error in the existing generation fence; a new Agent
+reopen reconciles the durable obligation. The same task/mutation fence blocks
+new native dispatch while retirement is owned, including after native foreground
+completion. Prompt admission checks this exact conversation both initially and
+before dispatch; unrelated conversations remain independent. No sender, tool
+effect, native callback decision, or retirement mutation is blindly replayed.
+
+The existing event reader owns and joins every managed worker. Reader exit and
+awaited Agent shutdown revoke Executing work but retain Retiring work through
+its accepted cancellation and commit receipt. The reader removes a Retiring task
+only after consuming its JoinSet result. Awaited shutdown preserves the original
+deadline failure and subsequent cleanup evidence, and closes the reader before
+releasing Toolset resources; an outer native-cleanup timeout cannot drop that
+owner. Native cleanup keeps its original bound. These guarantees concern
+ordinary observers and explicit awaited cleanup: destructive root-handle loss,
+including dropping the consuming shutdown future, retains the portable runtime
+contract's lack of asynchronous/durable cleanup guarantees. It cannot establish
+native rollback or successful retirement; persisted obligations require later
+reconciliation. No additional root task, runtime framework, or persistence
+version is introduced.
 
 ## Required Boundaries
 

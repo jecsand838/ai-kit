@@ -837,6 +837,8 @@ enum NotificationEmission {
     Burst,
     GateAfterFirst,
     GateBeforeLast,
+    ProgressBeforeAndAfter,
+    ProgressBefore,
 }
 
 struct NotificationSequence {
@@ -1476,6 +1478,46 @@ impl NotificationSequence {
             .expect("test notification identity")
     }
 
+    fn progress(index: usize) -> Result<ConversationNotification, KitError> {
+        let (id, label) = match index {
+            0 => (0xff01_u32, "Preparing response"),
+            1 => (0xff02_u32, "Tool calls requested"),
+            _ => panic!("the compatibility prompt has exactly two passive milestones"),
+        };
+        ConversationNotification::new(
+            format!("notification_{id:032x}").parse()?,
+            std::time::SystemTime::UNIX_EPOCH + Duration::from_millis(index as u64 + 1),
+            ConversationNotificationKind::Progress {
+                label: label.to_owned(),
+                detail: None,
+            },
+        )
+    }
+
+    async fn send_progress(&self, index: usize) -> Result<(), KitError> {
+        self.sender
+            .send(Ok(Self::progress(index)?))
+            .await
+            .map_err(|_| KitError::closed("test receiver closed"))
+    }
+
+    fn replay_with_progress(
+        notification: &ConversationNotification,
+    ) -> Result<Arc<Self>, KitError> {
+        let replay = Self::new(1, false);
+        for passive in [Self::progress(0)?, Self::progress(1)?] {
+            replay
+                .sender
+                .try_send(Ok(passive))
+                .expect("two passive replay facts fit the existing bounded receiver");
+        }
+        replay
+            .sender
+            .try_send(Ok(notification.clone()))
+            .expect("the exact pending interaction fits after its two passive facts");
+        Ok(replay)
+    }
+
     fn body(bytes: usize) -> String {
         assert!((1..=393_181).contains(&bytes));
         // U+0001 is valid nonblank portable text, encoded as six JSON bytes.
@@ -1535,6 +1577,19 @@ impl NotificationSequence {
 
     async fn prompt(&self) -> Result<PromptResponse, KitError> {
         let emission = *self.emission.lock().expect("test emission lock");
+        if matches!(
+            emission,
+            NotificationEmission::ProgressBeforeAndAfter | NotificationEmission::ProgressBefore
+        ) {
+            assert_eq!(
+                self.count, 1,
+                "the passive compatibility prompt has one interaction"
+            );
+            self.send_progress(0).await?;
+            if matches!(emission, NotificationEmission::ProgressBefore) {
+                self.send_progress(1).await?;
+            }
+        }
         for index in 0..self.count {
             if (index == 1 && matches!(emission, NotificationEmission::GateAfterFirst))
                 || (index + 1 == self.count
@@ -1587,6 +1642,9 @@ impl NotificationSequence {
                     .await
                     .map_err(|_| KitError::closed("test receiver closed"))?;
             }
+        }
+        if matches!(emission, NotificationEmission::ProgressBeforeAndAfter) {
+            self.send_progress(1).await?;
         }
         self.emission_completed.notify_one();
         if self.count > 0 && matches!(emission, NotificationEmission::Burst) {
@@ -10905,6 +10963,331 @@ async fn two_notifications_same_prompt_settle_distinct_targets()
 async fn notification_redelivery_and_resolution_replay_preserve_exact_targets()
 -> Result<(), Box<dyn Error + Send + Sync>> {
     StreamFailureState::assert_notifications(3, true).await
+}
+
+#[tokio::test]
+async fn passive_progress_around_interaction_preserves_exact_target_and_terminal()
+-> Result<(), Box<dyn Error + Send + Sync>> {
+    // Public App compatibility with caller-owned Agent facts; this fixture
+    // does not establish Codex or Custom native publication behavior.
+    let (state, agent) = StreamFailureState::open()?;
+    let notifications = NotificationSequence::new(1, false);
+    *notifications.emission.lock().unwrap() = NotificationEmission::ProgressBeforeAndAfter;
+    *state.notifications.lock().unwrap() = Some(Arc::clone(&notifications));
+    let store =
+        StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
+    let mut app = App::open(AppConfig::new(
+        store,
+        vec![AgentSpec::new("faulty".to_owned(), "v1".to_owned(), agent)],
+        vec![WorkflowDefinition::parse(STREAM_FAILURE)?],
+    ))
+    .await?;
+    let observed = AssertUnwindSafe(tokio::time::timeout(Duration::from_secs(10), async {
+        let workspace = app
+            .create_workspace(WorkspaceConfig {
+                name: None,
+                root: std::env::current_dir()?,
+            })
+            .await?;
+        let workflow = workspace.workflow("stream-failure".parse()?).await?;
+        let run = workflow.start(ExecutionOptions::default()).await?;
+        let waiting = tokio::time::timeout(Duration::from_secs(2), run.wait()).await??;
+        let [
+            Interaction::Notification {
+                sequence,
+                generation,
+                notification,
+            },
+        ] = waiting.interactions.as_slice()
+        else {
+            panic!("only the actual interaction becomes an App resolution target")
+        };
+        assert_eq!(notification.id(), &NotificationSequence::id(0));
+        assert!(matches!(
+            notification.kind(),
+            ConversationNotificationKind::Interaction { .. }
+        ));
+        assert_eq!(notifications.received.load(Ordering::SeqCst), 2);
+        assert_eq!(notifications.resolution_calls.load(Ordering::SeqCst), 0);
+        let (sequence, generation) = (*sequence, *generation);
+        let applied = run
+            .resolve(
+                sequence,
+                generation,
+                Resolution::Notification(NotificationResolution::Allow),
+            )
+            .await?;
+        let terminal = tokio::time::timeout(Duration::from_secs(2), run.wait()).await??;
+        assert!(matches!(terminal.status, RunStatus::Succeeded));
+        assert_eq!(terminal.state.values()["answer"], "both approvals accepted");
+        assert!(terminal.interactions.is_empty());
+        assert_eq!(terminal.outcomes.len(), 1);
+        assert_eq!(
+            notifications.received.load(Ordering::SeqCst),
+            3,
+            "the passive fact after the interaction drains before terminal completion"
+        );
+        assert_eq!(notifications.emitted.load(Ordering::SeqCst), 1);
+        assert_eq!(notifications.prompt_returns.load(Ordering::SeqCst), 1);
+        assert_eq!(state.prompts.load(Ordering::SeqCst), 1);
+        assert_eq!(state.conversations.load(Ordering::SeqCst), 1);
+        assert_eq!(state.aborts.load(Ordering::SeqCst), 0);
+        let repeated = run
+            .resolve(
+                sequence,
+                generation,
+                Resolution::Notification(NotificationResolution::Allow),
+            )
+            .await?;
+        StreamFailureState::assert_applied_snapshot(&repeated, &applied);
+        assert_eq!(notifications.resolution_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(notifications.resolution_returns.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            *notifications.resolved.lock().unwrap(),
+            [NotificationSequence::id(0)]
+        );
+        Ok::<_, Box<dyn Error + Send + Sync>>(())
+    }))
+    .catch_unwind()
+    .await;
+    notifications.cancelled.store(true, Ordering::SeqCst);
+    notifications.changed.notify_waiters();
+    notifications.resolution_release.notify_one();
+    let cleanup = AssertUnwindSafe(tokio::time::timeout(
+        Duration::from_secs(5),
+        app.shutdown(Shutdown::CancelAndDrain {
+            timeout: Duration::from_secs(3),
+        }),
+    ))
+    .catch_unwind()
+    .await;
+    drop(app);
+    if !matches!(&cleanup, Ok(Ok(Ok(())))) {
+        eprintln!("passive progress secondary cleanup: {cleanup:?}");
+    }
+    match observed {
+        Ok(result) => result??,
+        Err(panic) => std::panic::resume_unwind(panic),
+    }
+    cleanup
+        .expect("passive progress cleanup does not panic")
+        .expect("passive progress cleanup is bounded")?;
+    assert_eq!(state.shutdowns.load(Ordering::SeqCst), 1);
+    Ok(())
+}
+
+#[tokio::test]
+async fn passive_progress_replay_preserves_retained_interaction_without_prompt_reexecution()
+-> Result<(), Box<dyn Error + Send + Sync>> {
+    let (state, agent) = StreamFailureState::open()?;
+    let notifications = NotificationSequence::new(1, false);
+    *notifications.emission.lock().unwrap() = NotificationEmission::ProgressBefore;
+    *state.notifications.lock().unwrap() = Some(Arc::clone(&notifications));
+    let store =
+        StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory())).await?;
+    let mut source: Value = serde_json::from_str(STREAM_FAILURE)?;
+    source["nodes"][0]["deadline_ms"] = Value::from(20_000);
+    let source = source.to_string();
+    let mut app = Some(
+        App::open(AppConfig::new(
+            store.clone(),
+            vec![AgentSpec::new("faulty".to_owned(), "v1".to_owned(), agent)],
+            vec![WorkflowDefinition::parse(&source)?],
+        ))
+        .await?,
+    );
+    let observed = AssertUnwindSafe(tokio::time::timeout(Duration::from_secs(15), async {
+        let workspace = app
+            .as_ref()
+            .expect("original App")
+            .create_workspace(WorkspaceConfig {
+                name: None,
+                root: std::env::current_dir()?,
+            })
+            .await?;
+        let workspace_id = workspace.id().clone();
+        let workflow = workspace.workflow("stream-failure".parse()?).await?;
+        let run = workflow.start(ExecutionOptions::default()).await?;
+        let run_id = run.id().clone();
+        let waiting = tokio::time::timeout(Duration::from_secs(2), run.wait()).await??;
+        let [
+            Interaction::Notification {
+                sequence,
+                generation,
+                notification,
+            },
+        ] = waiting.interactions.as_slice()
+        else {
+            panic!("the original prompt exposes exactly its actual interaction")
+        };
+        let (sequence, generation, notification) =
+            (*sequence, *generation, notification.as_ref().clone());
+        assert_eq!(notification.id(), &NotificationSequence::id(0));
+        assert_eq!(notifications.received.load(Ordering::SeqCst), 3);
+        assert_eq!(notifications.resolution_calls.load(Ordering::SeqCst), 0);
+        drop(run);
+        drop(workflow);
+        drop(workspace);
+        drop(app.take());
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while Arc::strong_count(&state) > 1 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the original App joins before its lower replay owner is supplied");
+        assert_eq!(notifications.prompt_returns.load(Ordering::SeqCst), 0);
+        assert_eq!(state.prompts.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            state.shutdowns.load(Ordering::SeqCst),
+            1,
+            "original App drop must consume its lower Agent before reconstruction"
+        );
+
+        // These are the same already-delivered facts, supplied by the caller's
+        // recovered lower receiver. App must not invoke another prompt to find them.
+        let replay = NotificationSequence::replay_with_progress(&notification)?;
+        *state.notifications.lock().unwrap() = Some(Arc::clone(&replay));
+        app = Some(
+            App::open(AppConfig::new(
+                store,
+                vec![AgentSpec::new(
+                    "faulty".to_owned(),
+                    "v1".to_owned(),
+                    state.agent(),
+                )],
+                vec![WorkflowDefinition::parse(&source)?],
+            ))
+            .await?,
+        );
+        let workspace = app
+            .as_ref()
+            .expect("reopened App")
+            .workspace(workspace_id)
+            .await?;
+        let workflow = workspace.workflow("stream-failure".parse()?).await?;
+        let run = workflow.open_run(RunSelector::Latest(run_id)).await?;
+        let retained = tokio::time::timeout(Duration::from_secs(2), run.wait()).await??;
+        let [
+            Interaction::Notification {
+                sequence: retained_sequence,
+                generation: retained_generation,
+                notification: retained_notification,
+            },
+        ] = retained.interactions.as_slice()
+        else {
+            panic!("reopen preserves only the exact original pending target")
+        };
+        assert_eq!(
+            (*retained_sequence, *retained_generation),
+            (sequence, generation)
+        );
+        assert_eq!(retained_notification.id(), notification.id());
+        assert_eq!(
+            retained_notification.inserted_at(),
+            notification.inserted_at()
+        );
+        assert_eq!(retained_notification.kind(), notification.kind());
+
+        let applied = tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                match run
+                    .resolve(
+                        sequence,
+                        generation,
+                        Resolution::Notification(NotificationResolution::Allow),
+                    )
+                    .await
+                {
+                    // Busy is the documented pre-admission observation while
+                    // the exact lower notification is still being recovered.
+                    Err(AppError::Busy(_)) => {
+                        assert_eq!(replay.resolution_calls.load(Ordering::SeqCst), 0);
+                        tokio::task::yield_now().await;
+                    }
+                    result => break result,
+                }
+            }
+        })
+        .await
+        .expect("the retained interaction becomes exactly resolvable")?;
+        assert_eq!(replay.received.load(Ordering::SeqCst), 3);
+        assert_eq!(replay.resolution_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(replay.resolution_returns.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            *replay.resolved.lock().unwrap(),
+            [notification.id().clone()]
+        );
+        let repeated = run
+            .resolve(
+                sequence,
+                generation,
+                Resolution::Notification(NotificationResolution::Allow),
+            )
+            .await?;
+        StreamFailureState::assert_applied_snapshot(&repeated, &applied);
+        assert_eq!(replay.resolution_calls.load(Ordering::SeqCst), 1);
+
+        let unknown = tokio::time::timeout(Duration::from_secs(3), run.wait()).await??;
+        let [
+            Interaction::Unknown {
+                sequence,
+                generation,
+                ..
+            },
+        ] = unknown.interactions.as_slice()
+        else {
+            panic!("recovery retains the lost foreground outcome without resubmitting it")
+        };
+        run.resolve(*sequence, *generation, Resolution::Fail)
+            .await?;
+        let terminal = tokio::time::timeout(Duration::from_secs(2), run.wait()).await??;
+        assert!(matches!(terminal.status, RunStatus::Failed(_)));
+        assert!(terminal.interactions.is_empty());
+        assert_eq!(terminal.state.values()["answer"], "");
+        assert_eq!(state.prompts.load(Ordering::SeqCst), 1);
+        assert_eq!(state.conversations.load(Ordering::SeqCst), 1);
+        assert_eq!(replay.prompt_returns.load(Ordering::SeqCst), 0);
+        Ok::<_, Box<dyn Error + Send + Sync>>(())
+    }))
+    .catch_unwind()
+    .await;
+    let current = state
+        .notifications
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("current lower receiver");
+    current.cancelled.store(true, Ordering::SeqCst);
+    current.changed.notify_waiters();
+    current.resolution_release.notify_one();
+    let cleanup = match app.as_mut() {
+        Some(app) => Some(
+            AssertUnwindSafe(tokio::time::timeout(
+                Duration::from_secs(5),
+                app.shutdown(Shutdown::CancelAndDrain {
+                    timeout: Duration::from_secs(3),
+                }),
+            ))
+            .catch_unwind()
+            .await,
+        ),
+        None => None,
+    };
+    drop(app);
+    if !matches!(&cleanup, Some(Ok(Ok(Ok(()))))) {
+        eprintln!("passive replay secondary cleanup: {cleanup:?}");
+    }
+    match observed {
+        Ok(result) => result??,
+        Err(panic) => std::panic::resume_unwind(panic),
+    }
+    cleanup
+        .expect("the replayed App remains owned for cleanup")
+        .expect("passive replay cleanup does not panic")
+        .expect("passive replay cleanup is bounded")?;
+    assert_eq!(state.shutdowns.load(Ordering::SeqCst), 2);
+    Ok(())
 }
 
 #[tokio::test]

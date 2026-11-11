@@ -2342,6 +2342,21 @@ impl<S: StateStoreBackend> NotificationStore<S> {
         store: &impl StateStoreBackend,
         progress: &mut NotificationReceiverProgress,
     ) -> Result<Option<ReceiveStep>, NotificationReceiptError> {
+        if matches!(
+            &progress
+                .receipt()
+                .map_err(NotificationReceiptError::Failure)?
+                .step,
+            NotificationReceiptStep::Conflicted(_)
+        ) {
+            // An exact conflict proves this acknowledgment did not commit.
+            // Retain the delivered identity and retry against the current
+            // journal; a concurrent append is not contradictory evidence.
+            progress
+                .finish_reconciliation()
+                .map_err(NotificationReceiptError::Failure)?;
+            return Err(NotificationReceiptError::TransactionConflict);
+        }
         let commit_error = progress
             .receipt()
             .map_err(NotificationReceiptError::Failure)?

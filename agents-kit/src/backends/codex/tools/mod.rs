@@ -1,4 +1,4 @@
-use crate::error::{ErrorDetail, ErrorKind, ErrorPhase};
+use crate::error::{ErrorDetail, ErrorPhase};
 use tools_kit::ToolsetBackend;
 pub(crate) mod wire;
 
@@ -17,8 +17,10 @@ use tools_kit::interaction::{
 };
 
 use crate::backends::codex::adapters::conversation::CodexWorkspacePolicy;
+use crate::backends::codex::state_store::CodexPromptEffect;
 use crate::core::notification_store::{
-    NotificationSettlementError, NotificationStore, ResolutionDisposition, ResolutionSettlement,
+    NotificationMutationObservation, NotificationSettlementError, NotificationStore,
+    ResolutionDisposition, ResolutionSettlement,
 };
 use crate::{
     AgentId, AgentStorage, ConversationId, ConversationNotificationKind, KitError, NotificationId,
@@ -56,17 +58,28 @@ struct CodexToolState {
     closing_conversations: BTreeSet<ConversationId>,
     generation_fences: BTreeMap<CodexToolGeneration, CodexToolGenerationFence>,
     tasks: BTreeMap<Id, CodexManagedWork>,
-    publications: BTreeMap<CodexInteractionOwner, usize>,
+    mutations: BTreeMap<CodexInteractionOwner, usize>,
     responses: BTreeMap<CodexToolGeneration, usize>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 enum CodexToolGenerationFence {
     Draining,
     Reclaimable,
+    Failed {
+        owner: CodexInteractionOwner,
+        error: KitError,
+    },
 }
 
-struct CodexToolPublication<S: StateStoreBackend, T: ToolsetBackend> {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CodexToolWorkPhase {
+    Executing,
+    Retiring,
+    Revoked,
+}
+
+struct CodexToolMutation<S: StateStoreBackend, T: ToolsetBackend> {
     inner: Arc<CodexToolsInner<S, T>>,
     owner: CodexInteractionOwner,
 }
@@ -94,6 +107,7 @@ struct CodexManagedWork {
     workspace_id: WorkspaceId,
     conversation_id: ConversationId,
     abort: AbortHandle,
+    phase: CodexToolWorkPhase,
 }
 
 impl CodexToolGeneration {
@@ -126,11 +140,14 @@ impl CodexToolState {
 
     fn begin_generation_drain(&mut self, generation: CodexToolGeneration) {
         self.generation_fences
-            .insert(generation, CodexToolGenerationFence::Draining);
+            .entry(generation)
+            .or_insert(CodexToolGenerationFence::Draining);
     }
 
     fn mark_generation_reclaimable(&mut self, generation: &CodexToolGeneration) {
-        if let Some(fence) = self.generation_fences.get_mut(generation) {
+        if let Some(fence @ CodexToolGenerationFence::Draining) =
+            self.generation_fences.get_mut(generation)
+        {
             *fence = CodexToolGenerationFence::Reclaimable;
         }
     }
@@ -150,7 +167,7 @@ impl CodexToolState {
                 .any(|task| &task.generation == generation)
             && !self.responses.contains_key(generation)
             && !self
-                .publications
+                .mutations
                 .keys()
                 .any(|owner| &owner.generation == generation);
         if reclaimable {
@@ -160,17 +177,17 @@ impl CodexToolState {
     }
 }
 
-impl<S: StateStoreBackend, T: ToolsetBackend> Drop for CodexToolPublication<S, T> {
+impl<S: StateStoreBackend, T: ToolsetBackend> Drop for CodexToolMutation<S, T> {
     fn drop(&mut self) {
         let mut state = self
             .inner
             .state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let remove = match state.publications.get_mut(&self.owner) {
-            Some(publications) => match publications.checked_sub(1) {
+        let remove = match state.mutations.get_mut(&self.owner) {
+            Some(mutations) => match mutations.checked_sub(1) {
                 Some(remaining) => {
-                    *publications = remaining;
+                    *mutations = remaining;
                     remaining == 0
                 }
                 None => {
@@ -184,7 +201,7 @@ impl<S: StateStoreBackend, T: ToolsetBackend> Drop for CodexToolPublication<S, T
             }
         };
         if remove {
-            state.publications.remove(&self.owner);
+            state.mutations.remove(&self.owner);
         }
         drop(state);
         self.inner.changed.notify_waiters();
@@ -385,6 +402,11 @@ pub(crate) struct CodexDynamicToolCall {
     arguments: serde_json::Value,
 }
 
+pub(crate) enum CodexToolExecution {
+    Response(CodexDynamicToolCallResponse),
+    Cancelled(Result<(), KitError>),
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct CodexDynamicToolCallResponse {
     content_items: Vec<serde_json::Value>,
@@ -401,7 +423,19 @@ pub(super) struct CodexDynamicToolSpec {
 struct CodexPendingToolInteraction {
     owner: CodexInteractionOwner,
     request: ToolInteractionRequest,
-    response: tokio::sync::oneshot::Sender<ToolInteractionResponse>,
+    task: Id,
+    response: tokio::sync::oneshot::Sender<CodexToolContinuation>,
+}
+
+enum CodexToolContinuation {
+    Response(ToolInteractionResponse),
+    Cancel {
+        owner: CodexInteractionOwner,
+        notification_id: NotificationId,
+        request: Box<ToolInteractionRequest>,
+        deadline: tokio::time::Instant,
+        completed: tokio::sync::oneshot::Sender<Result<(), KitError>>,
+    },
 }
 
 impl<S: StateStoreBackend, T: ToolsetBackend> Clone for CodexTools<S, T> {
@@ -555,6 +589,33 @@ impl<S: StateStoreBackend, T: ToolsetBackend> CodexTools<S, T> {
         CodexWorkspacePolicy::new(context, !self.inner.specs.is_empty())
     }
 
+    pub(crate) fn recognizes_call(&self, call: &CodexDynamicToolCall) -> bool {
+        ToolName::new(call.tool.clone()).is_ok_and(|name| self.inner.routes.contains_key(&name))
+    }
+
+    pub(crate) fn check_prompt_admission(
+        &self,
+        conversation_id: &ConversationId,
+    ) -> Result<(), KitError> {
+        let state = self.state();
+        if state.closing || state.closing_conversations.contains(conversation_id) {
+            return Err(KitError::closed(
+                "managed tool conversation requires reconciliation",
+            ));
+        }
+        if state.tasks.values().any(|task| {
+            &task.conversation_id == conversation_id && state.generation_is_fenced(&task.generation)
+        }) || state.mutations.keys().any(|owner| {
+            &owner.conversation_id == conversation_id
+                && state.generation_is_fenced(&owner.generation)
+        }) {
+            return Err(KitError::busy(
+                "prior managed tool cancellation has not settled",
+            ));
+        }
+        Ok(())
+    }
+
     pub(crate) fn work_limit(&self) -> usize {
         self.inner.work_limit
     }
@@ -590,6 +651,7 @@ impl<S: StateStoreBackend, T: ToolsetBackend> CodexTools<S, T> {
                 workspace_id,
                 conversation_id,
                 abort: abort.clone(),
+                phase: CodexToolWorkPhase::Executing,
             },
         );
         if cancel {
@@ -704,7 +766,7 @@ impl<S: StateStoreBackend, T: ToolsetBackend> CodexTools<S, T> {
             changed.as_mut().enable();
             if !self
                 .state()
-                .publications
+                .mutations
                 .keys()
                 .any(|owner| owner.generation == generation)
             {
@@ -764,15 +826,16 @@ impl<S: StateStoreBackend, T: ToolsetBackend> CodexTools<S, T> {
                 break;
             }
             if tokio::time::timeout_at(deadline, changed).await.is_err() {
-                let aborts = self
-                    .state()
-                    .tasks
-                    .values()
-                    .filter(|task| task.generation == generation)
-                    .map(|task| task.abort.clone())
-                    .collect::<Vec<_>>();
-                for abort in aborts {
-                    abort.abort();
+                {
+                    let mut state = self.state();
+                    for task in state.tasks.values_mut() {
+                        if task.generation == generation
+                            && task.phase == CodexToolWorkPhase::Executing
+                        {
+                            task.phase = CodexToolWorkPhase::Revoked;
+                            task.abort.abort();
+                        }
+                    }
                 }
                 if first_error.is_none() {
                     first_error = Some(KitError::timeout(
@@ -780,6 +843,18 @@ impl<S: StateStoreBackend, T: ToolsetBackend> CodexTools<S, T> {
                     ));
                 }
                 break;
+            }
+        }
+        for fence in self.state().generation_fences.values() {
+            if let CodexToolGenerationFence::Failed { owner, error } = fence
+                && owner.generation == generation
+            {
+                first_error = Some(match first_error.take() {
+                    Some(primary) => {
+                        primary.with_supplementary(error.clone().in_phase(ErrorPhase::Cleanup))
+                    }
+                    None => error.clone(),
+                });
             }
         }
         first_error.map_or(Ok(()), Err)
@@ -802,7 +877,8 @@ impl<S: StateStoreBackend, T: ToolsetBackend> CodexTools<S, T> {
         workspace_id: &WorkspaceId,
         conversation_id: &ConversationId,
         call: CodexDynamicToolCall,
-    ) -> Result<CodexDynamicToolCallResponse, KitError> {
+        effect: Option<&CodexPromptEffect>,
+    ) -> Result<CodexToolExecution, KitError> {
         let owner = CodexInteractionOwner::new(workspace_id, conversation_id, call.generation());
         let tool_name = ToolName::new(call.tool.clone())
             .map_err(|_| KitError::protocol("requested an invalid managed tool name"))?;
@@ -829,24 +905,144 @@ impl<S: StateStoreBackend, T: ToolsetBackend> CodexTools<S, T> {
             arguments: call.arguments,
         });
         loop {
+            if let Some(effect) = effect.filter(|effect| !effect.allows_effects()) {
+                return Ok(self.cancel_handler(&mut handler, effect).await);
+            }
             let output = handler.step(input).await;
             match output {
                 Ok(ToolHandlerOutput::Completed(result)) => {
-                    return CodexDynamicToolCallResponse::success(result);
+                    return CodexDynamicToolCallResponse::success(result)
+                        .map(CodexToolExecution::Response);
                 }
                 Err(error) => {
-                    return Ok(CodexDynamicToolCallResponse::tool_error(error));
+                    return Ok(CodexToolExecution::Response(
+                        CodexDynamicToolCallResponse::tool_error(error),
+                    ));
                 }
                 Ok(ToolHandlerOutput::Interaction(request)) => {
+                    if let Some(effect) = effect.filter(|effect| !effect.allows_effects()) {
+                        return Ok(self.cancel_handler(&mut handler, effect).await);
+                    }
                     input = match self.request_interaction(&owner, request).await? {
-                        ToolInteractionResponse::Cancel { reason, .. } => {
-                            ToolHandlerInput::Cancel { reason }
+                        CodexToolContinuation::Response(ToolInteractionResponse::Cancel {
+                            reason,
+                            ..
+                        }) => ToolHandlerInput::Cancel { reason },
+                        CodexToolContinuation::Response(response) => {
+                            ToolHandlerInput::Interaction(response)
                         }
-                        response => ToolHandlerInput::Interaction(response),
+                        CodexToolContinuation::Cancel {
+                            owner: cancelled,
+                            notification_id,
+                            request,
+                            deadline,
+                            completed,
+                        } => {
+                            if cancelled != owner {
+                                let primary = KitError::invalid_state(
+                                    "tool cancellation was transferred to another owner",
+                                );
+                                let error = primary.with_cleanup_result(
+                                    self.cancel_handler_before(&mut handler, deadline).await,
+                                );
+                                self.retain_retirement_failure(&owner, error.clone());
+                                let _ = completed.send(Err(error));
+                                return Ok(CodexToolExecution::Cancelled(Ok(())));
+                            }
+                            return Ok(self
+                                .settle_retirement(
+                                    &mut handler,
+                                    &owner,
+                                    notification_id,
+                                    *request,
+                                    deadline,
+                                    completed,
+                                )
+                                .await);
+                        }
                     };
                 }
             }
         }
+    }
+
+    async fn cancel_handler(
+        &self,
+        handler: &mut T::Handler,
+        effect: &CodexPromptEffect,
+    ) -> CodexToolExecution {
+        let primary = effect.interruption_error();
+        let cleanup = self
+            .cancel_handler_before(handler, self.cancellation_deadline())
+            .await;
+        CodexToolExecution::Cancelled(
+            cleanup
+                .map_err(|error| primary.with_supplementary(error.at_phase(ErrorPhase::Cleanup))),
+        )
+    }
+
+    async fn cancel_handler_before(
+        &self,
+        handler: &mut T::Handler,
+        deadline: tokio::time::Instant,
+    ) -> Result<(), KitError> {
+        match tokio::time::timeout_at(
+            deadline,
+            handler.step(ToolHandlerInput::Cancel {
+                reason: Some("managed tool generation ended".to_owned()),
+            }),
+        )
+        .await
+        {
+            Ok(Ok(ToolHandlerOutput::Completed(_)))
+            | Ok(Err(tools_kit::ToolError::Cancelled { .. })) => Ok(()),
+            Ok(Ok(ToolHandlerOutput::Interaction(_))) => Err(KitError::invalid_state(
+                "managed tool cancellation requested another interaction",
+            )),
+            Ok(Err(error)) => Err(KitError::from(error)),
+            Err(_) => Err(KitError::timeout(
+                "managed tool cancellation did not settle",
+            )),
+        }
+    }
+
+    async fn settle_retirement(
+        &self,
+        handler: &mut T::Handler,
+        owner: &CodexInteractionOwner,
+        notification_id: NotificationId,
+        request: ToolInteractionRequest,
+        deadline: tokio::time::Instant,
+        completed: tokio::sync::oneshot::Sender<Result<(), KitError>>,
+    ) -> CodexToolExecution {
+        let mutation = self.claim_retirement(owner);
+        let retirement = async {
+            match &mutation {
+                Ok(_) => {
+                    self.retire_interaction(&notification_id, owner, &request, deadline)
+                        .await
+                }
+                Err(error) => Err(error.clone()),
+            }
+        };
+        let (retirement, cancellation) =
+            tokio::join!(retirement, self.cancel_handler_before(handler, deadline));
+        let result = match (retirement, cancellation) {
+            (Ok(()), Ok(())) => Ok(()),
+            (Err(primary), cleanup) => Err(primary.with_cleanup_result(cleanup)),
+            (Ok(()), Err(cleanup)) => Err(KitError::cancelled("managed tool cancellation failed")
+                .with_cleanup_result(Err(cleanup))),
+        };
+        if let Err(error) = &result {
+            self.retain_retirement_failure(owner, error.clone());
+        }
+        drop(mutation);
+        self.reclaim_generation(&owner.generation);
+        let _ = completed.send(result);
+        // The original worker remains owned by the reader's JoinSet. Scoped
+        // failures stay in its existing generation fence, including when this
+        // observation receipt was abandoned; they are not native responses.
+        CodexToolExecution::Cancelled(Ok(()))
     }
 
     pub(crate) async fn resolve(
@@ -884,7 +1080,11 @@ impl<S: StateStoreBackend, T: ToolsetBackend> CodexTools<S, T> {
             KitError::conflict("tool interaction changed during durable resolution")
         })?;
         let generation = pending.owner.generation.clone();
-        let settlement = if pending.response.send(response).is_ok() {
+        let settlement = if pending
+            .response
+            .send(CodexToolContinuation::Response(response))
+            .is_ok()
+        {
             ResolutionSettlement::Accepted
         } else {
             ResolutionSettlement::Cancelled
@@ -981,7 +1181,7 @@ impl<S: StateStoreBackend, T: ToolsetBackend> CodexTools<S, T> {
             changed.as_mut().enable();
             if !self
                 .state()
-                .publications
+                .mutations
                 .keys()
                 .any(|owner| &owner.conversation_id == conversation_id)
             {
@@ -1041,15 +1241,16 @@ impl<S: StateStoreBackend, T: ToolsetBackend> CodexTools<S, T> {
                 break;
             }
             if tokio::time::timeout_at(deadline, changed).await.is_err() {
-                let aborts = self
-                    .state()
-                    .tasks
-                    .values()
-                    .filter(|task| &task.conversation_id == conversation_id)
-                    .map(|task| task.abort.clone())
-                    .collect::<Vec<_>>();
-                for abort in aborts {
-                    abort.abort();
+                {
+                    let mut state = self.state();
+                    for task in state.tasks.values_mut() {
+                        if &task.conversation_id == conversation_id
+                            && task.phase == CodexToolWorkPhase::Executing
+                        {
+                            task.phase = CodexToolWorkPhase::Revoked;
+                            task.abort.abort();
+                        }
+                    }
                 }
                 if first_error.is_none() {
                     first_error = Some(KitError::timeout(
@@ -1057,6 +1258,18 @@ impl<S: StateStoreBackend, T: ToolsetBackend> CodexTools<S, T> {
                     ));
                 }
                 break;
+            }
+        }
+        for fence in self.state().generation_fences.values() {
+            if let CodexToolGenerationFence::Failed { owner, error } = fence
+                && &owner.conversation_id == conversation_id
+            {
+                first_error = Some(match first_error.take() {
+                    Some(primary) => {
+                        primary.with_supplementary(error.clone().in_phase(ErrorPhase::Cleanup))
+                    }
+                    None => error.clone(),
+                });
             }
         }
         first_error.map_or(Ok(()), Err)
@@ -1089,7 +1302,7 @@ impl<S: StateStoreBackend, T: ToolsetBackend> CodexTools<S, T> {
             changed.as_mut().enable();
             if !self
                 .state()
-                .publications
+                .mutations
                 .keys()
                 .any(|owner| &owner.workspace_id == workspace_id)
             {
@@ -1149,15 +1362,16 @@ impl<S: StateStoreBackend, T: ToolsetBackend> CodexTools<S, T> {
                 break;
             }
             if tokio::time::timeout_at(deadline, changed).await.is_err() {
-                let aborts = self
-                    .state()
-                    .tasks
-                    .values()
-                    .filter(|task| &task.workspace_id == workspace_id)
-                    .map(|task| task.abort.clone())
-                    .collect::<Vec<_>>();
-                for abort in aborts {
-                    abort.abort();
+                {
+                    let mut state = self.state();
+                    for task in state.tasks.values_mut() {
+                        if &task.workspace_id == workspace_id
+                            && task.phase == CodexToolWorkPhase::Executing
+                        {
+                            task.phase = CodexToolWorkPhase::Revoked;
+                            task.abort.abort();
+                        }
+                    }
                 }
                 if first_error.is_none() {
                     first_error = Some(KitError::timeout(
@@ -1165,6 +1379,18 @@ impl<S: StateStoreBackend, T: ToolsetBackend> CodexTools<S, T> {
                     ));
                 }
                 break;
+            }
+        }
+        for fence in self.state().generation_fences.values() {
+            if let CodexToolGenerationFence::Failed { owner, error } = fence
+                && &owner.workspace_id == workspace_id
+            {
+                first_error = Some(match first_error.take() {
+                    Some(primary) => {
+                        primary.with_supplementary(error.clone().in_phase(ErrorPhase::Cleanup))
+                    }
+                    None => error.clone(),
+                });
             }
         }
         first_error.map_or(Ok(()), Err)
@@ -1188,7 +1414,7 @@ impl<S: StateStoreBackend, T: ToolsetBackend> CodexTools<S, T> {
         loop {
             let mut changed = std::pin::pin!(self.inner.changed.notified());
             changed.as_mut().enable();
-            if self.state().publications.is_empty() {
+            if self.state().mutations.is_empty() {
                 break;
             }
             if tokio::time::timeout_at(deadline, changed).await.is_err() {
@@ -1239,14 +1465,14 @@ impl<S: StateStoreBackend, T: ToolsetBackend> CodexTools<S, T> {
                 break;
             }
             if tokio::time::timeout_at(deadline, changed).await.is_err() {
-                let aborts = self
-                    .state()
-                    .tasks
-                    .values()
-                    .map(|task| task.abort.clone())
-                    .collect::<Vec<_>>();
-                for abort in aborts {
-                    abort.abort();
+                {
+                    let mut state = self.state();
+                    for task in state.tasks.values_mut() {
+                        if task.phase == CodexToolWorkPhase::Executing {
+                            task.phase = CodexToolWorkPhase::Revoked;
+                            task.abort.abort();
+                        }
+                    }
                 }
                 if first_error.is_none() {
                     first_error = Some(KitError::timeout(
@@ -1256,6 +1482,16 @@ impl<S: StateStoreBackend, T: ToolsetBackend> CodexTools<S, T> {
                 break;
             }
         }
+        for fence in self.state().generation_fences.values() {
+            if let CodexToolGenerationFence::Failed { error, .. } = fence {
+                first_error = Some(match first_error.take() {
+                    Some(primary) => {
+                        primary.with_supplementary(error.clone().in_phase(ErrorPhase::Cleanup))
+                    }
+                    None => error.clone(),
+                });
+            }
+        }
         first_error.map_or(Ok(()), Err)
     }
 
@@ -1263,10 +1499,13 @@ impl<S: StateStoreBackend, T: ToolsetBackend> CodexTools<S, T> {
         let cancellation_error = self.cancel_all(deadline).await.err();
         let toolsets = self.toolsets().take().unwrap_or_default();
         let shutdown_error = Self::shutdown_registrations(toolsets, deadline).await.err();
-        if let Some(error) = cancellation_error.or(shutdown_error) {
-            return Err(error);
+        match (cancellation_error, shutdown_error) {
+            (Some(primary), Some(cleanup)) => {
+                Err(primary.with_supplementary(cleanup.in_phase(ErrorPhase::Cleanup)))
+            }
+            (Some(error), None) | (None, Some(error)) => Err(error),
+            (None, None) => Ok(()),
         }
-        Ok(())
     }
 
     async fn cancel_interaction(
@@ -1275,31 +1514,313 @@ impl<S: StateStoreBackend, T: ToolsetBackend> CodexTools<S, T> {
         notification_id: NotificationId,
         deadline: tokio::time::Instant,
     ) -> Result<(), KitError> {
-        let resolution = self
-            .resolve(
-                conversation_id,
-                notification_id.clone(),
-                NotificationResolution::Dismiss {
-                    reason: "managed tool work ended".to_owned(),
-                },
-                deadline,
-            )
-            .await;
-        if matches!(resolution, Ok(true)) {
+        let pending = self.pending().remove(&notification_id);
+        let Some(pending) = pending else {
             return Ok(());
-        }
-        if let Some(pending) = self.pending().remove(&notification_id) {
-            let generation = pending.owner.generation.clone();
-            let _ = pending.response.send(ToolInteractionResponse::cancel(
-                pending.request.id,
-                Some("managed tool work ended".to_owned()),
+        };
+        let owner = pending.owner;
+        let handoff = {
+            let mut state = self.state();
+            match state.tasks.get_mut(&pending.task) {
+                Some(task)
+                    if &owner.conversation_id == conversation_id
+                        && task.generation == owner.generation
+                        && task.workspace_id == owner.workspace_id
+                        && task.conversation_id == owner.conversation_id
+                        && task.phase == CodexToolWorkPhase::Executing =>
+                {
+                    task.phase = CodexToolWorkPhase::Retiring;
+                    Ok(())
+                }
+                _ => Err(KitError::invalid_state(
+                    "managed tool cancellation has no matching live worker",
+                )),
+            }
+        };
+        if let Err(error) = handoff {
+            self.retain_retirement_failure(&owner, error.clone());
+            let _ = pending.response.send(CodexToolContinuation::Response(
+                ToolInteractionResponse::cancel(
+                    pending.request.id,
+                    Some("managed tool work ended".to_owned()),
+                ),
             ));
-            self.reclaim_generation(&generation);
+            return Err(error);
         }
-        match resolution {
-            Ok(_) => Ok(()),
-            Err(error) if matches!(error.kind(), ErrorKind::Closed | ErrorKind::NotFound) => Ok(()),
-            Err(error) => Err(error),
+        let (completed, completion) = tokio::sync::oneshot::channel();
+        if pending
+            .response
+            .send(CodexToolContinuation::Cancel {
+                owner: owner.clone(),
+                notification_id,
+                request: Box::new(pending.request),
+                deadline,
+                completed,
+            })
+            .is_err()
+        {
+            let error = KitError::invalid_state(
+                "managed tool cancellation worker disappeared before handoff",
+            );
+            self.retain_retirement_failure(&owner, error.clone());
+            return Err(error);
+        }
+        self.inner.changed.notify_waiters();
+        tokio::time::timeout_at(deadline, completion)
+            .await
+            .map_err(|_| KitError::timeout("managed tool retirement observation deadline elapsed"))?
+            .map_err(|_| {
+                KitError::invalid_state("managed tool retirement owner ended without a receipt")
+            })?
+    }
+
+    fn retain_retirement_failure(&self, owner: &CodexInteractionOwner, error: KitError) {
+        let mut state = self.state();
+        state
+            .closing_conversations
+            .insert(owner.conversation_id.clone());
+        match state.generation_fences.get_mut(&owner.generation) {
+            Some(CodexToolGenerationFence::Failed {
+                owner: retained,
+                error: primary,
+            }) if retained == owner => {
+                *primary = primary
+                    .clone()
+                    .with_supplementary(error.in_phase(ErrorPhase::Cleanup));
+            }
+            _ => {
+                state.generation_fences.insert(
+                    owner.generation.clone(),
+                    CodexToolGenerationFence::Failed {
+                        owner: owner.clone(),
+                        error,
+                    },
+                );
+            }
+        }
+        drop(state);
+        self.inner.changed.notify_waiters();
+    }
+
+    pub(crate) fn revoke_execution(&self) -> bool {
+        let mut state = self.state();
+        state.closing = true;
+        let mut retiring = false;
+        for task in state.tasks.values_mut() {
+            match task.phase {
+                CodexToolWorkPhase::Executing => {
+                    task.phase = CodexToolWorkPhase::Revoked;
+                    task.abort.abort();
+                }
+                CodexToolWorkPhase::Retiring => retiring = true,
+                CodexToolWorkPhase::Revoked => {}
+            }
+        }
+        retiring
+    }
+
+    fn claim_retirement(
+        &self,
+        owner: &CodexInteractionOwner,
+    ) -> Result<CodexToolMutation<S, T>, KitError> {
+        let mut state = self.state();
+        let owns_retirement = state.tasks.get(&tokio::task::id()).is_some_and(|task| {
+            task.phase == CodexToolWorkPhase::Retiring
+                && task.generation == owner.generation
+                && task.workspace_id == owner.workspace_id
+                && task.conversation_id == owner.conversation_id
+        });
+        if !owns_retirement
+            || !(state.closing
+                || state.closing_workspaces.contains(&owner.workspace_id)
+                || state.closing_conversations.contains(&owner.conversation_id)
+                || state.generation_is_fenced(&owner.generation))
+        {
+            return Err(KitError::invalid_state(
+                "tool cancellation does not own this generation",
+            ));
+        }
+        let mutations = state.mutations.entry(owner.clone()).or_default();
+        *mutations = mutations.checked_add(1).ok_or_else(|| {
+            KitError::invalid_state("tool interaction mutation count is exhausted")
+        })?;
+        Ok(CodexToolMutation {
+            inner: self.inner.clone(),
+            owner: owner.clone(),
+        })
+    }
+
+    async fn retire_interaction(
+        &self,
+        notification_id: &NotificationId,
+        owner: &CodexInteractionOwner,
+        request: &ToolInteractionRequest,
+        deadline: tokio::time::Instant,
+    ) -> Result<(), KitError> {
+        if tokio::time::Instant::now() >= deadline {
+            return Err(KitError::timeout(
+                "tool interaction retirement deadline elapsed",
+            ));
+        }
+        let expected = CodexToolInteractionRecord::new(
+            self.inner.agent_id.clone(),
+            owner.workspace_id.clone(),
+            owner.conversation_id.clone(),
+            notification_id.clone(),
+        );
+        let key = CodexToolInteractionRecord::key(&self.inner.agent_id, notification_id)?;
+        let kind = CodexToolInteractionResolution::notification(request)?;
+        let store = self.inner.storage.store();
+        let mut transaction = tokio::time::timeout_at(deadline, store.begin_transaction())
+            .await
+            .map_err(|_| KitError::timeout("tool interaction retirement could not begin"))?
+            .map_err(|error| {
+                KitError::from_state_store(error, "tool interaction retirement could not begin")
+                    .in_phase(ErrorPhase::StateWrite)
+            })?;
+        let staged = tokio::time::timeout_at(deadline, async {
+            let snapshot = transaction
+                .load(key.clone())
+                .await
+                .map_err(|error| {
+                    KitError::from_state_store(
+                        error,
+                        "tool interaction obligation could not be loaded",
+                    )
+                    .in_phase(ErrorPhase::StateRead)
+                })?
+                .ok_or_else(|| {
+                    KitError::invalid_state("tool interaction obligation is missing")
+                        .in_phase(ErrorPhase::StateRead)
+                })?;
+            if CodexToolInteractionRecord::decode(snapshot, &self.inner.agent_id)
+                .map_err(|error| error.in_phase(ErrorPhase::StateRead))?
+                != expected
+            {
+                return Err(KitError::invalid_state(
+                    "tool interaction obligation changed during cancellation",
+                )
+                .in_phase(ErrorPhase::StateRead));
+            }
+            NotificationStore::<S>::ensure_interaction_matches_in_transaction(
+                &mut transaction,
+                &owner.conversation_id,
+                notification_id,
+                &kind,
+            )
+            .await
+            .map_err(|error| error.into_match_sdk().in_phase(ErrorPhase::StateRead))?;
+            NotificationStore::<S>::ensure_interaction_pending_in_transaction(
+                &mut transaction,
+                &owner.conversation_id,
+                notification_id,
+            )
+            .await
+            .map_err(|error| error.in_phase(ErrorPhase::StateRead))?;
+            let receipt = NotificationStore::<S>::reconcile_native_resolution_in_transaction(
+                &mut transaction,
+                &owner.conversation_id,
+                notification_id,
+                ResolutionSettlement::Cancelled,
+            )
+            .await
+            .map_err(NotificationSettlementError::into_reconciliation_sdk)?;
+            transaction.delete(key.clone()).await.map_err(|error| {
+                KitError::from_state_store(
+                    error,
+                    "tool interaction obligation could not be removed",
+                )
+                .in_phase(ErrorPhase::StateWrite)
+            })?;
+            Ok::<_, KitError>(receipt)
+        })
+        .await
+        .map_err(|_| KitError::timeout("tool interaction retirement deadline elapsed"))
+        .and_then(|result| result);
+        let receipt = match staged {
+            Ok(receipt) if tokio::time::Instant::now() < deadline => receipt,
+            result => {
+                let error = match result {
+                    Ok(_) => KitError::timeout("tool interaction retirement deadline elapsed"),
+                    Err(error) => error,
+                };
+                return Err(
+                    error.with_cleanup_result(transaction.rollback().await.map_err(|error| {
+                        KitError::from_state_store(
+                            error,
+                            "tool interaction retirement could not roll back",
+                        )
+                        .at_phase(ErrorPhase::Cleanup)
+                    })),
+                );
+            }
+        };
+        // Once admitted, native commit authority is awaited even beyond the
+        // original deadline. No second transaction or responder send is replayed.
+        let commit_error = match transaction.commit().await {
+            Ok(()) => {
+                self.inner
+                    .notifications
+                    .finish_reconciliation(&owner.conversation_id);
+                return Ok(());
+            }
+            Err(error @ storage_kit::StateStoreError::TransactionConflict { .. }) => {
+                return Err(KitError::from_state_store(
+                    error,
+                    "tool interaction retirement conflicted",
+                )
+                .in_phase(ErrorPhase::StateCommit));
+            }
+            Err(error) => {
+                KitError::from_state_store(error, "tool interaction retirement could not commit")
+                    .in_phase(ErrorPhase::StateCommit)
+            }
+        };
+        if tokio::time::Instant::now() >= deadline {
+            return Err(commit_error.with_supplementary(
+                KitError::timeout("tool interaction retirement confirmation deadline elapsed")
+                    .at_phase(ErrorPhase::Cleanup),
+            ));
+        }
+        let observed = tokio::time::timeout_at(deadline, async {
+            let journal = receipt.observe(store).await?;
+            let obligation = store.load(key).await.map_err(|error| {
+                KitError::from_state_store(
+                    error,
+                    "tool interaction retirement obligation could not be observed",
+                )
+                .in_phase(ErrorPhase::StateRead)
+            })?;
+            match (journal, obligation) {
+                (NotificationMutationObservation::Expected, None) => Ok(true),
+                (NotificationMutationObservation::Unchanged, Some(snapshot)) => {
+                    if CodexToolInteractionRecord::decode(snapshot, &self.inner.agent_id)?
+                        == expected
+                    {
+                        Ok(false)
+                    } else {
+                        Err(KitError::invalid_state(
+                            "tool interaction retirement obligation changed",
+                        ))
+                    }
+                }
+                _ => Err(KitError::invalid_state(
+                    "tool interaction retirement receipt is contradictory",
+                )),
+            }
+        })
+        .await
+        .map_err(|_| KitError::timeout("tool interaction retirement confirmation deadline elapsed"))
+        .and_then(|result| result);
+        match observed {
+            Ok(true) => {
+                self.inner
+                    .notifications
+                    .finish_reconciliation(&owner.conversation_id);
+                Ok(())
+            }
+            Ok(false) => Err(commit_error),
+            Err(error) => Err(commit_error.with_supplementary(error.at_phase(ErrorPhase::Cleanup))),
         }
     }
 
@@ -1307,7 +1828,7 @@ impl<S: StateStoreBackend, T: ToolsetBackend> CodexTools<S, T> {
         &self,
         owner: &CodexInteractionOwner,
         request: ToolInteractionRequest,
-    ) -> Result<ToolInteractionResponse, KitError> {
+    ) -> Result<CodexToolContinuation, KitError> {
         let publication = {
             let mut state = self.state();
             if state.closing
@@ -1315,16 +1836,18 @@ impl<S: StateStoreBackend, T: ToolsetBackend> CodexTools<S, T> {
                 || state.closing_conversations.contains(&owner.conversation_id)
                 || state.generation_is_fenced(&owner.generation)
             {
-                return Ok(ToolInteractionResponse::cancel(
-                    request.id.clone(),
-                    Some("managed tool generation ended".to_owned()),
+                return Ok(CodexToolContinuation::Response(
+                    ToolInteractionResponse::cancel(
+                        request.id.clone(),
+                        Some("managed tool generation ended".to_owned()),
+                    ),
                 ));
             }
-            let publications = state.publications.entry(owner.clone()).or_default();
-            *publications = publications.checked_add(1).ok_or_else(|| {
+            let mutations = state.mutations.entry(owner.clone()).or_default();
+            *mutations = mutations.checked_add(1).ok_or_else(|| {
                 KitError::invalid_state("tool interaction publication count is exhausted")
             })?;
-            CodexToolPublication {
+            CodexToolMutation {
                 inner: self.inner.clone(),
                 owner: owner.clone(),
             }
@@ -1340,7 +1863,7 @@ impl<S: StateStoreBackend, T: ToolsetBackend> CodexTools<S, T> {
         &self,
         owner: &CodexInteractionOwner,
         request: ToolInteractionRequest,
-    ) -> Result<tokio::sync::oneshot::Receiver<ToolInteractionResponse>, KitError> {
+    ) -> Result<tokio::sync::oneshot::Receiver<CodexToolContinuation>, KitError> {
         let kind = CodexToolInteractionResolution::notification(&request)?;
         let (response, receiver) = tokio::sync::oneshot::channel();
         let store = self.inner.storage.store();
@@ -1379,6 +1902,7 @@ impl<S: StateStoreBackend, T: ToolsetBackend> CodexTools<S, T> {
                 CodexPendingToolInteraction {
                     owner: owner.clone(),
                     request,
+                    task: tokio::task::id(),
                     response,
                 },
             )

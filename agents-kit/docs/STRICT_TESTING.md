@@ -84,6 +84,30 @@ results are rejected, while real structured-only content, including JSON
 `null`, and nonempty model-visible failures remain usable. This is evidence
 about the agent-owned loop, not an assertion that a built-in provider emitted
 any of those results.
+The `custom_mock_composition`, `custom_prompt_runtime`, and
+`codex_prompt_stream` targets cover the bounded milestone contract. They require
+one Preparing fact for tool-free prompts and at most one additional Tool fact,
+including large batches and multiple turns; complete invalid batches cannot
+publish Tool or construct handlers. Held transaction receipts, exact conflicts,
+lost acknowledgments, observer loss, interaction barriers, saturation, and cold
+reopen preserve immutable facts and effect boundaries. Custom's exclusive-writer
+fixtures distinguish admission/publication deadlock from deadline-bookkeeping
+deadlock and observe settlement before cleanup can supply cancellation. Codex
+controls distinguish thread and turn attribution, preserve healthy early
+callback behavior without inventing a milestone, and require publication
+failure to survive a successful native terminal and allow reuse only after
+confirmed settlement.
+
+These new behavior tests do not by themselves establish pre-existing production
+bugs. Preserve their original failures, fixture corrections, and subsequent
+source-specific outcomes separately. Existing strict-live prompts assert the
+same new ordering without adding model calls: Custom requires its exact
+milestones, while Codex permits the tool milestone to remain absent when native
+attribution was unavailable. Reacquiring a receiver can replay its last passive
+fact with exactly the same identity, timestamp, and payload; a quiet receive
+timeout does not prove acknowledgment. All existing native scenarios and six
+raw OpenCode copy grades remain required.
+
 Model-selection coverage separately verifies Codex's advertised effort choices,
 sticky override reset after omission, model changes, and reopen. A missing
 sourced reset default and an unadvertised effort must fail before `turn/start`.

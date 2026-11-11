@@ -471,6 +471,7 @@ impl<S: StateStoreBackend, D: DatabaseBackend, P: ProviderBackend, T: ToolsetBac
             provider,
             tools.clone(),
             requests.clone(),
+            state.notifications().clone(),
             custom,
             lifecycle_timeout,
         );

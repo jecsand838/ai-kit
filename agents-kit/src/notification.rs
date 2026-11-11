@@ -115,7 +115,11 @@ pub enum ConversationNotificationKind {
         /// Current portable process state.
         state: ProcessState,
     },
-    /// Reports passive progress without completing a prompt.
+    /// Reports passive advisory progress without completing a prompt.
+    ///
+    /// The supplied Codex and Custom prompt milestones describe history; they do
+    /// not establish current activity, remote acceptance, or tool success.
+    /// Published facts are immutable. Unacknowledged facts remain in the journal.
     Progress {
         /// Short progress label.
         label: String,

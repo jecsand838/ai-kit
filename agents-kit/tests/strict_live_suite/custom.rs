@@ -421,22 +421,50 @@ impl StrictCustomScenario {
         receiver: &mut ConversationNotificationReceiver,
     ) -> ConversationNotification {
         tokio::time::timeout(PROMPT_TIMEOUT, async {
-            loop {
-                let notification = receiver
-                    .recv()
-                    .await
-                    .expect("strict-live Custom notification stream must remain open")
-                    .expect("strict-live Custom notification delivery must succeed");
-                if matches!(
+            let preparing = Self::receive_progress(receiver, "Preparing response").await;
+            let tools = Self::receive_progress(receiver, "Tool calls requested").await;
+            assert_ne!(
+                preparing, tools,
+                "Custom milestones have distinct identities"
+            );
+            let notification = receiver
+                .recv()
+                .await
+                .expect("strict-live Custom notification stream must remain open")
+                .expect("strict-live Custom notification delivery must succeed");
+            assert!(
+                matches!(
                     notification.kind(),
                     ConversationNotificationKind::Interaction { .. }
-                ) {
-                    return notification;
-                }
-            }
+                ),
+                "the two milestones must be followed by the real Interaction"
+            );
+            assert_ne!(notification.id(), &preparing);
+            assert_ne!(notification.id(), &tools);
+            notification
         })
         .await
         .expect("strict-live Custom interaction must arrive")
+    }
+
+    async fn receive_progress(
+        receiver: &mut ConversationNotificationReceiver,
+        expected: &str,
+    ) -> NotificationId {
+        let notification = tokio::time::timeout(PROMPT_TIMEOUT, receiver.recv())
+            .await
+            .expect("Custom milestone delivery remains bounded")
+            .expect("Custom milestone delivery remains open")
+            .expect("Custom milestone delivery succeeds");
+        let ConversationNotificationKind::Progress { label, detail } = notification.kind() else {
+            panic!("expected {expected}, received {:?}", notification.kind());
+        };
+        assert_eq!(label, expected);
+        assert!(
+            detail.is_none(),
+            "Custom milestones carry no provider or tool detail"
+        );
+        notification.id().clone()
     }
 
     async fn settle_hierarchy<P: ProviderBackend>(
@@ -490,6 +518,7 @@ impl StrictCustomScenario {
         );
 
         let generation = owned_conversation.insert(self.conversation(workspace, "provider-model").await);
+        let mut receiver = generation.notification_stream().expect("Custom generation receiver opens");
         let generation_token = format!("CUSTOM_MODEL_GENERATION_{}", uuid::Uuid::new_v4().simple());
         self.diagnostics.enter(ScenarioStage::PlainGeneration);
         self.prompt(
@@ -500,6 +529,7 @@ impl StrictCustomScenario {
         )
         .await;
 
+        let plain_preparing = Self::receive_progress(&mut receiver, "Preparing response").await;
         let continuation_before = self.continuation_calls.load(Ordering::SeqCst);
         self.diagnostics.enter(ScenarioStage::FunctionContinuation);
         let continuation_token = format!(
@@ -520,9 +550,17 @@ impl StrictCustomScenario {
             continuation_before + 1,
             "one normalized function call must execute through Toolset -> ToolHandler"
         );
+        let tool_preparing = Self::receive_progress(&mut receiver, "Preparing response").await;
+        let tool_requested = Self::receive_progress(&mut receiver, "Tool calls requested").await;
+        assert_ne!(plain_preparing, tool_preparing);
+        assert_ne!(plain_preparing, tool_requested);
+        assert_ne!(tool_preparing, tool_requested);
         Self::settle_hierarchy(None, None, owned_conversation.take())
             .await
             .finish(Ok(Ok(())));
+        assert!(tokio::time::timeout(LIFECYCLE_TIMEOUT, receiver.recv())
+            .await.expect("closed Custom notification stream must drain").is_none(),
+            "plain and tool prompts publish exactly one and two milestones");
 
         self.prove_parallel_bound(workspace).await;
         self.prove_caller_cancellation_and_reuse(workspace).await;
@@ -905,6 +943,7 @@ impl StrictCustomScenario {
         })
         .await
         .expect("caller-cancelled Custom work must settle for clean reuse");
+        Self::receive_progress(&mut receiver, "Preparing response").await;
         assert_eq!(
             self.interaction_calls.load(Ordering::SeqCst),
             calls_before + 1,
@@ -1038,6 +1077,7 @@ impl StrictCustomScenario {
                         let notification = notification
                             .expect("strict-live Custom approval stream must remain open")
                             .expect("strict-live Custom approval delivery must succeed");
+                        assert!(!matches!(notification.kind(), ConversationNotificationKind::Progress { .. }), "approval continuation must not repeat either milestone");
                         if matches!(
                             notification.kind(),
                             ConversationNotificationKind::Interaction { .. }
@@ -1172,6 +1212,7 @@ impl StrictCustomScenario {
                 match tokio::time::timeout_at(deadline, receiver.recv()).await {
                     Err(_) => break,
                     Ok(Some(Ok(notification))) => {
+                        assert!(!matches!(notification.kind(), ConversationNotificationKind::Progress { .. }), "reopen must not recreate already acknowledged prompt milestones");
                         assert_ne!(
                             notification.id(),
                             &facts.notification_id,

@@ -8,15 +8,20 @@ mod mock_memory;
 mod mock_runtime;
 
 use std::num::NonZeroUsize;
+use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
+
+use futures_util::FutureExt;
 
 use agents_kit::config::{AgentConfig, CustomAgentConfig, CustomLoopLimits, CustomToolApproval};
 use agents_kit::conversation::NewConversation;
 use agents_kit::error::{ErrorDetail, ErrorKind, ErrorPhase};
 use agents_kit::model::ModelSelector;
-use agents_kit::notification::{ConversationNotificationKind, NotificationResolution};
+use agents_kit::notification::{
+    ConversationNotificationKind, ConversationNotificationReceiver, NotificationResolution,
+};
 use agents_kit::prompt::{PromptEvent, PromptRequest, StructuredOutputRequest, UsageInfo};
 use agents_kit::tool::ToolSelection;
 use agents_kit::workspace::{
@@ -28,7 +33,9 @@ use agents_kit::{
     Agent, AgentBackend, AgentBuilder, AgentStorage, Conversation, ConversationBackend, Workspace,
     WorkspaceBackend,
 };
-use providers_kit::generation::{ContentPart, FinishReason, GenerateEvent, Role};
+use providers_kit::generation::{
+    ContentPart, FinishReason, FunctionCall, GenerateEvent, GenerateResponse, Message, Role,
+};
 use providers_kit::{ModelBackend, ProviderBackend};
 use tools_kit::declaration::ToolName;
 use tools_kit::execution::{ToolHandlerInput, ToolInvocation};
@@ -551,6 +558,33 @@ impl<T: ToolsetBackend> Fixture<T> {
         self.state.assert_consumed();
         assert_eq!(self.provider.shutdowns(), 1);
         assert_eq!(self.tools.shutdowns(), 1);
+    }
+
+    async fn finish_with_notifications(
+        self,
+        mut receiver: ConversationNotificationReceiver,
+    ) -> Vec<ConversationNotificationKind> {
+        self.conversation
+            .close()
+            .await
+            .expect("conversation cleanup");
+        let observed = tokio::time::timeout(Duration::from_secs(3), async {
+            let mut observed = Vec::new();
+            while let Some(item) = receiver.recv().await {
+                observed.push(item.expect("notification").kind().clone());
+            }
+            observed
+        })
+        .await;
+        drop(receiver);
+        self.workspace.close().await.expect("workspace cleanup");
+        self.agent.shutdown().await.expect("agent cleanup");
+        self.provider.assert_consumed();
+        self.tools.assert_consumed();
+        self.state.assert_consumed();
+        assert_eq!(self.provider.shutdowns(), 1);
+        assert_eq!(self.tools.shutdowns(), 1);
+        observed.expect("bounded notification terminal drain")
     }
 
     async fn finish(self) {
@@ -1188,6 +1222,20 @@ async fn same_process_reconstruction_uses_history_without_opaque_continuations()
         .prompt(PromptRequest::new("first question").expect("prompt"))
         .await
         .expect("first completion");
+    let mut notifications = fixture
+        .conversation
+        .notification_stream()
+        .expect("receiver before shutdown");
+    let preparing = tokio::time::timeout(Duration::from_secs(3), notifications.recv())
+        .await
+        .expect("bounded preparing milestone")
+        .expect("source")
+        .expect("preparing milestone");
+    assert_eq!(
+        preparing.kind(),
+        &Fixture::<MockTools>::milestone_expectation(false)[0]
+    );
+    drop(notifications); // A delivered passive fact is still unacknowledged.
     let agent_id = fixture.agent.id();
     let workspace_id = fixture.workspace.id();
     let conversation_id = fixture.conversation.id();
@@ -1219,6 +1267,26 @@ async fn same_process_reconstruction_uses_history_without_opaque_continuations()
         .get_conversation(conversation_id)
         .await
         .expect("conversation reopen");
+    let mut notifications = conversation
+        .notification_stream()
+        .expect("reopened receiver");
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(3), notifications.recv())
+            .await
+            .expect("bounded replay")
+            .expect("source")
+            .expect("replayed preparing"),
+        preparing
+    );
+    let requested = tokio::time::timeout(Duration::from_secs(3), notifications.recv())
+        .await
+        .expect("bounded tools replay")
+        .expect("source")
+        .expect("replayed tools");
+    assert_eq!(
+        requested.kind(),
+        &Fixture::<MockTools>::milestone_expectation(true)[1]
+    );
     assert_eq!(
         conversation
             .prompt(PromptRequest::new("second question").expect("prompt"))
@@ -1248,6 +1316,17 @@ async fn same_process_reconstruction_uses_history_without_opaque_continuations()
         2,
         "reopen must not replay old effects"
     );
+    let fresh = tokio::time::timeout(Duration::from_secs(3), notifications.recv())
+        .await
+        .expect("bounded fresh milestone")
+        .expect("source")
+        .expect("fresh preparing");
+    assert_eq!(
+        fresh.kind(),
+        &Fixture::<MockTools>::milestone_expectation(false)[0]
+    );
+    assert_ne!(fresh.id(), preparing.id());
+    drop(notifications);
     conversation.close().await.expect("close conversation");
     workspace.close().await.expect("close workspace");
     reopened.shutdown().await.expect("shutdown");
@@ -2328,6 +2407,10 @@ async fn excluded_tool_call_is_rejected_before_executable_handler_creation() {
 #[tokio::test]
 async fn custom_validation_rejects_non_object_structured_schema_before_provider_effects() {
     let fixture = Fixture::new(Vec::new(), Vec::new()).await;
+    let receiver = fixture
+        .conversation
+        .notification_stream()
+        .expect("validation receiver");
     let request = PromptRequest::new("invalid Custom schema")
         .expect("request")
         .with_structured_output(
@@ -2342,7 +2425,10 @@ async fn custom_validation_rejects_non_object_structured_schema_before_provider_
     assert_eq!(error.kind(), ErrorKind::InvalidInput);
     assert!(fixture.provider.requests().is_empty());
     assert_eq!(fixture.tools.handlers(), 0);
-    fixture.finish().await;
+    assert!(
+        fixture.finish_with_notifications(receiver).await.is_empty(),
+        "failed local preflight must publish no Preparing milestone"
+    );
 }
 
 #[tokio::test]
@@ -2366,4 +2452,603 @@ async fn actual_custom_file_reads_preserve_exact_bytes_and_reject_escaping_paths
     assert_eq!(error.kind(), ErrorKind::InvalidInput);
     assert!(fixture.provider.requests().is_empty());
     fixture.finish().await;
+}
+
+impl Fixture<MockTools> {
+    fn milestone_expectation(tool_calls: bool) -> Vec<ConversationNotificationKind> {
+        let mut expected = vec![ConversationNotificationKind::Progress {
+            label: "Preparing response".into(),
+            detail: None,
+        }];
+        if tool_calls {
+            expected.push(ConversationNotificationKind::Progress {
+                label: "Tool calls requested".into(),
+                detail: None,
+            });
+        }
+        expected
+    }
+
+    fn function_batch(count: usize) -> GenerateResponse<Continuation> {
+        let mut response = ProviderControl::response("replaced by tool batch");
+        response.message = Message::assistant(
+            Vec::new(),
+            (0..count)
+                .map(|index| {
+                    FunctionCall::new(
+                        Some(format!("private-call-{index}")),
+                        TOOL,
+                        serde_json::json!({"key":"answer"}),
+                    )
+                    .expect("function call")
+                })
+                .collect(),
+        )
+        .expect("assistant")
+        .with_continuation(Continuation::new())
+        .expect("opaque continuation");
+        response.finish_reason = Some(FinishReason::ToolCall);
+        response
+    }
+}
+
+#[tokio::test]
+async fn custom_progress_milestones_are_bounded_across_unary_and_streamed_turns() {
+    for streaming in [false, true] {
+        for tool_turns in [0, 3] {
+            let responses = (0..tool_turns)
+                .map(|_| Fixture::<MockTools>::function_batch(2))
+                .chain(std::iter::once(ProviderControl::response("complete")));
+            let steps = responses
+                .map(|response| {
+                    if streaming {
+                        ProviderStep::Stream(vec![Ok(GenerateEvent::Completed(Box::new(response)))])
+                    } else {
+                        ProviderStep::unary(response)
+                    }
+                })
+                .collect();
+            let tools = ToolControl::scripted(
+                (0..tool_turns)
+                    .flat_map(|_| {
+                        (0..2).map(|index| {
+                            ToolScript::new(ToolOutcome::Completed)
+                                .with_call_id(format!("private-call-{index}"))
+                        })
+                    })
+                    .collect(),
+            );
+            let fixture = Fixture::build(
+                steps,
+                tools.tools(),
+                tools,
+                CustomToolApproval::Allow,
+                CustomLoopLimits::new(4, 6, 2).expect("limits"),
+            )
+            .await;
+            let receiver = fixture
+                .conversation
+                .notification_stream()
+                .expect("receiver");
+            let exercised = AssertUnwindSafe(async {
+                let response = if streaming {
+                    let mut stream = fixture
+                        .conversation
+                        .prompt_stream(PromptRequest::new("private prompt").expect("request"))
+                        .await
+                        .expect("stream");
+                    let response = match stream.recv().await.expect("terminal").expect("response") {
+                        PromptEvent::Completed(response) => response,
+                        event => panic!("unexpected stream event: {event:?}"),
+                    };
+                    assert!(stream.recv().await.is_none());
+                    response
+                } else {
+                    fixture
+                        .conversation
+                        .prompt(PromptRequest::new("private prompt").expect("request"))
+                        .await
+                        .expect("response")
+                };
+                assert_eq!(response.output(), "complete");
+                assert_eq!(
+                    response.usage(),
+                    Some(&UsageInfo::new(2 * (tool_turns + 1), 3 * (tool_turns + 1)))
+                );
+                assert_eq!(fixture.tools.invocations().len(), tool_turns as usize * 2);
+            })
+            .catch_unwind()
+            .await;
+            let cleanup = AssertUnwindSafe(fixture.finish_with_notifications(receiver))
+                .catch_unwind()
+                .await;
+            if let Err(primary) = exercised {
+                std::panic::resume_unwind(primary);
+            }
+            let observed = match cleanup {
+                Ok(observed) => observed,
+                Err(failure) => std::panic::resume_unwind(failure),
+            };
+            assert_eq!(
+                observed,
+                Fixture::<MockTools>::milestone_expectation(tool_turns != 0)
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn custom_progress_large_tool_batch_cannot_fill_the_notification_journal() {
+    let count = 4_097;
+    let tools = ToolControl::scripted(
+        (0..count)
+            .map(|index| {
+                ToolScript::new(ToolOutcome::Completed)
+                    .with_call_id(format!("private-call-{index}"))
+            })
+            .collect(),
+    );
+    let fixture = Fixture::build(
+        vec![
+            ProviderStep::unary(Fixture::<MockTools>::function_batch(count)),
+            ProviderStep::unary(ProviderControl::response("large batch complete")),
+        ],
+        tools.tools(),
+        tools,
+        CustomToolApproval::Allow,
+        CustomLoopLimits::new(2, count, 16).expect("limits"),
+    )
+    .await;
+    let receiver = fixture
+        .conversation
+        .notification_stream()
+        .expect("receiver");
+    let result = AssertUnwindSafe(tokio::time::timeout(
+        Duration::from_secs(20),
+        fixture
+            .conversation
+            .prompt(PromptRequest::new("many tools").expect("request")),
+    ))
+    .catch_unwind()
+    .await;
+    let invocations = fixture.tools.invocations().len();
+    let cleanup = AssertUnwindSafe(fixture.finish_with_notifications(receiver))
+        .catch_unwind()
+        .await;
+    let result = match result {
+        Ok(result) => result,
+        Err(primary) => std::panic::resume_unwind(primary),
+    };
+    assert_eq!(
+        result.expect("bounded batch").expect("completion").output(),
+        "large batch complete"
+    );
+    assert_eq!(invocations, count);
+    let observed = match cleanup {
+        Ok(observed) => observed,
+        Err(failure) => std::panic::resume_unwind(failure),
+    };
+    assert_eq!(observed, Fixture::<MockTools>::milestone_expectation(true));
+}
+
+#[tokio::test]
+async fn custom_progress_provider_rejection_preserves_error_and_clean_history() {
+    for kind in [
+        providers_kit::error::ErrorKind::InvalidInput,
+        providers_kit::error::ErrorKind::Unsupported,
+    ] {
+        let expected = if kind == providers_kit::error::ErrorKind::InvalidInput {
+            ErrorKind::InvalidInput
+        } else {
+            ErrorKind::Unsupported
+        };
+        let fixture = Fixture::new(
+            vec![
+                ProviderStep::Failure(providers_kit::KitError::new(
+                    kind,
+                    providers_kit::error::Operation::Generate,
+                    providers_kit::error::ErrorPhase::InputValidation,
+                )),
+                ProviderStep::unary(ProviderControl::response("fresh completion")),
+            ],
+            Vec::new(),
+        )
+        .await;
+        let receiver = fixture
+            .conversation
+            .notification_stream()
+            .expect("receiver");
+        let rejected = fixture
+            .conversation
+            .prompt(PromptRequest::new("rejected").expect("request"))
+            .await;
+        let next = fixture
+            .conversation
+            .prompt(PromptRequest::new("fresh").expect("request"))
+            .await;
+        let requests = fixture.provider.requests();
+        let tools = fixture.tools.invocations();
+        let observed = fixture.finish_with_notifications(receiver).await;
+        assert_eq!(rejected.expect_err("provider rejection").kind(), expected);
+        assert_eq!(
+            next.expect("admission released").output(),
+            "fresh completion"
+        );
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[1].messages().len(), 1);
+        assert_eq!(
+            requests[1].messages()[0].content(),
+            &[ContentPart::Text {
+                text: "fresh".into()
+            }]
+        );
+        assert!(tools.is_empty());
+        let mut expected = Fixture::<MockTools>::milestone_expectation(false);
+        expected.extend(Fixture::<MockTools>::milestone_expectation(false));
+        assert_eq!(observed, expected);
+    }
+}
+
+#[tokio::test]
+async fn custom_progress_rejects_invalid_and_exhausted_batches_before_tool_milestone() {
+    for invalid_shape in [false, true] {
+        for streaming in [false, true] {
+            let mut rejected = Fixture::<MockTools>::function_batch(3);
+            if invalid_shape {
+                rejected.finish_reason = Some(FinishReason::Stop);
+            }
+            let rejected = if streaming {
+                ProviderStep::Stream(vec![Ok(GenerateEvent::Completed(Box::new(rejected)))])
+            } else {
+                ProviderStep::unary(rejected)
+            };
+            let fixture = Fixture::configured(
+                vec![
+                    rejected,
+                    ProviderStep::unary(ProviderControl::response("clean reuse")),
+                ],
+                Vec::new(),
+                CustomToolApproval::Allow,
+                CustomLoopLimits::new(2, 2, 1).expect("limits"),
+            )
+            .await;
+            let receiver = fixture
+                .conversation
+                .notification_stream()
+                .expect("receiver");
+            let result = if streaming {
+                let mut output = fixture
+                    .conversation
+                    .prompt_stream(PromptRequest::new("invalid batch").expect("request"))
+                    .await
+                    .expect("stream");
+                let result = output.recv().await.expect("terminal");
+                assert!(output.recv().await.is_none());
+                result.map(|_| ())
+            } else {
+                fixture
+                    .conversation
+                    .prompt(PromptRequest::new("invalid batch").expect("request"))
+                    .await
+                    .map(|_| ())
+            };
+            let handlers = fixture.tools.handlers();
+            let invocations = fixture.tools.invocations();
+            let reused = fixture
+                .conversation
+                .prompt(PromptRequest::new("fresh batch").expect("request"))
+                .await;
+            let requests = fixture.provider.requests();
+            let observed = fixture.finish_with_notifications(receiver).await;
+            assert_eq!(
+                result.expect_err("batch rejection").kind(),
+                if invalid_shape {
+                    ErrorKind::Protocol
+                } else {
+                    ErrorKind::InvalidState
+                }
+            );
+            assert_eq!(handlers, 0);
+            assert!(invocations.is_empty());
+            assert_eq!(reused.expect("reusable admission").output(), "clean reuse");
+            assert_eq!(requests[1].messages().len(), 1);
+            let mut expected = Fixture::<MockTools>::milestone_expectation(false);
+            expected.extend(Fixture::<MockTools>::milestone_expectation(false));
+            assert_eq!(
+                observed, expected,
+                "invalid or exhausted batches never claim requested tool work"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn custom_progress_interaction_barrier_keeps_exact_order_after_observer_drop() {
+    let fixture = Fixture::new(
+        vec![
+            ProviderStep::Stream(vec![Ok(GenerateEvent::Completed(Box::new(
+                ProviderControl::function(&Continuation::new()),
+            )))]),
+            ProviderStep::Stream(vec![Ok(GenerateEvent::Completed(Box::new(
+                ProviderControl::response("resolved"),
+            )))]),
+        ],
+        vec![ToolOutcome::Interaction],
+    )
+    .await;
+    let mut receiver = fixture
+        .conversation
+        .notification_stream()
+        .expect("receiver");
+    let output = fixture
+        .conversation
+        .prompt_stream(PromptRequest::new("interaction and observer loss").expect("request"))
+        .await
+        .expect("stream");
+    let mut prefix = Vec::new();
+    let interaction = tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let item = receiver
+                .recv()
+                .await
+                .expect("source")
+                .expect("notification");
+            if matches!(
+                item.kind(),
+                ConversationNotificationKind::Interaction { .. }
+            ) {
+                break item;
+            }
+            prefix.push(item.kind().clone());
+        }
+    })
+    .await
+    .expect("bounded interaction");
+    drop(output);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(30), receiver.recv())
+            .await
+            .is_err(),
+        "unresolved interaction remains a delivery barrier"
+    );
+    assert_eq!(fixture.provider.requests().len(), 1);
+    assert_eq!(fixture.tools.interactions().len(), 0);
+    fixture
+        .conversation
+        .resolve_notification(
+            interaction.id().clone(),
+            NotificationResolution::Submit {
+                content: serde_json::json!("42"),
+            },
+        )
+        .await
+        .expect("resolve exact interaction");
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while fixture.provider.requests().len() != 2 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("accepted prompt continues after observer drop");
+    assert_eq!(fixture.tools.interactions().len(), 1);
+    assert_eq!(fixture.tools.invocations().len(), 1);
+    let remaining = fixture.finish_with_notifications(receiver).await;
+    assert_eq!(
+        prefix,
+        Fixture::<MockTools>::milestone_expectation(true),
+        "the exact two milestones precede the Interaction"
+    );
+    assert!(
+        remaining.is_empty(),
+        "resolved interaction and milestones are not republished"
+    );
+}
+
+#[tokio::test]
+async fn custom_progress_unread_journal_saturates_without_eviction_or_new_effects() {
+    // Failed turns retain truthful milestones without spending the separate
+    // 32-successful-turn history bound. No private record is seeded or rewritten.
+    let prompts = 2_048;
+    let steps = (0..prompts)
+        .flat_map(|_| {
+            [
+                ProviderStep::unary(ProviderControl::function(&Continuation::new())),
+                ProviderStep::Failure(providers_kit::KitError::new(
+                    providers_kit::error::ErrorKind::Unsupported,
+                    providers_kit::error::Operation::Generate,
+                    providers_kit::error::ErrorPhase::InputValidation,
+                )),
+            ]
+        })
+        .chain(std::iter::once(ProviderStep::unary(
+            ProviderControl::response("after acknowledgement"),
+        )))
+        .collect();
+    let fixture = Fixture::new(
+        steps,
+        (0..prompts).map(|_| ToolOutcome::Completed).collect(),
+    )
+    .await;
+    let mut receiver = fixture
+        .conversation
+        .notification_stream()
+        .expect("receiver");
+    let started = std::time::Instant::now();
+    let mut completed_prompts = 0;
+    // Debug validation repeatedly visits the retained journal. Measured filling
+    // reached 1,024 prompts in 80s; keep full capacity with a finite aggregate
+    // budget and independently bound each prompt to expose a stalled owner.
+    let observed = AssertUnwindSafe(tokio::time::timeout(Duration::from_secs(600), async {
+        let first = tokio::time::timeout(
+            Duration::from_secs(5),
+            fixture
+                .conversation
+                .prompt(PromptRequest::new("retained first").expect("request")),
+        )
+        .await
+        .expect("first failed prompt remains bounded")
+        .expect_err("scripted failure");
+        assert_eq!(first.kind(), ErrorKind::Unsupported);
+        completed_prompts = 1;
+        let first = tokio::time::timeout(Duration::from_secs(3), receiver.recv())
+            .await
+            .expect("first milestone stays bounded")
+            .expect("source")
+            .expect("first milestone");
+        assert_eq!(
+            first.kind(),
+            &Fixture::<MockTools>::milestone_expectation(false)[0]
+        );
+        drop(receiver);
+        for _ in 1..prompts {
+            let error = tokio::time::timeout(
+                Duration::from_secs(5),
+                fixture
+                    .conversation
+                    .prompt(PromptRequest::new("unread failed turn").expect("request")),
+            )
+            .await
+            .unwrap_or_else(|_| {
+                panic!(
+                    "unread prompt {} stalled after {:?}",
+                    completed_prompts + 1,
+                    started.elapsed()
+                )
+            })
+            .expect_err("scripted failure");
+            assert_eq!(error.kind(), ErrorKind::Unsupported);
+            completed_prompts += 1;
+            if completed_prompts % 256 == 0 {
+                eprintln!(
+                    "journal saturation: {completed_prompts}/{prompts} prompts in {:?}",
+                    started.elapsed()
+                );
+            }
+        }
+        let blocked = tokio::time::timeout(
+            Duration::from_secs(5),
+            fixture
+                .conversation
+                .prompt(PromptRequest::new("must not reach model").expect("request")),
+        )
+        .await
+        .expect("full journal failure remains bounded")
+        .expect_err("full journal blocks publication");
+        assert_eq!(blocked.kind(), ErrorKind::Integration);
+        assert_eq!(fixture.provider.requests().len(), prompts * 2);
+        assert_eq!(fixture.tools.invocations().len(), prompts);
+        let mut receiver = fixture
+            .conversation
+            .notification_stream()
+            .expect("reacquire receiver");
+        assert_eq!(
+            receiver
+                .recv()
+                .await
+                .expect("source")
+                .expect("replayed first"),
+            first,
+            "unacknowledged identity, timestamp and content cannot be evicted"
+        );
+        let second = receiver
+            .recv()
+            .await
+            .expect("source")
+            .expect("second milestone");
+        assert_eq!(
+            second.kind(),
+            &Fixture::<MockTools>::milestone_expectation(true)[1]
+        );
+        let next = tokio::time::timeout(
+            Duration::from_secs(5),
+            fixture
+                .conversation
+                .prompt(PromptRequest::new("after acknowledgement").expect("request")),
+        )
+        .await
+        .expect("acknowledged slot permits bounded prompt")
+        .expect("one acknowledged slot permits fresh work");
+        assert_eq!(next.output(), "after acknowledgement");
+        assert_eq!(fixture.provider.requests().len(), prompts * 2 + 1);
+        assert_eq!(fixture.tools.invocations().len(), prompts);
+        drop(receiver);
+    }))
+    .catch_unwind()
+    .await;
+    eprintln!(
+        "journal saturation observation ended: {completed_prompts}/{prompts} prompts in {:?}",
+        started.elapsed()
+    );
+    let cleanup = AssertUnwindSafe(fixture.finish()).catch_unwind().await;
+    match observed {
+        Ok(observed) => observed.expect("bounded truthful journal saturation"),
+        Err(primary) => std::panic::resume_unwind(primary),
+    }
+    if let Err(failure) = cleanup {
+        std::panic::resume_unwind(failure);
+    }
+}
+
+#[tokio::test]
+async fn custom_notification_receipt_conflict_preserves_delivery_across_a_concurrent_append() {
+    let model = Gate::new();
+    let receipt = mock_memory::CommitGate::new();
+    let fixture = Fixture::new(
+        vec![
+            ProviderStep::GatedStream {
+                gate: Arc::clone(&model),
+                events: vec![Ok(GenerateEvent::Completed(Box::new(
+                    ProviderControl::function(&Continuation::new()),
+                )))],
+            },
+            ProviderStep::Stream(vec![Ok(GenerateEvent::Completed(Box::new(
+                ProviderControl::response("completed once"),
+            )))]),
+        ],
+        vec![ToolOutcome::Completed],
+    )
+    .await;
+    let mut receiver = fixture
+        .conversation
+        .notification_stream()
+        .expect("receiver");
+    let observed = AssertUnwindSafe(tokio::time::timeout(Duration::from_secs(5), async {
+        let mut output = fixture.conversation.prompt_stream(
+            PromptRequest::new("append during acknowledgment").expect("request"),
+        ).await.expect("prompt admission");
+        model.entered().await;
+        let preparing = receiver.recv().await.expect("source").expect("Preparing");
+        assert_eq!(preparing.kind(), &Fixture::<MockTools>::milestone_expectation(false)[0]);
+        fixture.state.commit_as(CommitOutcome::Admitted(Arc::clone(&receipt)));
+        let mut next = Box::pin(receiver.recv());
+        tokio::select! {
+            () = receipt.entered() => {},
+            item = &mut next => panic!("acknowledgment crossed its transaction gate: {item:?}"),
+        }
+        // The receiver owns a real snapshot containing Preparing. Let the real
+        // prompt append Tool while that acknowledgment is still uncommitted.
+        model.release();
+        assert!(matches!(output.recv().await, Some(Ok(PromptEvent::Completed(response))) if response.output() == "completed once"));
+        assert!(output.recv().await.is_none());
+        fixture.state.settle_admitted();
+        receipt.assert_conflicted();
+        let requested = next.await.expect("source remains live").expect("conflicting acknowledgment must reconcile");
+        assert_eq!(requested.kind(), &Fixture::<MockTools>::milestone_expectation(true)[1]);
+        assert_ne!(requested.id(), preparing.id());
+        assert_eq!(fixture.provider.requests().len(), 2, "receipt retry cannot regenerate");
+        assert_eq!(fixture.tools.invocations().len(), 1, "receipt retry cannot repeat tool work");
+    })).catch_unwind().await;
+    model.release();
+    fixture.state.settle_admitted();
+    let cleanup = AssertUnwindSafe(fixture.finish_with_notifications(receiver))
+        .catch_unwind()
+        .await;
+    match observed {
+        Ok(observed) => observed.expect("bounded concurrent acknowledgment"),
+        Err(primary) => std::panic::resume_unwind(primary),
+    }
+    assert!(
+        cleanup.expect("fixture cleanup").is_empty(),
+        "acknowledged facts cannot replay after the terminal drain"
+    );
 }

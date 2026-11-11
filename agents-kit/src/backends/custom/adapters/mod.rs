@@ -6,6 +6,7 @@ pub(crate) mod files;
 use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroUsize;
 use std::sync::Arc;
+use std::time::Duration;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use futures_util::stream::{self, StreamExt};
@@ -16,7 +17,8 @@ use providers_kit::generation::{
 };
 use providers_kit::models::{ModelId, ModelListRequest, ModelPage};
 use providers_kit::{ModelBackend, ProviderBackend};
-use tokio::sync::watch;
+use tokio::sync::{oneshot, watch};
+use tokio::time::Instant;
 use tools_kit::execution::{
     ToolContent, ToolHandlerInput, ToolHandlerOutput, ToolInvocation, ToolResult,
 };
@@ -24,10 +26,12 @@ use tools_kit::execution::{
 use crate::backends::custom::server_requests::{CustomApprovalDecision, CustomServerRequests};
 use crate::backends::custom::state_store::records::CustomGeneration;
 use crate::backends::custom::tools::CustomTools;
-use crate::prompt::PromptOutput;
+use crate::core::notification_store::NotificationStore;
+use crate::prompt::{PromptMilestone, PromptOutput};
 use crate::{
     ConversationId, CustomLoopLimits, CustomToolApproval, KitError, ModelInfo, ModelSelector,
-    PromptResponse, ReasoningEffort, StructuredOutputRequest, ToolSelection, UsageInfo,
+    NotificationId, PromptResponse, ReasoningEffort, StructuredOutputRequest, ToolSelection,
+    UsageInfo,
 };
 use storage_kit::{DatabaseBackend, StateStoreBackend};
 use tools_kit::ToolHandlerBackend;
@@ -47,7 +51,9 @@ pub(crate) struct CustomProviderRuntime<
     provider: Arc<P>,
     tools: CustomTools<T>,
     requests: CustomServerRequests<S, D, T>,
+    notifications: NotificationStore<S>,
     tool_approval: CustomToolApproval,
+    lifecycle_timeout: Duration,
 }
 
 pub(crate) struct CustomProviderCall {
@@ -60,6 +66,7 @@ pub(crate) struct CustomProviderCall {
     response_format: Option<ResponseFormat>,
     reasoning: Option<ReasoningConfig>,
     output: Option<Arc<PromptOutput>>,
+    deadline: Option<Instant>,
 }
 
 #[derive(Clone, Copy)]
@@ -193,7 +200,9 @@ impl<S: StateStoreBackend, D: DatabaseBackend, P: ProviderBackend, T: ToolsetBac
             provider: Arc::clone(&self.provider),
             tools: self.tools.clone(),
             requests: self.requests.clone(),
+            notifications: self.notifications.clone(),
             tool_approval: self.tool_approval,
+            lifecycle_timeout: self.lifecycle_timeout,
         }
     }
 }
@@ -205,14 +214,57 @@ impl<S: StateStoreBackend, D: DatabaseBackend, P: ProviderBackend, T: ToolsetBac
         provider: Arc<P>,
         tools: CustomTools<T>,
         requests: CustomServerRequests<S, D, T>,
+        notifications: NotificationStore<S>,
         tool_approval: CustomToolApproval,
+        lifecycle_timeout: Duration,
     ) -> Self {
         Self {
             provider,
             tools,
             requests,
+            notifications,
             tool_approval,
+            lifecycle_timeout,
         }
+    }
+
+    fn check_effect(
+        &self,
+        cancellation: &watch::Receiver<bool>,
+        deadline: Option<Instant>,
+    ) -> Result<(), KitError> {
+        if *cancellation.borrow() {
+            return Err(Self::cancelled_error());
+        }
+        if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+            return Err(KitError::timeout(
+                "prompt deadline elapsed before the next effect",
+            ));
+        }
+        Ok(())
+    }
+
+    async fn publish_milestone(
+        &self,
+        conversation_id: &ConversationId,
+        milestone: PromptMilestone,
+        cancellation: &watch::Receiver<bool>,
+        prompt_deadline: Option<Instant>,
+    ) -> Result<(), KitError> {
+        self.check_effect(cancellation, prompt_deadline)?;
+        let lifecycle_deadline = Instant::now() + self.lifecycle_timeout;
+        let deadline = prompt_deadline.map_or(lifecycle_deadline, |deadline| {
+            deadline.min(lifecycle_deadline)
+        });
+        self.notifications
+            .publish_with_id_before(
+                conversation_id,
+                NotificationId::new(),
+                milestone.into_notification(),
+                deadline,
+            )
+            .await?;
+        self.check_effect(cancellation, prompt_deadline)
     }
 
     async fn execute_function(
@@ -220,10 +272,9 @@ impl<S: StateStoreBackend, D: DatabaseBackend, P: ProviderBackend, T: ToolsetBac
         conversation_id: ConversationId,
         call: FunctionCall,
         mut cancellation: watch::Receiver<bool>,
+        deadline: Option<Instant>,
     ) -> Result<FunctionResult, KitError> {
-        if *cancellation.borrow() {
-            return Err(Self::cancelled_error());
-        }
+        self.check_effect(&cancellation, deadline)?;
         match self.tool_approval {
             CustomToolApproval::Deny => {
                 return self.denied_function_result(&call, None);
@@ -251,9 +302,7 @@ impl<S: StateStoreBackend, D: DatabaseBackend, P: ProviderBackend, T: ToolsetBac
             CustomToolApproval::Allow => {}
         }
 
-        if *cancellation.borrow() {
-            return Err(Self::cancelled_error());
-        }
+        self.check_effect(&cancellation, deadline)?;
         let mut handler = tokio::select! {
             biased;
             changed = cancellation.changed() => {
@@ -270,6 +319,7 @@ impl<S: StateStoreBackend, D: DatabaseBackend, P: ProviderBackend, T: ToolsetBac
                     arguments: call.arguments().clone(),
                 }),
                 &mut cancellation,
+                deadline,
             )
             .await?;
         loop {
@@ -289,6 +339,9 @@ impl<S: StateStoreBackend, D: DatabaseBackend, P: ProviderBackend, T: ToolsetBac
                     });
                 }
                 ToolHandlerOutput::Interaction(request) => {
+                    if let Err(error) = self.check_effect(&cancellation, deadline) {
+                        return Err(self.cancel_handler(&mut handler, error).await);
+                    }
                     let response = tokio::select! {
                         biased;
                         changed = cancellation.changed() => {
@@ -308,6 +361,7 @@ impl<S: StateStoreBackend, D: DatabaseBackend, P: ProviderBackend, T: ToolsetBac
                             &mut handler,
                             ToolHandlerInput::Interaction(response),
                             &mut cancellation,
+                            deadline,
                         )
                         .await?;
                 }
@@ -320,9 +374,10 @@ impl<S: StateStoreBackend, D: DatabaseBackend, P: ProviderBackend, T: ToolsetBac
         handler: &mut T::Handler,
         input: ToolHandlerInput,
         cancellation: &mut watch::Receiver<bool>,
+        deadline: Option<Instant>,
     ) -> Result<ToolHandlerOutput, KitError> {
-        if *cancellation.borrow() {
-            return Err(self.cancel_handler(handler, Self::cancelled_error()).await);
+        if let Err(error) = self.check_effect(cancellation, deadline) {
+            return Err(self.cancel_handler(handler, error).await);
         }
         let result = {
             let step = handler.step(input);
@@ -464,6 +519,7 @@ impl CustomProviderCall {
         tools: ToolSelection,
         limits: CustomLoopLimits,
         output: Option<Arc<PromptOutput>>,
+        deadline: Option<Instant>,
     ) -> Self {
         Self {
             conversation_id,
@@ -475,6 +531,7 @@ impl CustomProviderCall {
             response_format: None,
             reasoning: None,
             output,
+            deadline,
         }
     }
 
@@ -509,6 +566,7 @@ impl CustomProviderCall {
         self,
         runtime: CustomProviderRuntime<S, D, P, T>,
         mut cancellation: watch::Receiver<bool>,
+        execution_release: oneshot::Receiver<()>,
     ) -> Result<PromptResponse, KitError> {
         let Self {
             conversation_id,
@@ -520,6 +578,7 @@ impl CustomProviderCall {
             response_format,
             reasoning,
             output,
+            deadline,
         } = self;
         let model = runtime
             .provider
@@ -544,11 +603,11 @@ impl CustomProviderCall {
         let mut input_tokens = 0_u64;
         let mut output_tokens = 0_u64;
         let mut has_complete_usage = true;
+        let mut execution_release = Some(execution_release);
+        let mut tools_published = false;
 
         for _ in 0..limits.max_model_turns() {
-            if *cancellation.borrow() {
-                return Err(CustomProviderRuntime::<S, D, P, T>::cancelled_error());
-            }
+            runtime.check_effect(&cancellation, deadline)?;
             let generation = GenerationConfig::default()
                 .with_tool_choice(Self::tool_choice(&tools, required_pending));
             let mut request = GenerateRequest::new(messages.clone())
@@ -563,6 +622,20 @@ impl CustomProviderCall {
             if let Some(reasoning) = reasoning.clone() {
                 request = request.with_reasoning(reasoning);
             }
+            if let Some(release) = execution_release.take() {
+                release
+                    .await
+                    .map_err(|_| CustomProviderRuntime::<S, D, P, T>::cancelled_error())?;
+                runtime
+                    .publish_milestone(
+                        &conversation_id,
+                        PromptMilestone::Preparing,
+                        &cancellation,
+                        deadline,
+                    )
+                    .await?;
+            }
+            runtime.check_effect(&cancellation, deadline)?;
             let completion = async {
                 let Some(output) = output.as_deref() else {
                     return model
@@ -606,6 +679,7 @@ impl CustomProviderCall {
                 }
                 response = completion => response?,
             };
+            runtime.check_effect(&cancellation, deadline)?;
             Self::validate_completion(&response)?;
             runtime
                 .tools
@@ -639,6 +713,18 @@ impl CustomProviderCall {
                     "model exceeded the configured tool-action limit",
                 ));
             }
+            if !tools_published {
+                runtime
+                    .publish_milestone(
+                        &conversation_id,
+                        PromptMilestone::ToolCallsRequested,
+                        &cancellation,
+                        deadline,
+                    )
+                    .await?;
+                tools_published = true;
+            }
+            runtime.check_effect(&cancellation, deadline)?;
             let parallel = limits.max_parallel_tool_actions();
             let executions = stream::iter(calls.into_iter().map(|call| {
                 let runtime = runtime.clone();
@@ -646,7 +732,7 @@ impl CustomProviderCall {
                 let cancellation = cancellation.clone();
                 async move {
                     runtime
-                        .execute_function(conversation_id, call, cancellation)
+                        .execute_function(conversation_id, call, cancellation, deadline)
                         .await
                 }
             }))

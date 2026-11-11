@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use futures_util::FutureExt;
 
+use agents_kit::identity::NotificationId;
 use agents_kit::notification::{
     ConversationNotification, ConversationNotificationKind, ConversationNotificationReceiver,
     NotificationResolution, ProcessState,
@@ -17,6 +18,54 @@ use crate::opencode_question_evidence::readback::NativeQuestionReadback;
 
 pub(super) struct DeliveryScenario;
 
+/// Evidence for one original live Codex prompt, including delayed eligible tools.
+pub(super) enum CodexProgress {
+    Pending,
+    Preparing(NotificationId),
+    Tools,
+    Settled,
+}
+
+impl CodexProgress {
+    pub(super) fn observe(&mut self, notification: &ConversationNotification) {
+        let ConversationNotificationKind::Progress { label, detail } = notification.kind() else {
+            panic!("Codex progress evidence requires a Progress fact");
+        };
+        assert!(
+            detail.is_none(),
+            "fixed progress must carry no native detail"
+        );
+        match (&*self, label.as_str()) {
+            (Self::Pending, "Preparing response") => {
+                *self = Self::Preparing(notification.id().clone());
+            }
+            (Self::Preparing(preparing), "Tool calls requested") => {
+                assert_ne!(
+                    preparing,
+                    notification.id(),
+                    "milestones have distinct identities"
+                );
+                *self = Self::Tools;
+            }
+            _ => {
+                panic!("Codex emitted an out-of-order, duplicate, or unexpected milestone: {label}")
+            }
+        }
+    }
+
+    pub(super) fn assert_preparing(&self) {
+        assert!(
+            matches!(self, Self::Preparing(_) | Self::Tools),
+            "the original live prompt must publish Preparing response"
+        );
+    }
+
+    pub(super) fn finish(&mut self) {
+        self.assert_preparing();
+        *self = Self::Settled;
+    }
+}
+
 enum CodexRequestScenario {
     Stdin,
     NonblockingInput,
@@ -25,20 +74,31 @@ enum CodexRequestScenario {
 impl CodexRequestScenario {
     async fn prompt(
         conversation: &Conversation,
+        owned_notifications: &mut Option<ConversationNotificationReceiver>,
         request: PromptRequest,
         expected_approval: Option<&str>,
         deadline: tokio::time::Instant,
     ) -> agents_kit::prompt::PromptResponse {
-        let mut notifications = conversation.notification_stream().unwrap();
+        let mut notifications = owned_notifications
+            .take()
+            .expect("request receiver remains owned across prompt stages");
         let mut prompt = Box::pin(conversation.prompt(request));
         let mut approvals = 0;
+        let mut progress = CodexProgress::Pending;
+        let mut last_progress = None;
         let response = tokio::time::timeout_at(deadline, async {
             loop {
                 tokio::select! {
                     biased;
                     notification = notifications.recv() => {
                         let notification = notification.expect("native delivery remains open").unwrap();
+                        if matches!(notification.kind(), ConversationNotificationKind::Progress { .. }) {
+                            progress.observe(&notification);
+                            last_progress = Some(notification.clone());
+                        }
                         if let ConversationNotificationKind::Interaction { title, response_schema, .. } = notification.kind() {
+                            progress.assert_preparing();
+                            last_progress = None;
                             assert_eq!(Some(title.as_str()), expected_approval, "the exact native approval kind is required");
                             assert!(response_schema.is_none());
                             approvals += 1;
@@ -48,6 +108,9 @@ impl CodexRequestScenario {
                             // Delivery remains fenced until this turn settles;
                             // its identity-only callback notification is not acceptance.
                             break (&mut prompt).await.expect("approved native prompt must complete");
+                        }
+                        if !matches!(notification.kind(), ConversationNotificationKind::Progress { .. }) {
+                            last_progress = None;
                         }
                     }
                     result = &mut prompt => break result.expect("native prompt must complete"),
@@ -59,6 +122,61 @@ impl CodexRequestScenario {
             usize::from(expected_approval.is_some()),
             "failure to elicit the native request is blocking"
         );
+        // Reconcile the ambiguous approval before observing its remaining facts.
+        // Retain this receiver across Stdin stages: a quiet receive does not
+        // prove the final passive acknowledgment committed before cancellation.
+        if approvals != 0 {
+            drop(notifications);
+            notifications = conversation.notification_stream().unwrap();
+        } else {
+            last_progress = None;
+        }
+        if matches!(progress, CodexProgress::Pending) {
+            let preparing = tokio::time::timeout_at(deadline, notifications.recv())
+                .await
+                .expect("required Preparing delivery remains within the original deadline")
+                .expect("required Preparing delivery remains open")
+                .expect("required Preparing delivery succeeds");
+            progress.observe(&preparing);
+        }
+        let quiet = (tokio::time::Instant::now() + DeliveryScenario::QUIET_TIMEOUT).min(deadline);
+        loop {
+            match tokio::time::timeout_at(quiet, notifications.recv()).await {
+                Err(_) => break,
+                Ok(Some(Ok(notification))) => {
+                    // Only the first delivery after reacquisition can be the
+                    // final unacknowledged fact from the previous receiver.
+                    if let Some(previous) = last_progress.take()
+                        && previous.id() == notification.id()
+                    {
+                        assert_eq!(
+                            previous, notification,
+                            "unacknowledged progress replays unchanged"
+                        );
+                        continue;
+                    }
+                    match notification.kind() {
+                        ConversationNotificationKind::Progress { .. } => {
+                            progress.observe(&notification)
+                        }
+                        ConversationNotificationKind::Interaction { .. } => {
+                            panic!("settled request must not publish another approval")
+                        }
+                        _ => {}
+                    }
+                }
+                Ok(Some(Err(error))) => panic!("settled request notification failed: {error}"),
+                Ok(None) => panic!("request delivery closed before conversation close"),
+            }
+        }
+        if expected_approval.is_none() {
+            assert!(
+                matches!(progress, CodexProgress::Preparing(_)),
+                "unsupported request_user_input must not invent a tool milestone"
+            );
+        }
+        progress.finish();
+        *owned_notifications = Some(notifications);
         response
     }
 
@@ -89,17 +207,18 @@ impl CodexRequestScenario {
             let personality = agents_kit::model::PersonalitySelector::new("none").unwrap();
             let rejected = conversation.prompt(PromptRequest::new("must not start").unwrap().with_model(model.clone()).with_personality(personality)).await.unwrap_err();
             assert_eq!(rejected.kind(), agents_kit::error::ErrorKind::Unsupported);
+            let mut notifications = Some(conversation.notification_stream().unwrap());
             match self {
                 Self::Stdin => {
                     std::fs::write(directory.join("stdin_check.py"), "import signal,sys\nfrom pathlib import Path\nsignal.alarm(120)\ntext=sys.stdin.readline()\nPath('stdin-result.txt').write_text(text)\nprint(text,end='',flush=True)\n").unwrap();
                     let launch = PromptRequest::new("Use exec_command exactly once to run `python3 -u stdin_check.py` in the current workspace with tty=true, yield_time_ms=1000, sandbox_permissions=\"require_escalated\", and justification=\"Start the owned stdin approval test\". Keep the returned session_id for the next turn. Do not write stdin, poll, or invoke another tool. Once the running session is returned, reply exactly STDIN_READY.").unwrap()
                         .with_model(model.clone()).with_timeout(DeliveryScenario::CODEX_TIMEOUT).unwrap();
-                    let ready = Self::prompt(conversation, launch, Some("Command approval"), deadline).await;
+                    let ready = Self::prompt(conversation, &mut notifications, launch, Some("Command approval"), deadline).await;
                     assert_eq!(ready.output(), "STDIN_READY");
                     let token = StrictFixture::unique("STDIN_ACCEPTED");
                     let input = PromptRequest::new(format!("Call write_stdin exactly once for the session_id returned in the previous turn, with chars equal to `{token}\\n` (one trailing newline), yield_time_ms=1000. Await approval and process completion. Do not start a new command. Reply exactly {token}." )).unwrap()
                         .with_model(model).with_timeout(DeliveryScenario::CODEX_TIMEOUT).unwrap();
-                    let response = Self::prompt(conversation, input, Some("Terminal input approval"), deadline).await;
+                    let response = Self::prompt(conversation, &mut notifications, input, Some("Terminal input approval"), deadline).await;
                     assert_eq!(response.output(), token);
                     assert_eq!(std::fs::read_to_string(directory.join("stdin-result.txt")).unwrap(), format!("{token}\n"), "the real reviewed process must receive the exact input");
                     input_evidence.lock().unwrap_or_else(std::sync::PoisonError::into_inner).assert_stdin_approvals();
@@ -108,7 +227,7 @@ impl CodexRequestScenario {
                     let request = PromptRequest::new("Stay in Default mode. Call the native request_user_input tool exactly once with one question: id=choice, header=Choice, question=Choose a value?, options=[{label:First,description:First choice},{label:Second,description:Second choice}]. Do not imitate the tool call in text. After the tool returns, including cancellation or unsupported response, reply exactly INPUT_SETTLED. Do not call other tools.").unwrap()
                         .with_model(model).with_timeout(DeliveryScenario::CODEX_TIMEOUT).unwrap();
                     process.prepare_input_evidence(&directory, request.model().unwrap().as_str(), request.text());
-                    let response = Self::prompt(conversation, request, None, deadline).await;
+                    let response = Self::prompt(conversation, &mut notifications, request, None, deadline).await;
                     assert_eq!(response.output(), "INPUT_SETTLED");
                     process.assert_nonblocking_response();
                 }
@@ -344,6 +463,7 @@ async fn codex_process_delivery_is_ordered_durable_exclusive_and_drains() {
             .expect("Codex process stream must be admitted");
         let mut prompt = Box::pin(NativeCleanup::observe_stream(stream));
         let mut response = None;
+        let mut progress = CodexProgress::Pending;
 
         let running = loop {
                 tokio::select! {
@@ -353,6 +473,7 @@ async fn codex_process_delivery_is_ordered_durable_exclusive_and_drains() {
                             .expect("Codex delivery must remain open")
                             .expect("Codex notification must succeed");
                         match notification.kind() {
+                            ConversationNotificationKind::Progress { .. } => progress.observe(&notification),
                             ConversationNotificationKind::Interaction { .. } => {
                                 if DeliveryScenario::resolve_codex_approval(&conversation, &notification).await {
                                     // Native enqueue is ambiguous. The same prompt's terminal
@@ -380,6 +501,7 @@ async fn codex_process_delivery_is_ordered_durable_exclusive_and_drains() {
                     }
                 }
         };
+        progress.assert_preparing();
         let running_id = running.id().clone();
         let running_label = match running.kind() {
             ConversationNotificationKind::Process {
@@ -411,6 +533,7 @@ async fn codex_process_delivery_is_ordered_durable_exclusive_and_drains() {
                             .expect("Codex delivery must remain open")
                             .expect("Codex notification must succeed");
                         match notification.kind() {
+                            ConversationNotificationKind::Progress { .. } => progress.observe(&notification),
                             ConversationNotificationKind::Interaction { .. } => {
                                 if DeliveryScenario::resolve_codex_approval(&conversation, &notification).await {
                                     // Native enqueue is ambiguous. The same prompt's terminal
@@ -458,18 +581,34 @@ async fn codex_process_delivery_is_ordered_durable_exclusive_and_drains() {
         assert_eq!(response.output(), format!("{token}_DONE"));
         drop(prompt);
 
-        receiver
+        (receiver, progress)
     }))
     .catch_unwind()
     .await;
 
     // Preserve the original assertion failure until all owned resources settle.
     let conversation_closed = conversation.close().await;
-    let drained = if let Ok(Ok(receiver)) = &mut observed {
+    let drained = if let Ok(Ok((receiver, progress))) = &mut observed {
         Some(
-            std::panic::AssertUnwindSafe(DeliveryScenario::drain(receiver))
-                .catch_unwind()
-                .await,
+            std::panic::AssertUnwindSafe(async {
+                tokio::time::timeout(DeliveryScenario::DRAIN_TIMEOUT, async {
+                    while let Some(notification) = receiver.recv().await {
+                        let notification =
+                            notification.expect("Codex terminal drain remains valid");
+                        if matches!(
+                            notification.kind(),
+                            ConversationNotificationKind::Progress { .. }
+                        ) {
+                            progress.observe(&notification);
+                        }
+                    }
+                })
+                .await
+                .expect("Codex terminal drain remains bounded");
+                progress.finish();
+            })
+            .catch_unwind()
+            .await,
         )
     } else {
         None

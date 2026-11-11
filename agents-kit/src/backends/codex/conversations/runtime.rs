@@ -11,15 +11,15 @@ use crate::backends::codex::protocol::responses::CodexServerResponse;
 use crate::backends::codex::protocol::{CodexPromptTurn, CodexPromptTurnStatus, CodexProtocol};
 use crate::backends::codex::server_requests::{CodexInteractionRequest, CodexServerRendering};
 use crate::backends::codex::state_store::{
-    CodexAbort, CodexPromptStartError, CodexStateStore, CodexTerminalDisposition,
+    CodexAbort, CodexPromptEffect, CodexPromptStartError, CodexStateStore, CodexTerminalDisposition,
 };
 use crate::backends::codex::tools::{
-    CodexDynamicToolCall, CodexDynamicToolCallResponse, CodexToolGeneration, CodexTools,
+    CodexDynamicToolCall, CodexToolExecution, CodexToolGeneration, CodexTools,
 };
 use crate::core::hierarchy::HierarchyAdmission;
 use crate::core::notification_store::ResolutionSettlement;
 use crate::error::{ErrorDetail, ErrorKind, ErrorPhase, Operation};
-use crate::prompt::{PromptOutput, PromptStream};
+use crate::prompt::{PromptMilestone, PromptOutput, PromptStream};
 use crate::{
     ConversationId, ConversationNotificationKind, KitError, NotificationId, NotificationResolution,
     PromptResponse,
@@ -468,12 +468,14 @@ impl<S: StateStoreBackend, T: ToolsetBackend> CodexConversationRuntime<S, T> {
     pub(crate) async fn execute_tool(
         &self,
         call: CodexDynamicToolCall,
-    ) -> Result<CodexDynamicToolCallResponse, KitError> {
+        effect: Option<&CodexPromptEffect>,
+    ) -> Result<CodexToolExecution, KitError> {
         self.tools
             .execute(
                 self.binding.workspace_id(),
                 self.binding.conversation_id(),
                 call,
+                effect,
             )
             .await
     }
@@ -537,6 +539,12 @@ impl<S: StateStoreBackend, T: ToolsetBackend> CodexConversationRuntime<S, T> {
                 "prompt deadline elapsed before dispatch",
             )));
         }
+        if let Err(error) = self
+            .tools
+            .check_prompt_admission(self.binding.conversation_id())
+        {
+            return admission.publish(Err(error));
+        }
         let request = match CodexTurnStartRequest::from_prompt(&prompt) {
             Ok(request) => request,
             Err(error) => return admission.publish(Err(error)),
@@ -552,6 +560,7 @@ impl<S: StateStoreBackend, T: ToolsetBackend> CodexConversationRuntime<S, T> {
         let binding = self.binding.clone();
         let state = self.state.clone();
         let protocol = self.protocol.clone();
+        let tools = self.tools.clone();
         let owner_client_message_id = client_message_id.clone();
         let lifecycle_deadline = tokio::time::Instant::now() + lifecycle_timeout;
         let prompt_start_deadline = deadline.map_or(lifecycle_deadline, |deadline| {
@@ -675,6 +684,36 @@ impl<S: StateStoreBackend, T: ToolsetBackend> CodexConversationRuntime<S, T> {
                 }
                 return;
             }
+            let preparing = async {
+                state.enable_prompt_progress(
+                    &binding,
+                    &client_message_id,
+                    deadline,
+                    lifecycle_timeout,
+                )?;
+                state
+                    .publish_prompt_progress(
+                        binding.conversation_id(),
+                        PromptMilestone::Preparing,
+                        None,
+                    )
+                    .await
+            }
+            .await;
+            if let Err(primary) = preparing {
+                let cleanup = Self::remove_unaccepted_prompt(
+                    &state,
+                    binding.conversation_id(),
+                    &client_message_id,
+                )
+                .await;
+                let primary = match cleanup {
+                    Ok(()) => primary,
+                    Err(error) => primary.with_supplementary(error.in_phase(ErrorPhase::Cleanup)),
+                };
+                session.finish_without_prompt(Err(primary));
+                return;
+            }
             if let Err(error) = state
                 .mark_prompt_may_be_accepted(binding.conversation_id(), &client_message_id)
                 .await
@@ -717,6 +756,17 @@ impl<S: StateStoreBackend, T: ToolsetBackend> CodexConversationRuntime<S, T> {
                     });
                     session.finish_without_prompt(result);
                 }
+                return;
+            }
+
+            if let Err(primary) = tools.check_prompt_admission(binding.conversation_id()) {
+                let cleanup = Self::remove_unaccepted_prompt(
+                    &state,
+                    binding.conversation_id(),
+                    &client_message_id,
+                )
+                .await;
+                session.finish_without_prompt(Err(primary.with_cleanup_result(cleanup)));
                 return;
             }
 
@@ -819,12 +869,39 @@ impl<S: StateStoreBackend, T: ToolsetBackend> CodexConversationRuntime<S, T> {
             }
 
             loop {
+                if let Some(primary) = state.prompt_progress_failure(binding.conversation_id()) {
+                    let runtime = Self::new(
+                        binding.clone(),
+                        state.clone(),
+                        protocol.clone(),
+                        tools.clone(),
+                    );
+                    runtime
+                        .settle_progress_failure(&client_message_id, primary, &mut session)
+                        .await;
+                    break;
+                }
                 let mut retry_ambiguous_cancellation = false;
                 match state
                     .prompt_terminal(binding.conversation_id(), &client_message_id)
                     .await
                 {
                     Ok(Some((turn_id, result))) => {
+                        // Publication may have settled while the terminal read was
+                        // awaiting storage. It still owns cancellation and task joins.
+                        if let Some(primary) =
+                            state.prompt_progress_failure(binding.conversation_id())
+                        {
+                            Self::new(
+                                binding.clone(),
+                                state.clone(),
+                                protocol.clone(),
+                                tools.clone(),
+                            )
+                            .settle_progress_failure(&client_message_id, primary, &mut session)
+                            .await;
+                            break;
+                        }
                         session
                             .finish_terminal(
                                 &state,
@@ -834,6 +911,10 @@ impl<S: StateStoreBackend, T: ToolsetBackend> CodexConversationRuntime<S, T> {
                                 result,
                             )
                             .await;
+                        tools.release_generation(CodexToolGeneration::new(
+                            binding.thread_id(),
+                            &turn_id,
+                        ));
                         break;
                     }
                     Ok(None) => {}
@@ -1544,6 +1625,249 @@ impl<S: StateStoreBackend, T: ToolsetBackend> CodexConversationRuntime<S, T> {
         }
     }
 
+    async fn settle_progress_failure(
+        &self,
+        client_message_id: &str,
+        primary: KitError,
+        session: &mut CodexPromptSession,
+    ) {
+        let deadline = tokio::time::Instant::now() + session.lifecycle_timeout;
+        let settlement = self.reconcile_failed_progress(client_message_id, deadline);
+        tokio::pin!(settlement);
+        let settled = tokio::select! {
+            biased;
+            settled = &mut settlement => settled,
+            _ = tokio::time::sleep_until(deadline) => {
+                // An admitted storage commit still has an owner. Seal admission
+                // and report uncertainty while continuing to poll its settlement.
+                self.state.invalidate_runtime();
+                session.send_early(Err(primary.clone().with_supplementary(
+                    KitError::timeout("progress failure cleanup deadline elapsed").in_phase(ErrorPhase::Cleanup),
+                )));
+                settlement.await
+            }
+        };
+        match settled {
+            Ok((turn_id, cleanup)) => {
+                let primary = match cleanup {
+                    Some(error) => primary.with_supplementary(error.in_phase(ErrorPhase::Cleanup)),
+                    None => primary,
+                };
+                session
+                    .finish_terminal(
+                        &self.state,
+                        self.binding.conversation_id(),
+                        client_message_id,
+                        &turn_id,
+                        Err(primary),
+                    )
+                    .await;
+                self.tools.release_generation(CodexToolGeneration::new(
+                    self.binding.thread_id(),
+                    &turn_id,
+                ));
+            }
+            Err(cleanup) => {
+                self.state.invalidate_runtime();
+                // Durable prompt ownership is deliberately retained: local
+                // failure or an interrupt reply cannot prove remote termination.
+                session.finish_without_prompt(Err(
+                    primary.with_supplementary(cleanup.in_phase(ErrorPhase::Cleanup))
+                ));
+            }
+        }
+    }
+
+    async fn reconcile_failed_progress(
+        &self,
+        client_message_id: &str,
+        deadline: tokio::time::Instant,
+    ) -> Result<(String, Option<KitError>), KitError> {
+        let mut cleanup_failure = None;
+        let result = async {
+            let turn_id = match self
+                .state
+                .request_abort(self.binding.conversation_id(), deadline)
+                .await?
+            {
+                CodexAbort::Join {
+                    client_message_id: owned,
+                    turn_id: Some(turn_id),
+                } if owned == client_message_id => turn_id,
+                CodexAbort::Idle | CodexAbort::Join { .. } => {
+                    return Err(KitError::invalid_state(
+                        "failed progress lost its accepted prompt owner",
+                    ));
+                }
+            };
+            if let Err(error) = self
+                .tools
+                .cancel_generation(
+                    CodexToolGeneration::new(self.binding.thread_id(), &turn_id),
+                    deadline,
+                )
+                .await
+            {
+                cleanup_failure = Some(error);
+            }
+            let claimed = loop {
+                if tokio::time::Instant::now() >= deadline {
+                    return Err(KitError::timeout(
+                        "progress failure cancellation claim deadline elapsed",
+                    ));
+                }
+                match self
+                    .state
+                    .claim_abort(self.binding.conversation_id(), client_message_id, false)
+                    .await
+                {
+                    Ok(claimed) => break claimed,
+                    Err(error)
+                        if error.detail() == Some(&ErrorDetail::TransactionConflict)
+                            && error.context().phase == ErrorPhase::StateCommit
+                            && error.cause().is_none()
+                            && error.supplementary().is_empty()
+                            && tokio::time::Instant::now() < deadline =>
+                    {
+                        // A definite local rollback can race the reader's native
+                        // terminal commit. Reread that same generation; claiming
+                        // its now-terminal state cannot dispatch another interrupt.
+                        tokio::time::sleep_until(
+                            deadline.min(tokio::time::Instant::now() + PROMPT_STATE_RETRY_INTERVAL),
+                        )
+                        .await;
+                    }
+                    Err(error) => return Err(error),
+                }
+            };
+            if let Some(claimed) = claimed {
+                let cancellation = tokio::time::timeout_at(
+                    deadline,
+                    self.protocol
+                        .interrupt_turn(self.binding.thread_id(), &claimed),
+                )
+                .await
+                .map_err(|_| KitError::timeout("progress failure interruption deadline elapsed"))
+                .and_then(|result| result.map_err(CodexProtocol::caller_safe_request_error));
+                let ambiguous = cancellation.is_err();
+                if let Err(error) = cancellation {
+                    cleanup_failure = Some(match cleanup_failure.take() {
+                        Some(primary) => {
+                            primary.with_supplementary(error.in_phase(ErrorPhase::Cleanup))
+                        }
+                        None => error,
+                    });
+                }
+                loop {
+                    if tokio::time::Instant::now() >= deadline {
+                        return Err(KitError::timeout(
+                            "progress failure cancellation receipt deadline elapsed",
+                        ));
+                    }
+                    match self
+                        .state
+                        .settle_abort(
+                            self.binding.conversation_id(),
+                            client_message_id,
+                            &claimed,
+                            ambiguous,
+                        )
+                        .await
+                    {
+                        Ok(()) => break,
+                        Err(error)
+                            if error.detail() == Some(&ErrorDetail::TransactionConflict)
+                                && error.context().phase == ErrorPhase::StateCommit
+                                && error.cause().is_none()
+                                && error.supplementary().is_empty()
+                                && tokio::time::Instant::now() < deadline =>
+                        {
+                            // Only the durable receipt is reconciled. The native
+                            // interrupt above remains a single, non-replayed call.
+                            tokio::time::sleep_until(
+                                deadline
+                                    .min(tokio::time::Instant::now() + PROMPT_STATE_RETRY_INTERVAL),
+                            )
+                            .await;
+                        }
+                        Err(error) => return Err(error),
+                    }
+                }
+            }
+            loop {
+                if tokio::time::Instant::now() >= deadline {
+                    return Err(KitError::timeout(
+                        "progress failure native settlement deadline elapsed",
+                    ));
+                }
+                if self
+                    .state
+                    .prompt_terminal(self.binding.conversation_id(), client_message_id)
+                    .await?
+                    .is_some()
+                {
+                    return Ok(turn_id);
+                }
+                let observed = tokio::time::timeout_at(
+                    deadline,
+                    self.protocol.prompt_turn(
+                        self.binding.thread_id(),
+                        Some(client_message_id),
+                        Some(&turn_id),
+                    ),
+                )
+                .await
+                .map_err(|_| {
+                    KitError::timeout("progress failure native reconciliation deadline elapsed")
+                })??;
+                Self::persist_observed_turn(
+                    &self.state,
+                    &self.binding,
+                    client_message_id,
+                    observed,
+                )
+                .await?;
+                tokio::time::sleep_until(
+                    deadline.min(tokio::time::Instant::now() + PROMPT_STATE_RETRY_INTERVAL),
+                )
+                .await;
+            }
+        }
+        .await;
+        match result {
+            Ok(turn_id) => Ok((turn_id, cleanup_failure)),
+            Err(error) => Err(match cleanup_failure {
+                Some(primary) => primary.with_supplementary(error.in_phase(ErrorPhase::Cleanup)),
+                None => error,
+            }),
+        }
+    }
+
+    pub(crate) fn tool_effects_allowed(&self) -> bool {
+        self.state
+            .prompt_progress_failure(self.binding.conversation_id())
+            .is_none()
+    }
+
+    pub(crate) async fn observe_tool_progress(&self, thread_id: &str, turn_id: &str) -> bool {
+        if !self.tool_effects_allowed() {
+            return false;
+        }
+        if thread_id != self.binding.thread_id() {
+            return true;
+        }
+        // Publication failure belongs to the accepted prompt owner, not to the
+        // connection reader. Keep reading so native terminal evidence can settle it.
+        self.state
+            .publish_prompt_progress(
+                self.binding.conversation_id(),
+                PromptMilestone::ToolCallsRequested,
+                Some(turn_id),
+            )
+            .await
+            .is_ok()
+    }
+
     pub(crate) async fn publish_notification(
         &self,
         kind: ConversationNotificationKind,
@@ -1558,9 +1882,44 @@ impl<S: StateStoreBackend, T: ToolsetBackend> CodexConversationRuntime<S, T> {
     pub(crate) async fn publish_interaction(
         &self,
         request: CodexInteractionRequest,
+        effect: Option<&CodexPromptEffect>,
     ) -> Result<(), KitError> {
-        let deadline = self.tools.cancellation_deadline();
+        if effect.is_some_and(|effect| !effect.allows_effects()) || !self.tool_effects_allowed() {
+            return Ok(());
+        }
+        if let Some(turn_id) = request.tool_progress_turn()
+            && !self
+                .observe_tool_progress(request.thread_id(), turn_id)
+                .await
+        {
+            return Ok(());
+        }
+        let deadline = effect.map_or_else(
+            || self.tools.cancellation_deadline(),
+            |effect| effect.bound_deadline(self.tools.cancellation_deadline()),
+        );
         loop {
+            // A successful admitted publication receipt can arrive after abort or
+            // the original prompt deadline. Recheck ownership before new effects.
+            if effect.is_some_and(|effect| !effect.allows_effects()) {
+                return Ok(());
+            }
+            if effect.is_some()
+                && let Some(turn_id) = request.turn_id()
+            {
+                let admission = self
+                    .state
+                    .observe_prompt_turn(self.binding.conversation_id(), turn_id)
+                    .await;
+                if effect.is_some_and(|effect| !effect.allows_effects()) {
+                    return Ok(());
+                }
+                if admission?
+                    == crate::backends::codex::state_store::records::CodexToolAdmission::Suppress
+                {
+                    return Ok(());
+                }
+            }
             match self
                 .state
                 .publish_interaction(self.binding.conversation_id(), request.clone(), deadline)

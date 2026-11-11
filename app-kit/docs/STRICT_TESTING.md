@@ -76,6 +76,20 @@ backoff tests. No Provider/Tool dependencies or service substitutes are added.
 These are ordinary correctness tests. An error category alone does not prove
 that a dispatched prompt was rejected before it performed work.
 
+## Passive Agent Progress compatibility
+
+The existing caller-owned Agent fixture in `workflow_execution` places passive
+Progress around a real Interaction and replays those exact facts during
+recovery. Only the Interaction becomes an App resolution target. Tests preserve
+its sequence, generation, identity, timestamp, and payload; resolve it once;
+and reject phantom interactions or prompt reexecution. Lost foreground
+completion remains Unknown and requires an explicit caller decision. Each
+original and reopened App must consume its owned Agent shutdown once.
+
+This is App consumer compatibility evidence, not native Codex or Custom
+publication proof. The routine App gate includes both cases without changing
+App production, its API, or the documented capacity exclusions below.
+
 ## Run the complete App gate
 
 ```bash

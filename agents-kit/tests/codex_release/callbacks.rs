@@ -28,12 +28,15 @@ async fn disappeared_callback_cancels_only_exact_pending_identity() {
         let observed = std::panic::AssertUnwindSafe(async { tokio::time::timeout(Duration::from_secs(3), async {
             let mut notifications = fixture.conversation.notification_stream().unwrap();
             let mut stream = fixture.conversation.prompt_stream(PromptRequest::new("disappearing callback").unwrap()).await.unwrap();
-            let turn = fixture.peer.turn().await;
+            CodexFixture::next_progress(&mut notifications, "Preparing response").await;
+            let turn = fixture.peer.accepted_turn(&mut stream).await;
             for id in [json!(81), json!("81")] {
                 fixture.peer.events.send(json!({"id":id,"method":"item/commandExecution/requestApproval","params":{
                     "threadId":"stream-thread","turnId":turn,"itemId":"same-item","approvalId":"same-approval",
                     "kind":"command","startedAtMs":0,"availableDecisions":["accept","cancel"]}})).await.unwrap();
             }
+            let tool_progress = notifications.recv().await.unwrap().unwrap();
+            assert!(matches!(tool_progress.kind(), ConversationNotificationKind::Progress { label, detail: None } if label == "Tool calls requested"));
             fixture.peer.notify("item/agentMessage/delta", json!({"threadId":"stream-thread","turnId":turn,"itemId":"barrier","delta":"published"})).await;
             assert!(matches!(stream.recv().await, Some(Ok(PromptEvent::OutputDelta { text })) if text == "published"));
             let before = raw.list(StateListRequest::new("agents_kit_codex_continuations_v1").unwrap()).await.unwrap();
@@ -43,6 +46,7 @@ async fn disappeared_callback_cancels_only_exact_pending_identity() {
             if delivered {
                 let first = notifications.recv().await.unwrap().unwrap();
                 assert_eq!(first.id(), &id);
+                assert!(matches!(first.kind(), ConversationNotificationKind::Interaction { .. }));
             }
             for (thread, request) in [("foreign-thread", json!(81)), ("stream-thread", json!("absent"))] {
                 fixture.peer.notify("serverRequest/resolved", json!({"threadId":thread,"requestId":request})).await;
@@ -67,6 +71,11 @@ async fn disappeared_callback_cancels_only_exact_pending_identity() {
             assert_eq!(duplicate["error"]["code"], -32602, "retired identity cannot be republished");
             drop(notifications);
             let mut notifications = fixture.conversation.notification_stream().unwrap();
+            if !delivered {
+                // Callback retirement must not acknowledge the preceding passive fact.
+                let replayed = notifications.recv().await.unwrap().unwrap();
+                assert_eq!(replayed, tool_progress);
+            }
             let remaining = notifications.recv().await.unwrap().unwrap();
             let other = before.records.iter().find(|record| record.record.value["request_id"] == "81").unwrap();
             assert_eq!(json!(remaining.id()), other.record.value["notification_id"]);
@@ -107,6 +116,7 @@ struct CallbackGate {
     entered: Semaphore,
     release: Semaphore,
     conflicts: AtomicUsize,
+    unrelated_conflicts: AtomicUsize,
 }
 
 #[derive(Clone)]
@@ -235,7 +245,14 @@ impl StateTransactionBackend for CallbackTransaction {
         }
         let result = self.inner.commit().await;
         if matches!(&result, Err(StateStoreError::TransactionConflict { .. })) {
-            self.gate.conflicts.fetch_add(1, Ordering::SeqCst);
+            // Progress publication/acknowledgment may conflict during setup.
+            // Only this race's selected callback mutation is a retirement or
+            // resolution attempt; retain other conflicts in a separate counter.
+            if selected {
+                self.gate.conflicts.fetch_add(1, Ordering::SeqCst);
+            } else {
+                self.gate.unrelated_conflicts.fetch_add(1, Ordering::SeqCst);
+            }
         }
         result
     }
@@ -268,6 +285,7 @@ impl CallbackRace {
             entered: Semaphore::new(0),
             release: Semaphore::new(0),
             conflicts: AtomicUsize::new(0),
+            unrelated_conflicts: AtomicUsize::new(0),
         });
         let store = CallbackStore {
             inner: raw.clone(),
@@ -277,10 +295,15 @@ impl CallbackRace {
         let observed = std::panic::AssertUnwindSafe(async {
             let mut notifications = fixture.conversation.notification_stream().unwrap();
             let mut stream = fixture.conversation.prompt_stream(PromptRequest::new("callback retirement failure").unwrap()).await.unwrap();
-            let turn = fixture.peer.turn().await;
+            CodexFixture::next_progress(&mut notifications, "Preparing response").await;
+            let turn = fixture.peer.accepted_turn(&mut stream).await;
             fixture.peer.request(101, "item/commandExecution/requestApproval", json!({"threadId":"stream-thread","turnId":turn,"itemId":"command","startedAtMs":0,"availableDecisions":["accept","cancel"]})).await;
-            let _interaction = tokio::time::timeout(Duration::from_secs(3), notifications.recv()).await.unwrap().unwrap().unwrap();
+            CodexFixture::next_progress(&mut notifications, "Tool calls requested").await;
+            let interaction = tokio::time::timeout(Duration::from_secs(3), notifications.recv()).await.unwrap().unwrap().unwrap();
+            assert!(matches!(interaction.kind(), ConversationNotificationKind::Interaction { .. }));
             let key = raw.list(StateListRequest::new("agents_kit_codex_continuations_v1").unwrap()).await.unwrap().records[0].record.key.clone();
+            assert_eq!(gate.conflicts.load(Ordering::SeqCst), 0, "setup cannot attempt the selected callback mutation");
+            let unrelated_conflicts = gate.unrelated_conflicts.load(Ordering::SeqCst);
             gate.armed.store(true, Ordering::SeqCst);
             fixture.peer.notify("serverRequest/resolved", json!({"threadId":"stream-thread","requestId":101})).await;
             if matches!(self, Self::InventoryStalled) {
@@ -304,6 +327,7 @@ impl CallbackRace {
                 }
                 Self::IntentCommitted | Self::CancellationStaged | Self::CancellationConflict => unreachable!("separate race case"),
             }
+            assert_eq!(gate.unrelated_conflicts.load(Ordering::SeqCst), unrelated_conflicts, "no unrelated transaction may consume the callback fault window");
             assert!(fixture.peer.responses.try_recv().is_err(), "disappearance never sends approval");
             let state = raw.load(key).await.unwrap().unwrap().record.value["state"].clone();
             assert_eq!(state, if matches!(self, Self::AmbiguousCommit) { "cancelled" } else { "pending" });
@@ -331,6 +355,7 @@ impl CallbackRace {
             entered: Semaphore::new(0),
             release: Semaphore::new(0),
             conflicts: AtomicUsize::new(0),
+            unrelated_conflicts: AtomicUsize::new(0),
         });
         let store = CallbackStore {
             inner: raw.clone(),
@@ -341,10 +366,15 @@ impl CallbackRace {
             tokio::time::timeout(Duration::from_secs(3), async {
                 let mut notifications = fixture.conversation.notification_stream().unwrap();
                 let mut stream = fixture.conversation.prompt_stream(PromptRequest::new("callback race").unwrap()).await.unwrap();
-                let turn = fixture.peer.turn().await;
+                CodexFixture::next_progress(&mut notifications, "Preparing response").await;
+                let turn = fixture.peer.accepted_turn(&mut stream).await;
                 fixture.peer.request(99, "item/commandExecution/requestApproval", json!({"threadId":"stream-thread","turnId":turn,"itemId":"command","startedAtMs":0,"availableDecisions":["accept","cancel"]})).await;
+                CodexFixture::next_progress(&mut notifications, "Tool calls requested").await;
                 let notification = notifications.recv().await.unwrap().unwrap();
+                assert!(matches!(notification.kind(), ConversationNotificationKind::Interaction { .. }));
                 let key = raw.list(StateListRequest::new("agents_kit_codex_continuations_v1").unwrap()).await.unwrap().records[0].record.key.clone();
+                assert_eq!(gate.conflicts.load(Ordering::SeqCst), 0, "setup cannot attempt the selected callback mutation");
+                let unrelated_conflicts = gate.unrelated_conflicts.load(Ordering::SeqCst);
                 gate.armed.store(true, Ordering::SeqCst);
                 let mut resolve = Box::pin(fixture.conversation.resolve_notification(notification.id().clone(), NotificationResolution::Allow));
                 match self {
@@ -383,6 +413,7 @@ impl CallbackRace {
                 } else {
                     assert_eq!(fixture.peer.responses.recv().await.unwrap(), json!({"id":99,"result":{"decision":"accept"}}));
                 }
+                assert_eq!(gate.unrelated_conflicts.load(Ordering::SeqCst), unrelated_conflicts, "no unrelated transaction may consume the callback fault window");
                 assert_eq!(gate.conflicts.load(Ordering::SeqCst), usize::from(!matches!(self, Self::IntentCommitted)));
                 assert_eq!(fixture.conversation.resolve_notification(notification.id().clone(), NotificationResolution::Allow).await.unwrap_err().kind(), ErrorKind::Conflict);
                 assert!(fixture.peer.responses.try_recv().is_err());

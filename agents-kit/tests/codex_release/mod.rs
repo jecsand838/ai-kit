@@ -231,11 +231,15 @@ impl CodexFixture {
         let observed = std::panic::AssertUnwindSafe(async {
             let mut notifications = fixture.conversation.notification_stream().unwrap();
             let mut stream = fixture.conversation.prompt_stream(PromptRequest::new("request").unwrap()).await.unwrap();
-            let turn = fixture.peer.turn().await;
+            CodexFixture::next_progress(&mut notifications, "Preparing response").await;
+            let turn = fixture.peer.accepted_turn(&mut stream).await;
             params["threadId"] = json!("stream-thread");
             params["turnId"] = json!(turn);
             let id = json!("callback-distinct-from-item");
             fixture.peer.events.send(json!({"id":id,"method":method,"params":params})).await.unwrap();
+            if method == "item/commandExecution/requestApproval" && title.is_some() {
+                CodexFixture::next_progress(&mut notifications, "Tool calls requested").await;
+            }
             let (notification, response) = tokio::time::timeout(Duration::from_secs(3), async {
                 tokio::select! {
                     response = fixture.peer.responses.recv() => (None, response.unwrap()),
@@ -265,6 +269,7 @@ impl CodexFixture {
                 }
             } else {
                 assert!(notification.is_none(), "unsupported/malformed request published an interaction");
+                assert!(tokio::time::timeout(Duration::from_millis(20), notifications.recv()).await.is_err(), "unsupported/malformed request published an extra notification");
             }
             assert!(fixture.peer.responses.try_recv().is_err(), "one response per request");
         }).catch_unwind().await;
@@ -311,7 +316,8 @@ async fn human_command_is_unsupported_without_publication_or_capability() {
         assert!(initialization["params"]["capabilities"].get("requiredHumanApproval").is_none());
         let mut notifications = fixture.conversation.notification_stream().unwrap();
         let mut stream = fixture.conversation.prompt_stream(PromptRequest::new("human request").unwrap()).await.unwrap();
-        let turn = fixture.peer.turn().await;
+        CodexFixture::next_progress(&mut notifications, "Preparing response").await;
+        let turn = fixture.peer.accepted_turn(&mut stream).await;
         for id in [json!(73), json!("73")] {
             for malformed in [false, true] {
                 let mut params = json!({"threadId":"stream-thread","turnId":turn,"itemId":"same-item",
@@ -331,7 +337,7 @@ async fn human_command_is_unsupported_without_publication_or_capability() {
         assert!(matches!(stream.recv().await, Some(Ok(PromptEvent::Completed(response))) if response.output() == "human request unsupported"));
         assert!(stream.recv().await.is_none());
         assert!(tokio::time::timeout(Duration::from_millis(20), notifications.recv()).await.is_err(),
-            "unsupported requests must publish neither Interaction nor synthetic Process");
+            "unsupported requests must publish no tool milestone, Interaction, or synthetic Process");
     }).catch_unwind().await;
     fixture.finish_release(observed, None).await;
 }
@@ -478,6 +484,7 @@ impl CodexFixture {
         let observed = std::panic::AssertUnwindSafe(async {
             let mut notifications = fixture.conversation.notification_stream().unwrap();
             let mut stream = fixture.conversation.prompt_stream(PromptRequest::new("event").unwrap()).await.unwrap();
+            CodexFixture::next_progress(&mut notifications, "Preparing response").await;
             let turn = fixture.peer.turn().await;
             fixture.peer.notify("item/agentMessage/delta", json!({"threadId":"stream-thread","turnId":turn,"itemId":"accepted","delta":"accepted"})).await;
             assert!(matches!(stream.recv().await, Some(Ok(PromptEvent::OutputDelta { text })) if text == "accepted"));
@@ -627,10 +634,12 @@ async fn repeated_section_metadata_cannot_acknowledge_delivery_or_change_revisio
         let before = fixture.workspace.info().await.unwrap();
         let mut notifications = fixture.conversation.notification_stream().unwrap();
         let mut stream = fixture.conversation.prompt_stream(PromptRequest::new("section metadata").unwrap()).await.unwrap();
-        let turn = fixture.peer.turn().await;
+        CodexFixture::next_progress(&mut notifications, "Preparing response").await;
+        let turn = fixture.peer.accepted_turn(&mut stream).await;
         fixture.peer.notify("item/started", json!({"threadId":"stream-thread","turnId":turn,"startedAtMs":0,
             "item":{"id":"process","type":"commandExecution","status":"inProgress","command":"private-command",
             "cwd":fixture.root,"commandActions":[],"aggregatedOutput":null,"exitCode":null}})).await;
+        CodexFixture::next_progress(&mut notifications, "Tool calls requested").await;
         let original = tokio::time::timeout(Duration::from_secs(3), notifications.recv()).await.unwrap().unwrap().unwrap();
         assert!(matches!(original.kind(), ConversationNotificationKind::Process { .. }));
         drop(notifications);
@@ -649,6 +658,7 @@ async fn repeated_section_metadata_cannot_acknowledge_delivery_or_change_revisio
         fixture.peer.complete(&turn, "section terminal").await;
         assert!(matches!(stream.recv().await, Some(Ok(PromptEvent::Completed(response))) if response.output() == "section terminal"));
         assert!(stream.recv().await.is_none());
+        assert!(tokio::time::timeout(Duration::from_millis(20), replay.recv()).await.is_err(), "section metadata cannot append notifications after the replayed Process");
     }).catch_unwind().await;
     fixture.finish_release(observed, None).await;
 }

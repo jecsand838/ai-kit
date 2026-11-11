@@ -1,3 +1,4 @@
+mod codex_progress;
 mod codex_release;
 mod lance_state_support;
 mod native_cleanup;
@@ -17,9 +18,10 @@ use agents_kit::config::{AgentConfig, CodexConfig};
 use agents_kit::conversation::NewConversation;
 use agents_kit::error::{DeadlineKind, ErrorDetail, ErrorKind, ErrorPhase, Operation};
 use agents_kit::notification::{
-    ConversationNotificationKind, NotificationResolution, ProcessState,
+    ConversationNotificationKind, ConversationNotificationReceiver, NotificationResolution,
+    ProcessState,
 };
-use agents_kit::prompt::{PromptEvent, PromptRequest, StructuredOutputRequest};
+use agents_kit::prompt::{PromptEvent, PromptRequest, PromptStream, StructuredOutputRequest};
 use agents_kit::workspace::{
     DeleteWorkspaceRequest, NewWorkspace, UpdateWorkspaceRequest, WorkspaceContext,
     WorkspaceDefaults, WorkspaceExecutionPolicy, WorkspaceNetworkAccess, WorkspaceRoot,
@@ -54,6 +56,7 @@ struct CodexPeer {
     features: Arc<std::sync::Mutex<Value>>,
     models: Arc<std::sync::Mutex<Value>>,
     requests: Arc<std::sync::Mutex<Vec<Value>>>,
+    sent_requests: Arc<std::sync::Mutex<Vec<Value>>>,
     hold_initialization: Arc<AtomicBool>,
     initializations: Arc<AtomicUsize>,
     thread_starts: Arc<AtomicUsize>,
@@ -72,6 +75,11 @@ enum FirstStart {
     PaginatedEmpty,
     Materialization(Value),
     DeferredInterruptTerminal,
+    DeferredInterruptSettlement,
+    IndependentThreads,
+    ResponsiveHistory,
+    DeferredStart(oneshot::Receiver<()>),
+    Reopenable,
     ThreadObservation(oneshot::Receiver<()>),
     RecoveredTurn {
         status: String,
@@ -79,6 +87,10 @@ enum FirstStart {
         items: Vec<Value>,
     },
     Held(oneshot::Receiver<()>),
+    EarlyProgress {
+        events: Vec<Value>,
+        release: oneshot::Receiver<()>,
+    },
     EarlyDeltas {
         count: usize,
         release: Option<oneshot::Receiver<()>>,
@@ -113,6 +125,8 @@ impl CodexPeer {
         let reported_models = Arc::clone(&models);
         let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
         let observed_requests = Arc::clone(&requests);
+        let sent_requests = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let observed_sent_requests = Arc::clone(&sent_requests);
         let identity = Arc::new(std::sync::Mutex::new(json!("codex/0.167.1")));
         let reported_identity = Arc::clone(&identity);
         let hold_initialization = Arc::new(AtomicBool::new(false));
@@ -142,18 +156,58 @@ impl CodexPeer {
             let mut socket = tokio_tungstenite::accept_async(connection)
                 .await
                 .expect("WebSocket handshake");
+            let independent_threads = matches!(&first_start, FirstStart::IndependentThreads);
+            let mut other_threads = BTreeMap::<String, Value>::new();
             let mut thread = Value::Null;
             let mut policy = Value::Null;
             let mut next_turn = 0;
             let mut defer_interrupt_terminal = false;
+            let deferred_interrupt_settlement = matches!(
+                &first_start,
+                FirstStart::DeferredInterruptSettlement | FirstStart::IndependentThreads
+            );
+            let mut held_start_reply: Option<(Value, oneshot::Receiver<()>)> = None;
+            let mut held_history_reply: Option<(Value, oneshot::Receiver<()>)> = None;
+            let responsive_history = matches!(&first_start, FirstStart::ResponsiveHistory);
             let paginated = matches!(first_start, FirstStart::PaginatedEmpty);
             let mut materialized = false;
             let mut loaded = true;
+            let reopenable = matches!(first_start, FirstStart::Reopenable);
             loop {
                 tokio::select! {
                     _ = &mut stopped => return,
+                    reply = async {
+                        match held_start_reply.as_mut() {
+                            Some((reply, release)) => {
+                                release.await.expect("release deferred turn receipt");
+                                reply.clone()
+                            }
+                            None => std::future::pending().await,
+                        }
+                    } => {
+                        held_start_reply.take();
+                        if socket.send(Message::Text(reply.to_string().into())).await.is_err() { break }
+                    }
+                    reply = async {
+                        match held_history_reply.as_mut() {
+                            Some((reply, release)) => {
+                                if release.await.is_err() { return None; }
+                                Some(reply.clone())
+                            }
+                            None => std::future::pending().await,
+                        }
+                    } => {
+                        held_history_reply.take();
+                        let Some(reply) = reply else { return; };
+                        if socket.send(Message::Text(reply.to_string().into())).await.is_err() { break }
+                    }
                     event = inbound.recv() => {
                         let Some(event) = event else { break };
+                        if independent_threads && let Some(id) = event["params"]["threadId"].as_str()
+                            && thread["id"] != id && let Some(selected) = other_threads.get(id).cloned() {
+                            other_threads.insert(thread["id"].as_str().unwrap().to_owned(), thread);
+                            thread = selected;
+                        }
                         if event["method"] == "turn/completed" && !defer_interrupt_terminal {
                             thread["turns"] = json!([event["params"]["turn"].clone()]);
                         }
@@ -174,9 +228,20 @@ impl CodexPeer {
                         }
                         *observed_history.lock().unwrap() = thread.clone();
                         if socket.send(Message::Text(event.to_string().into())).await.is_err() { break }
+                        if let Some(id) = event.get("id") {
+                            observed_sent_requests.lock().unwrap().push(id.clone());
+                        }
                     }
                     frame = socket.next() => {
-                        let Some(Ok(Message::Text(frame))) = frame else { break };
+                        let Some(Ok(Message::Text(frame))) = frame else {
+                            if !reopenable { break }
+                            let connection = tokio::select! {
+                                connection = listener.accept() => connection.expect("replacement protocol connection").0,
+                                _ = &mut stopped => return,
+                            };
+                            socket = tokio_tungstenite::accept_async(connection).await.expect("replacement WebSocket handshake");
+                            continue;
+                        };
                         let request: Value = serde_json::from_str(&frame).expect("JSON-RPC request");
                         let Some(method) = request["method"].as_str() else {
                             replied.send(request).await.expect("approval response observer");
@@ -222,11 +287,20 @@ impl CodexPeer {
                             if socket.send(Message::Text(response.to_string().into())).await.is_err() { break }
                             continue;
                         }
+                        if independent_threads && let Some(id) = params["threadId"].as_str()
+                            && thread["id"] != id && let Some(selected) = other_threads.get(id).cloned() {
+                            other_threads.insert(thread["id"].as_str().unwrap().to_owned(), thread);
+                            thread = selected;
+                        }
                         let mut result = match method {
                             "initialize" => json!({"userAgent":reported_identity.lock().unwrap().clone()}),
                             "thread/start" => {
-                                observed_thread_starts.fetch_add(1, Ordering::SeqCst);
-                                thread = json!({"id":"stream-thread", "cwd":params["cwd"], "parentThreadId":null,
+                                let previous_starts = observed_thread_starts.fetch_add(1, Ordering::SeqCst);
+                                let thread_id = if independent_threads && previous_starts > 0 {
+                                    other_threads.insert(thread["id"].as_str().unwrap().to_owned(), thread);
+                                    format!("independent-thread-{previous_starts}")
+                                } else { "stream-thread".to_owned() };
+                                thread = json!({"id":thread_id, "cwd":params["cwd"], "parentThreadId":null,
                                     "threadSource":params["threadSource"], "turns":[]});
                                 policy = json!({"cwd":params["cwd"], "runtimeWorkspaceRoots":params["runtimeWorkspaceRoots"],
                                     "sandbox":{"type":"dangerFullAccess"}, "activePermissionProfile":{"id":":danger-full-access","extends":null}});
@@ -277,7 +351,7 @@ impl CodexPeer {
                                 next_turn += 1;
                                 let id = format!("turn-{next_turn}");
                                 let mut turn = json!({"id":id,"status":"inProgress","items":[],"error":null});
-                                if defer_interrupt_terminal || matches!(&first_start, FirstStart::DeferredInterruptTerminal) {
+                                if defer_interrupt_terminal || matches!(&first_start, FirstStart::DeferredInterruptTerminal | FirstStart::DeferredInterruptSettlement | FirstStart::IndependentThreads | FirstStart::ResponsiveHistory | FirstStart::DeferredStart(_) | FirstStart::Reopenable) {
                                     defer_interrupt_terminal = true;
                                     turn["itemsView"] = json!("full");
                                     turn["items"] = json!([{"type":"userMessage","content":[],"id":format!("user-{id}"),"clientId":params["clientUserMessageId"]}]);
@@ -290,7 +364,11 @@ impl CodexPeer {
                                 if next_turn == 1 {
                                     match std::mem::replace(&mut first_start, FirstStart::Ordinary) {
                                         FirstStart::Ordinary | FirstStart::PaginatedEmpty | FirstStart::Materialization(_) => {}
-                                        FirstStart::DeferredInterruptTerminal => {}
+                                        FirstStart::DeferredInterruptTerminal | FirstStart::DeferredInterruptSettlement | FirstStart::IndependentThreads | FirstStart::ResponsiveHistory | FirstStart::Reopenable => {}
+                                        FirstStart::DeferredStart(release) => {
+                                            held_start_reply = Some((json!({"id":request["id"],"result":{"turn":turn}}), release));
+                                            continue;
+                                        }
                                         FirstStart::ThreadObservation(_) => panic!("thread observation must be consumed before a turn starts"),
                                         FirstStart::RecoveredTurn { status, error, mut items } => {
                                             items.insert(0, json!({"type":"userMessage","id":format!("user-{id}"),"content":[],"clientId":params["clientUserMessageId"]}));
@@ -301,6 +379,15 @@ impl CodexPeer {
                                         FirstStart::Held(release) => {
                                             tokio::select! {
                                                 result = release => result.expect("release original native start"),
+                                                _ = &mut stopped => return,
+                                            }
+                                        }
+                                        FirstStart::EarlyProgress { events, release } => {
+                                            for event in events {
+                                                socket.send(Message::Text(event.to_string().into())).await.expect("early native event");
+                                            }
+                                            tokio::select! {
+                                                result = release => result.expect("release receipt after early progress evidence"),
                                                 _ = &mut stopped => return,
                                             }
                                         }
@@ -326,28 +413,35 @@ impl CodexPeer {
                                 observed_interrupts.fetch_add(1, Ordering::SeqCst);
                                 let turn = thread["turns"].as_array_mut().unwrap().iter_mut()
                                     .find(|turn| turn["id"] == params["turnId"]).expect("exact interrupted turn");
-                                turn["status"] = json!("interrupted");
+                                if !deferred_interrupt_settlement {
+                                    turn["status"] = json!("interrupted");
+                                }
                                 json!({})
                             }
                             method => panic!("unhandled fixture request {method}"),
                         };
                         *observed_history.lock().unwrap() = thread.clone();
-                        if method == "thread/read" && params["includeTurns"] == true {
-                            let release = held_history_response.lock().unwrap().take();
-                            if let Some(release) = release {
-                                entered_history.notify_one();
-                                tokio::select! {
-                                    result = release => { if result.is_err() { return } },
-                                    _ = &mut stopped => return,
-                                }
-                            }
-                        }
                         if method == "thread/read" {
                             result["readState"] = json!({"firstUnread":{"type":"turn","turnId":"earlier-turn"},"revision":"opaque"});
                         } else if method == "thread/list" {
                             result["readStates"] = json!({});
                         }
                         let response = json!({"id":request["id"],"result":result});
+                        if method == "thread/read" && params["includeTurns"] == true {
+                            let release = held_history_response.lock().unwrap().take();
+                            if let Some(release) = release {
+                                entered_history.notify_one();
+                                if responsive_history {
+                                    assert!(held_history_reply.is_none());
+                                    held_history_reply = Some((response, release));
+                                    continue;
+                                }
+                                tokio::select! {
+                                    result = release => { if result.is_err() { return } },
+                                    _ = &mut stopped => return,
+                                }
+                            }
+                        }
                         if socket.send(Message::Text(response.to_string().into())).await.is_err() { break }
                         if method == "turn/interrupt" && !defer_interrupt_terminal {
                             let event = json!({"method":"turn/completed","params":{"threadId":"stream-thread","turn":thread["turns"][0]}});
@@ -356,6 +450,9 @@ impl CodexPeer {
                     }
                 }
             }
+            // Socket drain is final response evidence; retaining the fixture
+            // task below must not retain a sender capable of future replies.
+            drop(replied);
             // Keep the fixture task alive until explicit cleanup, including
             // after Kit transport drop, so public runtime task counts cannot
             // mistake a finished peer for a remaining Kit task.
@@ -371,6 +468,7 @@ impl CodexPeer {
             features,
             models,
             requests,
+            sent_requests,
             hold_initialization,
             initializations,
             thread_starts,
@@ -392,6 +490,18 @@ impl CodexPeer {
             .expect("native accepted turn")
     }
 
+    async fn accepted_turn(&mut self, stream: &mut PromptStream) -> String {
+        let turn = self.turn().await;
+        self.notify("item/agentMessage/delta", json!({
+            "threadId":"stream-thread", "turnId":turn, "itemId":"fixture-acceptance", "delta":"fixture accepted"
+        })).await;
+        assert!(
+            matches!(tokio::time::timeout(Duration::from_secs(3), stream.recv()).await.unwrap(),
+            Some(Ok(PromptEvent::OutputDelta { text })) if text == "fixture accepted")
+        );
+        turn
+    }
+
     fn reject(&self, method: &str, code: i64, message: &str) {
         self.rejections
             .lock()
@@ -404,6 +514,18 @@ impl CodexPeer {
             .send(json!({"id":id,"method":method,"params":params}))
             .await
             .expect("fixture request source");
+    }
+
+    async fn request_sent(&self, id: i64) {
+        while !self
+            .sent_requests
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|sent| sent == &json!(id))
+        {
+            tokio::task::yield_now().await;
+        }
     }
 
     async fn notify(&self, method: &str, params: Value) {
@@ -863,11 +985,39 @@ impl WaiterFaultStore {
                 if raw.load(prompt_key.clone()).await.unwrap().unwrap().record.value["state"]["turn_id"] == turn { break; }
                 tokio::task::yield_now().await;
             }
+            CodexFixture::next_progress(&mut notifications, "Preparing response").await;
+            if point == InteractionFaultPoint::HeldCommit {
+                // Settle the prior passive receipt before deliberately holding
+                // an unrelated transaction's native commit across its deadline.
+                let journal_key = StateKey::new("agents_kit_conversation_notifications_v1", fixture.conversation.id().as_str()).unwrap();
+                let receipt = notifications.recv();
+                tokio::pin!(receipt);
+                tokio::select! {
+                    result = &mut receipt => panic!("no next fact has been published: {result:?}"),
+                    _ = async {
+                        loop {
+                            let journal = raw.load(journal_key.clone()).await.unwrap().unwrap();
+                            if journal.record.value["pending"].as_array().unwrap().is_empty() { break; }
+                            tokio::task::yield_now().await;
+                        }
+                    } => {}
+                }
+            }
             armed.store(true, Ordering::SeqCst);
             let callback = json!("exact-publication-callback");
             fixture.peer.events.send(json!({"id":callback,"method":"item/commandExecution/requestApproval","params":{
                 "threadId":"stream-thread","turnId":turn,"itemId":"running-command","approvalId":"distinct-approval",
                 "kind":"writeStdin","startedAtMs":1,"availableDecisions":["accept","cancel"]}})).await.unwrap();
+            if point == InteractionFaultPoint::HeldCommit {
+                // Do not create new journal delivery/acknowledgment writes while
+                // the real native commit is pending. The ordered native barrier
+                // proves the callback has settled before observation resumes.
+                fixture.peer.request(9200, "currentTime/read", json!({"threadId":"stream-thread"})).await;
+                let barrier = fixture.peer.responses.recv().await.unwrap();
+                assert_eq!(barrier["id"], 9200, "the admitted interaction commit must settle successfully: {barrier}");
+                assert!(barrier["result"]["currentTimeAt"].is_i64());
+            }
+            CodexFixture::next_progress(&mut notifications, "Tool calls requested").await;
             let succeeds = source == StorageFaultSource::Conflict && !rollback_failure && failures != usize::MAX
                 && point != InteractionFaultPoint::HeldStaging;
             let committed = succeeds || point == InteractionFaultPoint::AmbiguousCommit;
@@ -960,10 +1110,7 @@ impl WaiterFaultStore {
         if current != *point || !self.armed.load(Ordering::SeqCst) {
             return None;
         }
-        if matches!(
-            point,
-            InteractionFaultPoint::Begin | InteractionFaultPoint::PromptLoad
-        ) {
+        {
             let mut owner = owner_task.lock().unwrap();
             if owner.is_none() || *owner != tokio::task::try_id() {
                 return None;
@@ -1404,7 +1551,9 @@ impl StateTransactionBackend for WaiterFaultTransaction {
                 .is_some()
         {
             tokio::time::sleep(Duration::from_millis(3100)).await;
-            return self.inner.commit().await;
+            let result = self.inner.commit().await;
+            eprintln!("held interaction native commit result: {result:?}");
+            return result;
         }
         if self.interaction_staged
             && let Some(error) = self
@@ -1599,6 +1748,18 @@ struct CodexFixture<S: StateStoreBackend = StateStore> {
 }
 
 impl CodexFixture {
+    async fn next_progress(receiver: &mut ConversationNotificationReceiver, label: &str) {
+        let notification = tokio::time::timeout(Duration::from_secs(3), receiver.recv())
+            .await
+            .expect("expected bounded prompt milestone")
+            .expect("notification stream remains open")
+            .expect("durable prompt milestone");
+        assert!(
+            matches!(notification.kind(), ConversationNotificationKind::Progress { label: actual, detail: None } if actual == label),
+            "expected exactly {label}: {notification:?}"
+        );
+    }
+
     async fn build() -> Self {
         let peer = CodexPeer::start().await;
         Self::build_with_peer(peer).await
@@ -1622,7 +1783,8 @@ impl CodexFixture {
             .prompt_stream(PromptRequest::new("approve command").expect("prompt"))
             .await
             .expect("prompt admission");
-        let turn = fixture.peer.turn().await;
+        let turn = fixture.peer.accepted_turn(&mut stream).await;
+        CodexFixture::next_progress(&mut notifications, "Preparing response").await;
         fixture
             .peer
             .request(
@@ -1637,6 +1799,9 @@ impl CodexFixture {
             .await;
         let observed =
             std::panic::AssertUnwindSafe(tokio::time::timeout(Duration::from_secs(3), async {
+                if approvable {
+                    CodexFixture::next_progress(&mut notifications, "Tool calls requested").await;
+                }
                 tokio::select! {
                     response = fixture.peer.responses.recv() => (None, None, response),
                     notification = notifications.recv() => {
@@ -1711,6 +1876,14 @@ impl CodexFixture {
 
 impl<S: StateStoreBackend> CodexFixture<S> {
     async fn build_with_store(peer: CodexPeer, store: S) -> Self {
+        Self::build_with_toolset(peer, store, None).await
+    }
+
+    async fn build_with_toolset(
+        peer: CodexPeer,
+        store: S,
+        toolset: Option<tools_kit::Toolset>,
+    ) -> Self {
         let config = AgentConfig::new(
             CodexConfig::tcp(peer.address, Duration::from_secs(3), Duration::from_secs(3))
                 .expect("Codex config")
@@ -1719,10 +1892,12 @@ impl<S: StateStoreBackend> CodexFixture<S> {
             NonZeroUsize::new(1).expect("one prompt"),
         )
         .expect("Agent config");
-        let agent = AgentBuilder::create(config, AgentStorage::new(store))
-            .build()
-            .await
-            .expect("Codex fixture Agent");
+        let builder = AgentBuilder::create(config, AgentStorage::new(store));
+        let builder = match toolset {
+            Some(toolset) => builder.with_toolset(toolset),
+            None => builder,
+        };
+        let agent = builder.build().await.expect("Codex fixture Agent");
         let root =
             std::env::temp_dir().join(format!("agents-kit-codex-stream-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir(&root).expect("fixture directory");
@@ -1893,7 +2068,8 @@ async fn codex_process_delivery_reconciles_ambiguous_approval_at_prompt_terminal
                 .prompt_stream(PromptRequest::new("one native process").expect("prompt"))
                 .await
                 .expect("process prompt admission");
-            let turn = fixture.peer.turn().await;
+            let turn = fixture.peer.accepted_turn(&mut stream).await;
+            CodexFixture::next_progress(&mut receiver, "Preparing response").await;
             fixture
                 .peer
                 .notify(
@@ -1907,6 +2083,7 @@ async fn codex_process_delivery_reconciles_ambiguous_approval_at_prompt_terminal
                     }),
                 )
                 .await;
+            CodexFixture::next_progress(&mut receiver, "Tool calls requested").await;
             let running = receiver
                 .recv()
                 .await
@@ -3531,6 +3708,7 @@ impl WaiterFaultStore {
             .await
             .expect("stream admission");
         assert_eq!(fixture.peer.turn().await, "turn-1");
+        CodexFixture::next_progress(&mut notifications, "Preparing response").await;
         assert!(matches!(
             tokio::time::timeout(Duration::from_secs(1), stream.recv())
                 .await
@@ -3918,13 +4096,15 @@ impl WaiterFaultStore {
         let mut receiver = fixture.conversation.notification_stream().unwrap();
         let observed = NativeCleanup::observe(tokio::time::Instant::now() + Duration::from_secs(10), async {
             let mut stream = fixture.conversation.prompt_stream(PromptRequest::new("notification receipt owner").unwrap()).await.unwrap();
-            let turn = fixture.peer.turn().await;
+            let turn = fixture.peer.accepted_turn(&mut stream).await;
+            CodexFixture::next_progress(&mut receiver, "Preparing response").await;
             fixture.peer.notify("item/started", json!({
                 "threadId":"stream-thread", "turnId":turn, "startedAtMs":1,
                 "item":{"id":"receipt-command", "type":"commandExecution", "status":"inProgress",
                     "command":"printf receipt", "cwd":fixture.root,
                     "commandActions":[], "aggregatedOutput":null, "exitCode":null}
             })).await;
+            CodexFixture::next_progress(&mut receiver, "Tool calls requested").await;
             let running = receiver.recv().await.unwrap().unwrap();
             assert!(matches!(running.kind(), ConversationNotificationKind::Process {state: ProcessState::Running, ..}));
             let key = StateKey::new("agents_kit_conversation_notifications_v1", fixture.conversation.id().as_str()).unwrap();
@@ -4551,12 +4731,14 @@ impl HistoricalTerminalCase {
                 let turn = fixture.peer.turn().await;
                 fixture.peer.notify("item/agentMessage/delta", json!({"threadId":"stream-thread","turnId":turn,"itemId":"answer","delta":"accepted"})).await;
                 assert!(matches!(stream.recv().await, Some(Ok(PromptEvent::OutputDelta { text })) if text == "accepted"));
+                CodexFixture::next_progress(&mut notifications, "Preparing response").await;
                 if matches!(self, Self::OrphanContinuation) {
                     fixture.peer.request(92, "item/commandExecution/requestApproval", json!({
                         "threadId":"stream-thread", "turnId":turn, "itemId":"command",
                         "startedAtMs":1, "command":"printf approved",
                         "availableDecisions":["accept", "cancel"]
                     })).await;
+                    CodexFixture::next_progress(&mut notifications, "Tool calls requested").await;
                     let notification = notifications.recv().await.unwrap().unwrap();
                     assert!(matches!(notification.kind(), ConversationNotificationKind::Interaction { .. }));
                     let mut page = store.list(StateListRequest::new("agents_kit_codex_continuations_v1").unwrap()).await.unwrap();
@@ -5003,6 +5185,7 @@ async fn codex_input_blocking_policy_uses_selected_field() {
             let mut notifications = fixture.conversation.notification_stream().unwrap();
             let mut stream = fixture.conversation.prompt_stream(PromptRequest::new("input").unwrap()).await.unwrap();
             let turn = fixture.peer.turn().await;
+            CodexFixture::next_progress(&mut notifications, "Preparing response").await;
             let mut params = json!({"threadId":"stream-thread","turnId":turn,"itemId":"input",
                 "autoResolutionMs":timeout,"questions":[{"id":"choice","header":"Choice","question":"First line\nSecond line","isOther":false,"isSecret":false,"options":[{"label":"First\nOption","description":"description"}]}]});
             if let Some(blocking) = blocking { params["isBlocking"] = blocking; }
@@ -5090,10 +5273,12 @@ async fn codex_stdin_approval_preserves_callback_and_one_shot_decisions() {
         let observed = std::panic::AssertUnwindSafe(async {
             let mut notifications = fixture.conversation.notification_stream().unwrap();
             let mut stream = fixture.conversation.prompt_stream(PromptRequest::new("approval").unwrap()).await.unwrap();
-            let turn = fixture.peer.turn().await;
+            let turn = fixture.peer.accepted_turn(&mut stream).await;
+            CodexFixture::next_progress(&mut notifications, "Preparing response").await;
             let mut params = json!({"threadId":"stream-thread","turnId":turn,"itemId":"terminal","approvalId":"callback","startedAtMs":1,"availableDecisions":["accept","cancel"]});
             if let Some(kind) = kind { params["kind"] = kind; }
             fixture.peer.request(71, "item/commandExecution/requestApproval", params).await;
+            if title.is_some() { CodexFixture::next_progress(&mut notifications, "Tool calls requested").await; }
             let response = tokio::time::timeout(Duration::from_secs(3), async {
                 tokio::select! {
                     response = fixture.peer.responses.recv() => response.unwrap(),
@@ -5602,6 +5787,7 @@ impl CodexFixture {
             let turn = fixture.peer.turn().await;
             fixture.peer.notify("item/agentMessage/delta", json!({"threadId":"stream-thread","turnId":turn,"itemId":"answer","delta":"accepted"})).await;
             assert!(matches!(tokio::time::timeout(Duration::from_secs(3), stream.recv()).await.unwrap(), Some(Ok(PromptEvent::OutputDelta { .. }))));
+            CodexFixture::next_progress(&mut notifications, "Preparing response").await;
             if expected.is_none() {
                 fixture.peer.notify("item/completed", json!({"threadId":"stream-thread","turnId":turn,"completedAtMs":1,
                     "item":{"id":"answer","type":"agentMessage","text":"actual terminal","phase":"final_answer"}})).await;
@@ -5889,6 +6075,7 @@ async fn codex_permission_locations_reject_nonlocal_without_actionable_notificat
             let mut notifications = fixture.conversation.notification_stream().unwrap();
             let mut stream = fixture.conversation.prompt_stream(PromptRequest::new("permission location").unwrap()).await.unwrap();
             let turn = fixture.peer.turn().await;
+            CodexFixture::next_progress(&mut notifications, "Preparing response").await;
             fixture.peer.request(75, "item/permissions/requestApproval", json!({"threadId":"stream-thread","turnId":turn,"itemId":"permissions","startedAtMs":1,"cwd":cwd,"permissions":{}})).await;
             let response = tokio::time::timeout(Duration::from_secs(3), fixture.peer.responses.recv()).await.unwrap().unwrap();
             assert_eq!(response["id"], 75);
@@ -5963,13 +6150,15 @@ async fn codex_shared_item_callbacks_preserve_distinct_rpc_ids_and_no_resend() {
     let observed = NativeCleanup::observe(tokio::time::Instant::now() + Duration::from_secs(10), async {
         let mut notifications = fixture.conversation.notification_stream().unwrap();
         let mut stream = fixture.conversation.prompt_stream(PromptRequest::new("shared item").unwrap()).await.unwrap();
-        let turn = fixture.peer.turn().await;
+        let turn = fixture.peer.accepted_turn(&mut stream).await;
+        CodexFixture::next_progress(&mut notifications, "Preparing response").await;
         for id in [json!(71), json!("71")] {
             fixture.peer.events.send(json!({"id":id,"method":"item/commandExecution/requestApproval", "params":{
                 "threadId":"stream-thread","turnId":turn,"itemId":"same-item", "kind":"writeStdin",
                 "startedAtMs":1, "availableDecisions":["accept","cancel"]
             }})).await.unwrap();
         }
+        CodexFixture::next_progress(&mut notifications, "Tool calls requested").await;
         let notification = notifications.recv().await.unwrap().unwrap();
         loop {
             let page = store.list(StateListRequest::new("agents_kit_codex_continuations_v1").unwrap()).await.unwrap();
@@ -6425,10 +6614,12 @@ async fn codex_interaction_publication_reloads_settled_duplicate_in_transaction(
     let observed = std::panic::AssertUnwindSafe(tokio::time::timeout(Duration::from_secs(3), async {
         let mut notifications = fixture.conversation.notification_stream().unwrap();
         let mut stream = fixture.conversation.prompt_stream(PromptRequest::new("duplicate approval").unwrap()).await.unwrap();
-        let turn = fixture.peer.turn().await;
+        let turn = fixture.peer.accepted_turn(&mut stream).await;
+        CodexFixture::next_progress(&mut notifications, "Preparing response").await;
         let request = json!({"id":71,"method":"item/commandExecution/requestApproval","params":{
             "threadId":"stream-thread","turnId":turn,"itemId":"command","startedAtMs":1,"availableDecisions":["accept","cancel"]}});
         fixture.peer.events.send(request.clone()).await.unwrap();
+        CodexFixture::next_progress(&mut notifications, "Tool calls requested").await;
         let notification = notifications.recv().await.unwrap().unwrap();
         assert_eq!(fixture.conversation.resolve_notification(notification.id().clone(), NotificationResolution::Allow).await.unwrap_err().kind(), ErrorKind::Conflict);
         assert_eq!(fixture.peer.responses.recv().await.unwrap(), json!({"id":71,"result":{"decision":"accept"}}));

@@ -317,6 +317,19 @@ impl CodexInteractionRequest {
         &self.thread_id
     }
 
+    pub(crate) fn turn_id(&self) -> Option<&str> {
+        self.turn_id.as_deref()
+    }
+
+    pub(crate) fn tool_progress_turn(&self) -> Option<&str> {
+        match &self.continuation {
+            CodexContinuationKind::CommandApproval { .. } | CodexContinuationKind::FileApproval => {
+                self.turn_id.as_deref()
+            }
+            _ => None,
+        }
+    }
+
     pub(crate) fn into_parts(
         self,
     ) -> (

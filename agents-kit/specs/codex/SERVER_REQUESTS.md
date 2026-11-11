@@ -109,8 +109,20 @@ the non-idempotent response outside storage and synchronization critical
 sections. Definite pre-acceptance failure may return to pending. Proven or
 ambiguous acceptance never does and is never resent.
 
+For supported command/file approvals, the original live prompt's eligible
+`Tool calls requested` milestone settles before Interaction publication. Managed
+dynamic callbacks settle the same milestone before handler acquisition. This
+advisory claim requires exact root-thread and accepted-turn attribution; early
+or descendant callbacks keep their existing interaction/tool disposition without
+claiming progress. A milestone publication failure suppresses the dependent
+callback mutation and wakes the existing prompt owner for cancellation and
+native reconciliation; it does not send a synthetic denial or retry the effect.
+
 Publication atomically observes the prompt and inserts the notification and
-its native continuation. A competing passive-notification acknowledgment can
+its native continuation. That same transaction checks cancellation and terminal
+state after preserving exact foreign-turn rejection. A cancelled owning turn
+rolls back without publishing actionable work; rollback failure remains an
+error. A prior standalone admission read cannot override this transaction. A competing passive-notification acknowledgment can
 conflict on the same journal. Before any response enqueue, only an exact
 StateStore transaction conflict permits another publication attempt, bounded
 by the existing lifecycle deadline. Each attempt rereads durable ownership
@@ -156,6 +168,18 @@ terminally cancels a request whose exact responder no longer exists; reopen
 never presents it as resolvable. Handler-local dynamic-tool interactions remain
 governed by their direct continuation acceptance because the server emits no
 `serverRequest/resolved` for them.
+
+Actionable callbacks capture their exact live prompt owner before asynchronous
+route lookup. After milestone receipt settlement, both the original deadline and
+durable cancellation admission are checked again before Interaction publication
+or managed handler acquisition. The handler handoff retains that owner through
+acquisition and each step; its original deadline is rechecked before Invoke,
+interaction publication, and continuation resumption as specified in
+[`CATALOG.md`](CATALOG.md). A
+cleared or failed generation cannot emit a late callback response against a
+replacement prompt. Existing foreign and wrong-turn callback dispositions remain
+distinct. An already admitted notification commit keeps its authoritative
+receipt even if cancellation occurs while that receipt is delayed.
 
 ## Dynamic Tool Requests
 

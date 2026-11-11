@@ -18,23 +18,7 @@ use crate::state::record::{
 /// their preconditions inside the same associated transaction that commits
 /// the writes. App and Agent own their record schemas, histories and receipts.
 ///
-/// # Examples
-///
-/// ```
-/// use storage_kit::{StateStore, StateStoreBackend, StateTransactionBackend};
-/// use storage_kit::state::config::{StateStoreConfig, LanceStateStoreConfig};
-/// use storage_kit::state::record::{StateKey, StateRecord};
-/// # tokio::runtime::Runtime::new()?.block_on(async {
-/// let store = StateStore::connect(StateStoreConfig::lance(LanceStateStoreConfig::memory())).await?;
-/// let key = StateKey::new("workflow", "run/1")?;
-/// let mut transaction = store.begin_transaction().await?;
-/// transaction.put(StateRecord::new(key.clone(), serde_json::json!({"status": "ready"}))).await?;
-/// transaction.commit().await?;
-/// assert!(store.load(key).await?.is_some());
-/// # Ok::<(), storage_kit::StateStoreError>(())
-/// # })?;
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// ```
+/// See the [transaction workflow](crate::state) for an executable example.
 ///
 /// # Caller-owned store and transaction enums
 ///
@@ -116,20 +100,7 @@ pub trait StateStoreBackend: Send + Sync + 'static {
     /// Returns the owning [`StateStoreError`] when the read cannot complete,
     /// including unavailable storage, timeout, or record decoding failure.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use storage_kit::{StateStore, StateStoreBackend, StateTransactionBackend};
-    /// use storage_kit::state::config::{StateStoreConfig, LanceStateStoreConfig};
-    /// use storage_kit::state::record::StateKey;
-    /// # tokio::runtime::Runtime::new()?.block_on(async {
-    /// let store = StateStore::connect(StateStoreConfig::lance(LanceStateStoreConfig::memory())).await?;
-    /// let key = StateKey::new("workflow", "run/1")?;
-    /// assert!(store.load(key).await?.is_none());
-    /// # Ok::<(), storage_kit::StateStoreError>(())
-    /// # })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See the [transaction workflow](crate::state) for an executable example.
     fn load(
         &self,
         key: StateKey,
@@ -148,25 +119,7 @@ pub trait StateStoreBackend: Send + Sync + 'static {
     /// Returns the owning [`StateStoreError`] when the page cannot be read or
     /// decoded, or the configured operation deadline expires.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use storage_kit::{StateStore, StateStoreBackend, StateTransactionBackend};
-    /// use storage_kit::state::config::{StateStoreConfig, LanceStateStoreConfig};
-    /// use storage_kit::state::record::{StateKey, StateRecord, StateListRequest};
-    /// # tokio::runtime::Runtime::new()?.block_on(async {
-    /// let store = StateStore::connect(StateStoreConfig::lance(LanceStateStoreConfig::memory())).await?;
-    /// let key = StateKey::new("workflow", "run/1")?;
-    /// let mut transaction = store.begin_transaction().await?;
-    /// transaction.put(StateRecord::new(key, serde_json::json!(42))).await?;
-    /// transaction.commit().await?;
-    /// let page = store.list(StateListRequest::new("workflow")?.with_limit(10)?).await?;
-    /// assert_eq!(page.records.len(), 1);
-    /// assert!(page.next_start_after.is_none());
-    /// # Ok::<(), storage_kit::StateStoreError>(())
-    /// # })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See the [transaction workflow](crate::state) for an executable example.
     fn list(
         &self,
         request: StateListRequest,
@@ -184,19 +137,7 @@ pub trait StateStoreBackend: Send + Sync + 'static {
     /// Returns [`StateStoreError`] if admission or native transaction setup fails,
     /// times out, or encounters a serialization conflict.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use storage_kit::{StateStore, StateStoreBackend, StateTransactionBackend};
-    /// use storage_kit::state::config::{StateStoreConfig, LanceStateStoreConfig};
-    /// # tokio::runtime::Runtime::new()?.block_on(async {
-    /// let store = StateStore::connect(StateStoreConfig::lance(LanceStateStoreConfig::memory())).await?;
-    /// let transaction = store.begin_transaction().await?;
-    /// transaction.rollback().await?;
-    /// # Ok::<(), storage_kit::StateStoreError>(())
-    /// # })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See the [transaction workflow](crate::state) for an executable example.
     fn begin_transaction(
         &self,
     ) -> impl Future<Output = Result<Self::Transaction, StateStoreError>> + Send + '_;
@@ -214,24 +155,7 @@ pub trait StateStoreBackend: Send + Sync + 'static {
 /// The trait deliberately has no list or native snapshot operation. Upper
 /// consumers build history from their own immutable records and fenced heads.
 ///
-/// # Examples
-///
-/// ```
-/// use storage_kit::{StateStore, StateStoreBackend, StateTransactionBackend};
-/// use storage_kit::state::config::{StateStoreConfig, LanceStateStoreConfig};
-/// use storage_kit::state::record::{StateKey, StateRecord};
-/// # tokio::runtime::Runtime::new()?.block_on(async {
-/// let store = StateStore::connect(StateStoreConfig::lance(LanceStateStoreConfig::memory())).await?;
-/// let key = StateKey::new("workflow", "run/1")?;
-/// let mut transaction = store.begin_transaction().await?;
-/// transaction.put(StateRecord::new(key.clone(), serde_json::json!(42))).await?;
-/// assert!(transaction.load(key.clone()).await?.is_some());
-/// transaction.rollback().await?;
-/// assert!(store.load(key).await?.is_none());
-/// # Ok::<(), storage_kit::StateStoreError>(())
-/// # })?;
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// ```
+/// See the [transaction workflow](crate::state) for an executable example.
 pub trait StateTransactionBackend: Send + 'static {
     /// Loads through the transaction, including earlier writes and tombstones.
     ///
@@ -241,24 +165,7 @@ pub trait StateTransactionBackend: Send + 'static {
     /// unavailable transaction. A failed nonterminal operation invalidates the
     /// transaction; roll it back or drop it instead of attempting commit.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use storage_kit::{StateStore, StateStoreBackend, StateTransactionBackend};
-    /// use storage_kit::state::config::{StateStoreConfig, LanceStateStoreConfig};
-    /// use storage_kit::state::record::{StateKey, StateRecord};
-    /// # tokio::runtime::Runtime::new()?.block_on(async {
-    /// let store = StateStore::connect(StateStoreConfig::lance(LanceStateStoreConfig::memory())).await?;
-    /// let key = StateKey::new("workflow", "run/1")?;
-    /// let mut transaction = store.begin_transaction().await?;
-    /// transaction.put(StateRecord::new(key.clone(), serde_json::json!(42))).await?;
-    /// let observed = transaction.load(key).await?.expect("staged record is visible");
-    /// assert_eq!(observed.record.value.as_ref(), &serde_json::json!(42));
-    /// transaction.rollback().await?;
-    /// # Ok::<(), storage_kit::StateStoreError>(())
-    /// # })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See the [transaction workflow](crate::state) for an executable example.
     fn load(
         &mut self,
         key: StateKey,
@@ -276,23 +183,7 @@ pub trait StateTransactionBackend: Send + 'static {
     /// conflict, timeout, or unavailable transaction. A failure invalidates the
     /// transaction, so earlier staged writes cannot subsequently commit.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use storage_kit::{StateStore, StateStoreBackend, StateTransactionBackend};
-    /// use storage_kit::state::config::{StateStoreConfig, LanceStateStoreConfig};
-    /// use storage_kit::state::record::{StateKey, StateRecord};
-    /// # tokio::runtime::Runtime::new()?.block_on(async {
-    /// let store = StateStore::connect(StateStoreConfig::lance(LanceStateStoreConfig::memory())).await?;
-    /// let key = StateKey::new("workflow", "run/1")?;
-    /// let mut transaction = store.begin_transaction().await?;
-    /// transaction.put(StateRecord::new(key.clone(), serde_json::json!(42))).await?;
-    /// assert_eq!(transaction.load(key).await?.expect("staged record").revision.get(), 1);
-    /// transaction.commit().await?;
-    /// # Ok::<(), storage_kit::StateStoreError>(())
-    /// # })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See the [transaction workflow](crate::state) for an executable example.
     fn put(
         &mut self,
         record: StateRecord,
@@ -308,25 +199,7 @@ pub trait StateTransactionBackend: Send + 'static {
     /// Returns [`StateStoreError`] for a revision boundary, conflict, timeout, or
     /// unavailable transaction. A failure invalidates the transaction.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use storage_kit::{StateStore, StateStoreBackend, StateTransactionBackend};
-    /// use storage_kit::state::config::{StateStoreConfig, LanceStateStoreConfig};
-    /// use storage_kit::state::record::{StateKey, StateRecord};
-    /// # tokio::runtime::Runtime::new()?.block_on(async {
-    /// let store = StateStore::connect(StateStoreConfig::lance(LanceStateStoreConfig::memory())).await?;
-    /// let key = StateKey::new("workflow", "run/1")?;
-    /// let mut transaction = store.begin_transaction().await?;
-    /// transaction.delete(key.clone()).await?;
-    /// assert!(transaction.load(key.clone()).await?.is_none());
-    /// transaction.put(StateRecord::new(key.clone(), serde_json::json!(42))).await?;
-    /// assert_eq!(transaction.load(key).await?.expect("recreated record").revision.get(), 2);
-    /// transaction.commit().await?;
-    /// # Ok::<(), storage_kit::StateStoreError>(())
-    /// # })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See the [transaction workflow](crate::state) for an executable example.
     fn delete(
         &mut self,
         key: StateKey,
@@ -347,23 +220,7 @@ pub trait StateTransactionBackend: Send + 'static {
     /// uncertain; inspect a durable application receipt before retrying. A
     /// previously failed nonterminal operation cannot publish its staged writes.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use storage_kit::{StateStore, StateStoreBackend, StateTransactionBackend};
-    /// use storage_kit::state::config::{StateStoreConfig, LanceStateStoreConfig};
-    /// use storage_kit::state::record::{StateKey, StateRecord};
-    /// # tokio::runtime::Runtime::new()?.block_on(async {
-    /// let store = StateStore::connect(StateStoreConfig::lance(LanceStateStoreConfig::memory())).await?;
-    /// let key = StateKey::new("workflow", "run/1")?;
-    /// let mut transaction = store.begin_transaction().await?;
-    /// transaction.put(StateRecord::new(key.clone(), serde_json::json!(42))).await?;
-    /// transaction.commit().await?;
-    /// assert!(store.load(key).await?.is_some());
-    /// # Ok::<(), storage_kit::StateStoreError>(())
-    /// # })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See the [transaction workflow](crate::state) for an executable example.
     fn commit(self) -> impl Future<Output = Result<(), StateStoreError>> + Send
     where
         Self: Sized;
@@ -379,23 +236,7 @@ pub trait StateTransactionBackend: Send + 'static {
     /// Preserve any earlier operation failure as the primary error when reporting
     /// a separate rollback failure.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use storage_kit::{StateStore, StateStoreBackend, StateTransactionBackend};
-    /// use storage_kit::state::config::{StateStoreConfig, LanceStateStoreConfig};
-    /// use storage_kit::state::record::{StateKey, StateRecord};
-    /// # tokio::runtime::Runtime::new()?.block_on(async {
-    /// let store = StateStore::connect(StateStoreConfig::lance(LanceStateStoreConfig::memory())).await?;
-    /// let key = StateKey::new("workflow", "run/1")?;
-    /// let mut transaction = store.begin_transaction().await?;
-    /// transaction.put(StateRecord::new(key.clone(), serde_json::json!(42))).await?;
-    /// transaction.rollback().await?;
-    /// assert!(store.load(key).await?.is_none());
-    /// # Ok::<(), storage_kit::StateStoreError>(())
-    /// # })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See the [transaction workflow](crate::state) for an executable example.
     fn rollback(self) -> impl Future<Output = Result<(), StateStoreError>> + Send
     where
         Self: Sized;
@@ -407,24 +248,7 @@ pub trait StateTransactionBackend: Send + 'static {
 /// reads, listing, and transaction creation; transaction behavior is provided
 /// by [`StateTransactionBackend`]. This handle contains built-ins only.
 ///
-/// # Examples
-///
-/// ```
-/// use storage_kit::{StateStore, StateStoreBackend, StateTransactionBackend};
-/// use storage_kit::state::config::{StateStoreConfig, LanceStateStoreConfig};
-/// use storage_kit::state::record::{StateKey, StateRecord};
-/// # tokio::runtime::Runtime::new()?.block_on(async {
-/// let store = StateStore::connect(StateStoreConfig::lance(LanceStateStoreConfig::memory())).await?;
-/// let shared = store.clone();
-/// let key = StateKey::new("workflow", "run/1")?;
-/// let mut transaction = shared.begin_transaction().await?;
-/// transaction.put(StateRecord::new(key.clone(), serde_json::json!(42))).await?;
-/// transaction.commit().await?;
-/// assert!(store.load(key).await?.is_some());
-/// # Ok::<(), storage_kit::StateStoreError>(())
-/// # })?;
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// ```
+/// See the [transaction workflow](crate::state) for an executable example.
 #[derive(Clone)]
 pub struct StateStore {
     inner: Arc<StateStoreInner>,
@@ -453,19 +277,7 @@ impl StateStore {
     /// Returns [`StateStoreError::InvalidConfig`] for invalid configuration, or
     /// the owning I/O, connection, setup, or timeout error when opening fails.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use storage_kit::{StateStore, StateStoreBackend, StateTransactionBackend};
-    /// use storage_kit::state::config::{StateStoreConfig, LanceStateStoreConfig};
-    /// use storage_kit::state::record::StateKey;
-    /// # tokio::runtime::Runtime::new()?.block_on(async {
-    /// let store = StateStore::connect(StateStoreConfig::lance(LanceStateStoreConfig::memory())).await?;
-    /// assert!(store.load(StateKey::new("workflow", "run/1")?).await?.is_none());
-    /// # Ok::<(), storage_kit::StateStoreError>(())
-    /// # })?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
+    /// See the [transaction workflow](crate::state) for an executable example.
     pub async fn connect(config: StateStoreConfig) -> Result<Self, StateStoreError> {
         config.validate()?;
         match config {

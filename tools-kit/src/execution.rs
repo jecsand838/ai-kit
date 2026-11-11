@@ -33,21 +33,23 @@
 //!     let output = handler.step(ToolHandlerInput::Invoke(ToolInvocation {
 //!         call_id: Some("owned-call".into()), arguments: serde_json::json!({"key":"missing"}),
 //!     })).await?;
-//!     let ToolHandlerOutput::Completed(result) = output else { panic!("terminal result expected") };
-//!     assert!(result.is_error);
-//!     assert!(matches!(result.content.as_slice(), [ToolContent::Text { text, .. }] if text.contains("missing")));
+//!     let ToolHandlerOutput::Completed(result) = output else {
+//!         return Err(ToolError::Protocol { message: "terminal result expected".into() });
+//!     };
 //!     let mut invalid = tools.tool_handler(name).await?;
 //!     let rejected = invalid.step(ToolHandlerInput::Invoke(ToolInvocation {
 //!         call_id: None, arguments: serde_json::json!({}),
 //!     })).await;
-//!     assert!(matches!(rejected, Err(ToolError::InvalidArguments { .. })));
-//!     Ok::<(), ToolError>(())
+//!     Ok::<_, ToolError>((result, rejected))
 //! }.await;
 //! let cleanup = tools.shutdown().await;
 //! if let Err(error) = &cleanup {
 //!     eprintln!("Cleanup failed: {error}");
 //! }
-//! work?;
+//! let (result, rejected) = work?;
+//! assert!(result.is_error);
+//! assert!(matches!(result.content.as_slice(), [ToolContent::Text { text, .. }] if text.contains("missing")));
+//! assert!(matches!(rejected, Err(ToolError::InvalidArguments { .. })));
 //! cleanup?;
 //! # Ok(())
 //! # }

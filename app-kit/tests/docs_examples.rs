@@ -235,6 +235,98 @@ impl Documentation {
             .expect("App cleanup is bounded")
             .expect("App cleanup succeeds");
     }
+
+    async fn assert_execution_controls(&self) {
+        let store = StateStore::connect(StateStoreConfig::Lance(LanceStateStoreConfig::memory()))
+            .await
+            .unwrap();
+        let mut app = App::open(AppConfig::<_, Agent>::new(
+            store,
+            Vec::new(),
+            self.definitions("linear_state", &["joins"]),
+        ))
+        .await
+        .unwrap();
+        let observed = AssertUnwindSafe(tokio::time::timeout(Duration::from_secs(20), async {
+            let workspace = app
+                .create_workspace(WorkspaceConfig {
+                    name: Some("documented execution controls".into()),
+                    root: PathBuf::from(env!("CARGO_MANIFEST_DIR")),
+                })
+                .await
+                .unwrap();
+            let linear = workspace.workflow("linear_state".parse().unwrap()).await.unwrap();
+            let mut run = linear.prepare(WorkflowState::default()).await.unwrap();
+            let halted = run
+                .execution(ExecutionOptions {
+                    halt_before: vec!["first".into(), "second".into()],
+                    ..ExecutionOptions::default()
+                })
+                .await
+                .unwrap()
+                .finish()
+                .await
+                .unwrap();
+            assert!(matches!(halted.status, RunStatus::Halted { node, result: None } if node == "second"));
+            assert_eq!(halted.state.values()["count"], 1);
+            assert_eq!(halted.last_action_ordinal, Some(0));
+
+            // Historical commits do not enable the fresh session's halt checks.
+            let resumed = run
+                .execution(ExecutionOptions {
+                    halt_before: vec!["second".into()],
+                    ..ExecutionOptions::default()
+                })
+                .await
+                .unwrap()
+                .finish()
+                .await
+                .unwrap();
+            assert!(matches!(resumed.status, RunStatus::Succeeded));
+            assert_eq!(resumed.state.values()["count"], 2);
+            assert_eq!(resumed.last_action_ordinal, Some(1));
+
+            let parallel = workspace.workflow("joins".parse().unwrap()).await.unwrap();
+            for limit in [2, 3] {
+                let run = parallel
+                    .start(ExecutionOptions {
+                        max_steps: std::num::NonZeroUsize::new(limit),
+                        ..ExecutionOptions::default()
+                    })
+                    .await
+                    .unwrap();
+                let halted = run.wait().await.unwrap();
+                assert!(matches!(halted.status, RunStatus::Halted { node, result: Some(_) } if node == "right"));
+                assert_eq!(halted.state.values()["values"], json!(["left", "right"]));
+                assert_eq!(halted.last_action_ordinal, Some(2));
+                assert_eq!(
+                    halted.outcomes.iter().map(|outcome| outcome.node.as_str()).collect::<Vec<_>>(),
+                    ["left", "right"],
+                );
+                // Fork plus two siblings commits three actions in two waves.
+                // Limit two is exceeded atomically; limit three parks before join.
+                assert_eq!(halted.outcomes[0].ordinal, 1);
+                assert_eq!(halted.outcomes[1].ordinal, 2);
+            }
+        }))
+        .catch_unwind()
+        .await;
+        let closed = tokio::time::timeout(
+            Duration::from_secs(5),
+            app.shutdown(Shutdown::CancelAndDrain {
+                timeout: Duration::from_secs(3),
+            }),
+        )
+        .await;
+        drop(app);
+        match observed {
+            Err(panic) => std::panic::resume_unwind(panic),
+            Ok(result) => result.expect("documented execution controls finish within their budget"),
+        }
+        closed
+            .expect("App cleanup is bounded")
+            .expect("App cleanup succeeds");
+    }
 }
 
 #[test]
@@ -341,6 +433,11 @@ async fn documented_join_retains_both_canonical_sibling_contributions() {
             json!({"values": ["left", "right"]}),
         )
         .await;
+}
+
+#[tokio::test]
+async fn documented_halts_and_step_limits_preserve_session_and_wave_boundaries() {
+    Documentation::new().assert_execution_controls().await;
 }
 
 #[test]

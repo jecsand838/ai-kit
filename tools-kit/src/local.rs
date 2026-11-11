@@ -37,20 +37,24 @@
 //!     let output = handler.step(ToolHandlerInput::Invoke(ToolInvocation {
 //!         call_id: Some("city-call".into()), arguments: serde_json::json!({}),
 //!     })).await?;
-//!     let ToolHandlerOutput::Interaction(request) = output else { panic!("interaction expected") };
-//!     assert_eq!(request.tool_name, name);
-//!     assert_eq!(request.call_id.as_deref(), Some("city-call"));
+//!     let ToolHandlerOutput::Interaction(request) = output else {
+//!         return Err(ToolError::Protocol { message: "interaction expected".into() });
+//!     };
+//!     if request.tool_name != name || request.call_id.as_deref() != Some("city-call") {
+//!         return Err(ToolError::Protocol { message: "interaction correlation changed".into() });
+//!     }
 //!     let reply = ToolInteractionResponse::cancel(request.id, Some("caller stopped".into()));
 //!     let cancelled = handler.step(ToolHandlerInput::Interaction(reply)).await;
-//!     assert!(matches!(cancelled, Err(ToolError::Cancelled { .. })));
-//!     assert!(handler.step(ToolHandlerInput::Cancel { reason: None }).await.is_err());
-//!     Ok::<(), ToolError>(())
+//!     let repeated = handler.step(ToolHandlerInput::Cancel { reason: None }).await;
+//!     Ok::<_, ToolError>((cancelled, repeated))
 //! }.await;
 //! let cleanup = tools.shutdown().await;
 //! if let Err(error) = &cleanup {
 //!     eprintln!("Cleanup failed: {error}");
 //! }
-//! work?;
+//! let (cancelled, repeated) = work?;
+//! assert!(matches!(cancelled, Err(ToolError::Cancelled { .. })));
+//! assert!(repeated.is_err());
 //! cleanup?;
 //! # Ok(())
 //! # }

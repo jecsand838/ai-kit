@@ -1,8 +1,47 @@
 //! Durable conversation facts, exclusive delivery, and caller interaction resolutions.
 //!
-//! Prompt output stays on the prompt return path. Passive items are acknowledged
-//! by advancing delivery; actionable interactions require an explicit resolution.
-//! Receiver drop is not acknowledgment while the conversation is reopenable.
+//! Prompt output stays on [`crate::prompt::PromptResponse`] or the transient
+//! [`crate::prompt::PromptStream`], separately from these durable facts. Passive
+//! items are acknowledged by advancing delivery; actionable interactions require
+//! an explicit resolution. Receiver drop is not acknowledgment while the
+//! conversation is reopenable.
+//!
+//! # Historical prompt milestones
+//!
+//! Supplied Codex and Custom conversations publish at most two additional
+//! [`Progress`](ConversationNotificationKind::Progress) facts per original live
+//! prompt: `Preparing response` after local validation and durable Kit admission,
+//! then `Tool calls requested` upon the first supported tool request. Both have
+//! `detail: None`. These labels describe past observations, not current activity,
+//! remote acceptance, tool completion, or prompt success. Model turns and tool
+//! count do not increase their cadence; OpenCode retains its own event mapping.
+//!
+//! Recovery can leave a milestone absent; already committed facts replay with
+//! their original identities. Unread facts are never overwritten or evicted.
+//! The per-prompt bound does not bound lifetime backlog: a full unread journal
+//! rejects publication, and a publication failure fails its prompt.
+//!
+//! This runnable example constructs and inspects a passive value. Construction
+//! alone neither publishes it nor supplies a durable journal or native observation.
+//!
+//! ```
+//! use agents_kit::notification::{ConversationNotification, ConversationNotificationKind};
+//! let milestone = ConversationNotification::new(
+//!     "notification_00000000000000000000000000000000".parse()?,
+//!     std::time::SystemTime::UNIX_EPOCH,
+//!     ConversationNotificationKind::Progress {
+//!         label: "Preparing response".into(),
+//!         detail: None,
+//!     },
+//! )?;
+//! assert!(matches!(milestone.kind(),
+//!     ConversationNotificationKind::Progress { label, detail }
+//!         if label == "Preparing response" && detail.is_none()));
+//! # Ok::<(), agents_kit::KitError>(())
+//! ```
+//!
+//! See [`ConversationNotificationReceiver`] for delivery and acknowledgment, and
+//! [`crate::conversation`] for streaming output alongside durable interactions.
 //!
 use std::path::PathBuf;
 use std::pin::Pin;
@@ -120,6 +159,8 @@ pub enum ConversationNotificationKind {
     /// The supplied Codex and Custom prompt milestones describe history; they do
     /// not establish current activity, remote acceptance, or tool success.
     /// Published facts are immutable. Unacknowledged facts remain in the journal.
+    /// See the [notification module](crate::notification) for milestone bounds
+    /// and a runnable passive-value example.
     Progress {
         /// Short progress label.
         label: String,

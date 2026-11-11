@@ -5,7 +5,8 @@
 //! import [`crate::StateTransactionBackend`] to stage and finalize mutations.
 //! [`record`] contains validated identities, write inputs, observations, and
 //! pagination. Transactions remain unique, lifetime-free values and are
-//! consumed by commit or rollback.
+//! consumed by commit or rollback. Clones of the supplied StateStore share one
+//! connected store; cloning it does not clone or create a transaction.
 //!
 //! Read conditional-write preconditions inside the committing transaction.
 //! Ordinary reads and separate listing pages do not establish a snapshot.
@@ -23,8 +24,10 @@
 //! use storage_kit::state::record::{StateKey, StateListRequest, StateRecord};
 //! # tokio::runtime::Runtime::new()?.block_on(async {
 //! let store = StateStore::connect(StateStoreConfig::lance(LanceStateStoreConfig::memory())).await?;
+//! let shared = store.clone();
 //! let key = StateKey::new("jobs", "a")?;
-//! let mut create = store.begin_transaction().await?;
+//! assert!(store.load(key.clone()).await?.is_none());
+//! let mut create = shared.begin_transaction().await?;
 //! assert!(create.load(key.clone()).await?.is_none());
 //! create.put(StateRecord::new(key.clone(), serde_json::json!({"status":"ready"}))).await?;
 //! create.put(StateRecord::new(StateKey::new("jobs", "b")?, serde_json::json!({"status":"ready"}))).await?;
@@ -52,7 +55,7 @@
 //! replace.put(StateRecord::new(key.clone(), serde_json::json!({"status":"new"}))).await?;
 //! replace.commit().await?;
 //! assert_eq!(store.load(key).await?.unwrap().revision.get(), 3);
-//! drop(store);
+//! drop((shared, store));
 //! # Ok::<(), storage_kit::StateStoreError>(())
 //! # })?;
 //! # Ok::<(), Box<dyn std::error::Error>>(())

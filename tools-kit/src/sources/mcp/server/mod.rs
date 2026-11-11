@@ -94,25 +94,24 @@ const INTERACTION_CLEANUP_TIMEOUT: Duration = Duration::from_secs(1);
 ///                 let ToolHandlerOutput::Completed(result) = output else {
 ///                     return Err(ToolError::Protocol { message: "unexpected interaction".into() });
 ///                 };
-///                 assert!(!result.is_error);
-///                 assert_eq!(result.structured_content, Some(serde_json::json!({"value":42})));
-///                 Ok::<(), ToolError>(())
+///                 Ok::<_, ToolError>(result)
 ///             }.await;
 ///             let client_closed = client.shutdown().await;
 ///             if let Err(error) = &client_closed {
 ///                 eprintln!("Cleanup failed: {error}");
 ///             }
-///             invoked?;
-///             client_closed
+///             let result = invoked?;
+///             client_closed?;
+///             Ok::<_, ToolError>(result)
 ///         }.await;
 ///         let serving_closed = server.shutdown().await; // Consumes and joins serving.
 ///         if let Err(error) = &serving_closed {
 ///             eprintln!("Cleanup failed: {error}");
 ///         }
-///         client_work?;
+///         let result = client_work?;
 ///         serving_closed?;
-///         assert_eq!(source.list_tools().await?.len(), 1); // Source remains usable.
-///         Ok(())
+///         let remaining_tools = source.list_tools().await?.len(); // Source remains usable.
+///         Ok((result, remaining_tools))
 ///     }
 ///     Err(error) => Err(error),
 /// }
@@ -121,7 +120,10 @@ const INTERACTION_CLEANUP_TIMEOUT: Duration = Duration::from_secs(1);
 /// if let Err(error) = &source_closed {
 ///     eprintln!("Cleanup failed: {error}");
 /// }
-/// observed?;
+/// let (result, remaining_tools) = observed?;
+/// assert!(!result.is_error);
+/// assert_eq!(result.structured_content, Some(serde_json::json!({"value":42})));
+/// assert_eq!(remaining_tools, 1);
 /// source_closed?;
 /// # Ok(())
 /// # }
